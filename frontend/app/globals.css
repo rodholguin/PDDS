@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+/* ── Tokens del design system RedEX / Tasf.B2B ───────────────────── */
+@theme {
+  /* Superficies */
+  --color-base:    #121217;   /* fondo de página     */
+  --color-surface: #1c1c24;   /* tarjetas, sidebar   */
+  --color-raised:  #232330;   /* elementos elevados  */
+  --color-rim:     #2d2d40;   /* bordes, divisores   */
+
+  /* Acento principal */
+  --color-accent:      #6685ff;
+  --color-accent-light: #8ba3ff;
+  --color-accent-dim:  rgba(102, 133, 255, 0.12);
+
+  /* Texto */
+  --color-ink:  #f0f0f8;   /* texto primario   */
+  --color-dim:  #8484a0;   /* texto secundario */
+  --color-faint:#4a4a60;   /* placeholder      */
+
+  /* Semánticos */
+  --color-ok:   #22c55e;   /* NORMAL / SUCCESS */
+  --color-warn: #f59e0b;   /* ALERTA / PARTIAL */
+  --color-fail: #ef4444;   /* CRITICO / FAILED */
+  --color-sky:  #38bdf8;   /* IN_FLIGHT / info */
+
+  /* Tipografía */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ── Estilos base ─────────────────────────────────────────────────── */
+:root { color-scheme: dark; }
+
+html, body { height: 100%; }
+
+body {
+  background: #121217;
+  color: #f0f0f8;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar minimalista */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2d2d40; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #6685ff; }
+
+/* Animación de pulso para "En vivo" */
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.animate-live { animation: live-pulse 1.8s ease-in-out infinite; }
+
+/* Barra de progreso de ocupación */
+.occ-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: #2d2d40;
+  overflow: hidden;
+}
+.occ-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+/* Transiciones de hover en tarjetas */
+.card-hover { transition: border-color 0.2s, box-shadow 0.2s; }
+.card-hover:hover {
+  border-color: #6685ff40;
+  box-shadow: 0 0 0 1px #6685ff20;
+}

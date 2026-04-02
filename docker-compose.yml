@@ -1,0 +1,61 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL 15 ────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: tasfb2b-postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-tasfb2b}
+      POSTGRES_USER:     ${POSTGRES_USER:-tasfb2b}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tasfb2b}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tasfb2b} -d ${POSTGRES_DB:-tasfb2b}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Spring Boot Backend ─────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tasfb2b-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DB_URL:  jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tasfb2b}
+      DB_USER: ${POSTGRES_USER:-tasfb2b}
+      DB_PASS: ${POSTGRES_PASSWORD:-tasfb2b}
+    ports:
+      - "8080:8080"
+
+  # ── Next.js Frontend ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* se hornea en el bundle en tiempo de build.
+        # Usar localhost:8080 porque el navegador del host accede al puerto mapeado.
+        NEXT_PUBLIC_API_URL: http://localhost:8080
+    container_name: tasfb2b-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

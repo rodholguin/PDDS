@@ -1,0 +1,27 @@
+package com.tasfb2b.dto;
+
+import com.tasfb2b.model.ShipmentStatus;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * Respuesta detallada de GET /api/shipments/{id}.
+ * Incluye la lista de paradas del plan de viaje.
+ */
+public record ShipmentDetailDto(
+        Long id,
+        String shipmentCode,
+        String airlineName,
+        String originIcaoCode,
+        String originCity,
+        String destinationIcaoCode,
+        String destinationCity,
+        Integer luggageCount,
+        LocalDateTime registrationDate,
+        LocalDateTime deadline,
+        ShipmentStatus status,
+        Double progressPercentage,
+        Boolean isInterContinental,
+        List<TravelStopDto> stops
+) {}
