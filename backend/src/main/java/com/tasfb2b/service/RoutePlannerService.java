@@ -1,256 +1,280 @@
 package com.tasfb2b.service;
 
-import com.tasfb2b.model.*;
-import com.tasfb2b.repository.*;
+import com.tasfb2b.model.AlgorithmType;
+import com.tasfb2b.model.Airport;
+import com.tasfb2b.model.AirportStatus;
+import com.tasfb2b.model.Flight;
+import com.tasfb2b.model.Shipment;
+import com.tasfb2b.model.ShipmentAuditType;
+import com.tasfb2b.model.ShipmentStatus;
+import com.tasfb2b.model.SimulationConfig;
+import com.tasfb2b.model.StopStatus;
+import com.tasfb2b.model.TravelStop;
+import com.tasfb2b.repository.AirportRepository;
+import com.tasfb2b.repository.FlightRepository;
+import com.tasfb2b.repository.ShipmentRepository;
+import com.tasfb2b.repository.SimulationConfigRepository;
+import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.algorithm.AntColonyOptimization;
 import com.tasfb2b.service.algorithm.GeneticAlgorithm;
 import com.tasfb2b.service.algorithm.OptimizationResult;
 import com.tasfb2b.service.algorithm.RouteOptimizer;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
-/**
- * Servicio orquestador de planificación de rutas.
- *
- * <p>Coordina los dos algoritmos de optimización ({@link GeneticAlgorithm}
- * y {@link AntColonyOptimization}), gestiona la selección del algoritmo activo
- * según {@link SimulationConfig}, persiste los {@link TravelStop} resultantes
- * y expone métricas de riesgo de colapso.
- */
 @Service
-@Slf4j
 @RequiredArgsConstructor
 @Transactional
 public class RoutePlannerService {
 
-    private final GeneticAlgorithm       geneticAlgorithm;
-    private final AntColonyOptimization  antColonyOptimization;
+    private final GeneticAlgorithm geneticAlgorithm;
+    private final AntColonyOptimization antColonyOptimization;
 
-    private final AirportRepository          airportRepository;
-    private final FlightRepository           flightRepository;
-    private final ShipmentRepository         shipmentRepository;
-    private final TravelStopRepository       travelStopRepository;
+    private final AirportRepository airportRepository;
+    private final FlightRepository flightRepository;
+    private final ShipmentRepository shipmentRepository;
+    private final TravelStopRepository travelStopRepository;
     private final SimulationConfigRepository configRepository;
+    private final ShipmentAuditService shipmentAuditService;
 
-    // ── Planificación ────────────────────────────────────────────────────────
-
-    /**
-     * Planifica la ruta de un envío usando el algoritmo especificado y persiste
-     * los {@link TravelStop} resultantes.
-     *
-     * @param shipment      envío a planificar
-     * @param algorithmName "Genetic Algorithm" o "Ant Colony Optimization"
-     * @return lista de paradas planificadas (vacía si no hay ruta factible)
-     */
     public List<TravelStop> planShipment(Shipment shipment, String algorithmName) {
-        log.info("[RoutePlanner] Planificando envío {} con algoritmo '{}'",
-                shipment.getShipmentCode(), algorithmName);
+        return planShipment(shipment, algorithmName,
+                flightRepository.findFlightsWithAvailableCapacity(),
+                airportRepository.findAll(),
+                true);
+    }
 
+    public List<TravelStop> planShipment(Shipment shipment,
+                                         String algorithmName,
+                                         List<Flight> availableFlights,
+                                         List<Airport> airports,
+                                         boolean persistFlightLoadImmediately) {
         RouteOptimizer optimizer = resolveOptimizer(algorithmName);
-        List<Flight>   available = flightRepository.findFlightsWithAvailableCapacity();
-        List<Airport>  airports  = airportRepository.findAll();
+        List<Flight> eligibleFlights = candidateFlightsForShipment(shipment, eligibleFlightsForShipment(shipment, availableFlights));
 
-        List<TravelStop> stops = optimizer.planRoute(shipment, available, airports);
+        List<TravelStop> directStops = buildDirectCandidate(shipment, eligibleFlights);
+        List<TravelStop> multiHopStops = optimizer.planRoute(shipment, eligibleFlights, airports);
+
+        CandidatePlan selected = selectBestCandidate(shipment, directStops, multiHopStops);
+        List<TravelStop> stops = selected.stops();
 
         if (stops.isEmpty()) {
-            log.warn("[RoutePlanner] Sin ruta factible para {}. Marcando CRITICAL.",
-                    shipment.getShipmentCode());
             shipment.setStatus(ShipmentStatus.CRITICAL);
             shipmentRepository.save(shipment);
             return stops;
         }
 
-        // Persistir las paradas y actualizar estado del envío
         stops.forEach(stop -> stop.setShipment(shipment));
         travelStopRepository.saveAll(stops);
 
+        allocateFlightLoads(shipment, stops, persistFlightLoadImmediately);
+
         shipment.setStatus(ShipmentStatus.IN_ROUTE);
+        shipment.setProgressPercentage(calculateProgress(shipment));
         shipmentRepository.save(shipment);
 
-        log.info("[RoutePlanner] Ruta de {} paradas creada para {}",
-                stops.size(), shipment.getShipmentCode());
+        shipmentAuditService.log(
+                shipment,
+                ShipmentAuditType.ROUTE_PLANNED,
+                buildPlanningMessage(algorithmName, selected),
+                shipment.getOriginAirport(),
+                null
+        );
+
         return stops;
     }
 
-    /**
-     * Replanifica la ruta de un envío desde la última parada fallida.
-     * Busca la parada PENDING más próxima y delega al algoritmo activo en config.
-     *
-     * @param shipmentId ID del envío a replanificar
-     * @return nueva lista de paradas desde la parada fallida
-     */
+    @Transactional(readOnly = true)
+    public List<TravelStop> previewRoute(Shipment shipment, String algorithmName) {
+        return previewRoute(
+                shipment,
+                algorithmName,
+                flightRepository.findFlightsWithAvailableCapacity(),
+                airportRepository.findAll()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<TravelStop> previewRoute(Shipment shipment,
+                                         String algorithmName,
+                                         List<Flight> availableFlights,
+                                         List<Airport> airports) {
+        RouteOptimizer optimizer = resolveOptimizer(algorithmName);
+        List<Flight> eligibleFlights = candidateFlightsForShipment(shipment, eligibleFlightsForShipment(shipment, availableFlights));
+        List<TravelStop> directStops = buildDirectCandidate(shipment, eligibleFlights);
+        List<TravelStop> multiHopStops = optimizer.planRoute(shipment, eligibleFlights, airports);
+        return selectBestCandidate(shipment, directStops, multiHopStops).stops();
+    }
+
     public List<TravelStop> replanShipment(Long shipmentId) {
         Shipment shipment = shipmentRepository.findById(shipmentId)
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Envío no encontrado: " + shipmentId));
+                .orElseThrow(() -> new IllegalArgumentException("Envío no encontrado: " + shipmentId));
 
-        List<TravelStop> currentStops = travelStopRepository
-                .findByShipmentOrderByStopOrderAsc(shipment);
-
+        List<TravelStop> currentStops = travelStopRepository.findByShipmentOrderByStopOrderAsc(shipment);
         TravelStop failedStop = currentStops.stream()
-                .filter(s -> s.getStopStatus() == StopStatus.PENDING)
+                .filter(stop -> stop.getStopStatus() == StopStatus.PENDING || stop.getStopStatus() == StopStatus.IN_TRANSIT)
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                        "No hay paradas PENDING en envío " + shipmentId));
+                .orElseThrow(() -> new IllegalStateException("No hay paradas pendientes para replanificar"));
 
-        String activeAlgo = getActiveAlgorithmName();
-        RouteOptimizer optimizer = resolveOptimizer(activeAlgo);
-        List<Flight> available   = flightRepository.findFlightsWithAvailableCapacity();
-
-        List<TravelStop> newStops = optimizer.replanRoute(shipment, failedStop, available);
+        RouteOptimizer optimizer = resolveOptimizer(getActiveAlgorithmName());
+        List<TravelStop> newStops = optimizer.replanRoute(
+                shipment,
+                failedStop,
+                flightRepository.findFlightsWithAvailableCapacity()
+        );
 
         if (newStops.isEmpty()) {
-            log.error("[RoutePlanner] Replanificación fallida para envío {}. Estado → DELAYED.",
-                    shipment.getShipmentCode());
             shipment.setStatus(ShipmentStatus.DELAYED);
             shipmentRepository.save(shipment);
             return newStops;
         }
 
-        // Eliminar paradas pendientes anteriores y persistir las nuevas
         travelStopRepository.deleteAll(
                 currentStops.stream()
-                        .filter(s -> s.getStopStatus() == StopStatus.PENDING)
-                        .toList());
-        newStops.forEach(s -> s.setShipment(shipment));
+                        .filter(stop -> stop.getStopStatus() == StopStatus.PENDING || stop.getStopStatus() == StopStatus.IN_TRANSIT)
+                        .toList()
+        );
+
+        newStops.forEach(stop -> stop.setShipment(shipment));
         travelStopRepository.saveAll(newStops);
 
-        log.info("[RoutePlanner] Replanificación exitosa para {} ({} nuevas paradas)",
-                shipment.getShipmentCode(), newStops.size());
+        allocateFlightLoads(shipment, newStops, true);
+
+        shipment.setProgressPercentage(calculateProgress(shipment));
+        shipmentRepository.save(shipment);
+
+        shipmentAuditService.log(
+                shipment,
+                ShipmentAuditType.ROUTE_REPLANNED,
+                "Ruta replanificada con " + getActiveAlgorithmName() + " (" + (newStops.size() - 1) + " tramos)",
+                failedStop.getAirport(),
+                null
+        );
+
         return newStops;
     }
 
-    // ── Comparativa de algoritmos ────────────────────────────────────────────
-
-    /**
-     * Ejecuta ambos algoritmos sobre el mismo conjunto de envíos y retorna
-     * los resultados para su comparación en el dashboard.
-     *
-     * @param shipments envíos a evaluar (misma lista para ambos)
-     * @return mapa {@code algorithmName → OptimizationResult}
-     */
+    @Transactional(readOnly = true)
     public Map<String, OptimizationResult> runBothAlgorithms(List<Shipment> shipments) {
-        log.info("[RoutePlanner] Comparando algoritmos sobre {} envíos", shipments.size());
+        return runBothAlgorithms(shipments, null, null);
+    }
 
+    @Transactional(readOnly = true)
+    public Map<String, OptimizationResult> runBothAlgorithms(List<Shipment> shipments, LocalDate from, LocalDate to) {
         Map<String, OptimizationResult> results = new HashMap<>();
-
-        // TODO: Ejecutar en paralelo con CompletableFuture para reducir tiempo de comparativa.
-        //       Por ahora, ejecución secuencial para mantener el esqueleto simple.
-
-        OptimizationResult gaResult  = geneticAlgorithm.evaluatePerformance(
-                shipments, null, null);
-        OptimizationResult acoResult = antColonyOptimization.evaluatePerformance(
-                shipments, null, null);
-
-        results.put(geneticAlgorithm.getAlgorithmName(),     gaResult);
-        results.put(antColonyOptimization.getAlgorithmName(), acoResult);
-
-        log.info("[RoutePlanner] GA completedPct={:.1f}%  ACO completedPct={:.1f}%",
-                gaResult.getCompletedPct(), acoResult.getCompletedPct());
-
+        results.put(
+                geneticAlgorithm.getAlgorithmName(),
+                geneticAlgorithm.evaluatePerformance(shipments, from, to)
+        );
+        results.put(
+                antColonyOptimization.getAlgorithmName(),
+                antColonyOptimization.evaluatePerformance(shipments, from, to)
+        );
         return results;
     }
 
-    // ── Métricas de colapso ──────────────────────────────────────────────────
+    @Transactional(readOnly = true)
+    public String benchmarkWinner(List<Shipment> shipments) {
+        return benchmarkWinner(shipments, null, null);
+    }
 
-    /**
-     * Determina si el sistema ha colapsado: más del 90 % de los aeropuertos
-     * tienen estado CRITICO según los umbrales de {@link SimulationConfig}.
-     *
-     * @return {@code true} si el sistema está colapsado
-     */
+    @Transactional(readOnly = true)
+    public String benchmarkWinner(List<Shipment> shipments, LocalDate from, LocalDate to) {
+        Map<String, OptimizationResult> results = runBothAlgorithms(shipments, from, to);
+        return results.values().stream()
+                .max((a, b) -> {
+                    int byCompleted = Double.compare(a.getCompletedPct(), b.getCompletedPct());
+                    if (byCompleted != 0) return byCompleted;
+                    int byTransit = Double.compare(b.getAvgTransitHours(), a.getAvgTransitHours());
+                    if (byTransit != 0) return byTransit;
+                    return Double.compare(b.getFlightUtilizationPct(), a.getFlightUtilizationPct());
+                })
+                .map(OptimizationResult::getAlgorithmName)
+                .orElse("N/A");
+    }
+
     @Transactional(readOnly = true)
     public Boolean isSystemCollapsed() {
         SimulationConfig config = getConfig();
-        List<Airport> all       = airportRepository.findAll();
+        List<Airport> airports = airportRepository.findAll();
+        if (airports.isEmpty()) return false;
 
-        if (all.isEmpty()) return false;
-
-        long critical = all.stream()
-                .filter(a -> a.getStatus(config.getNormalThresholdPct(),
-                                         config.getWarningThresholdPct())
-                              == AirportStatus.CRITICO)
+        long critical = airports.stream()
+                .filter(airport -> airport.getStatus(config.getNormalThresholdPct(), config.getWarningThresholdPct()) == AirportStatus.CRITICO)
                 .count();
 
-        double pct = (double) critical / all.size() * 100.0;
-        boolean collapsed = pct > 90.0;
-
-        if (collapsed) {
-            log.error("[RoutePlanner] SISTEMA COLAPSADO — {}% de aeropuertos en CRITICO", pct);
-        }
-        return collapsed;
+        return (critical * 100.0 / airports.size()) > 90.0;
     }
 
-    /**
-     * Calcula el riesgo de colapso del sistema como un valor entre 0.0 y 1.0.
-     *
-     * <p>Fórmula:
-     * <pre>
-     *   riesgo = 0.6 × (avgAirportOccupancy / 100)
-     *          + 0.3 × (fracciónAeropuertosCriticos)
-     *          + 0.1 × (fracciónEnvíosDelayedOCritical / totalActivos)
-     * </pre>
-     *
-     * Los pesos reflejan que la saturación acumulada de almacenes es el principal
-     * predictor de colapso, seguido por la concentración de aeropuertos críticos
-     * y la tasa de envíos problemáticos.
-     *
-     * @return valor en [0.0, 1.0] donde 1.0 = colapso inminente
-     */
     @Transactional(readOnly = true)
     public Double getCollapseRisk() {
         SimulationConfig config = getConfig();
-        List<Airport> airports  = airportRepository.findAll();
-
+        List<Airport> airports = airportRepository.findAll();
         if (airports.isEmpty()) return 0.0;
 
-        // Componente 1: ocupación promedio de almacenes (0–1)
         double avgOccupancy = airports.stream()
                 .mapToDouble(Airport::getOccupancyPct)
                 .average()
                 .orElse(0.0) / 100.0;
 
-        // Componente 2: fracción de aeropuertos en CRITICO (0–1)
         long criticalCount = airports.stream()
-                .filter(a -> a.getStatus(config.getNormalThresholdPct(),
-                                         config.getWarningThresholdPct())
-                              == AirportStatus.CRITICO)
+                .filter(airport -> airport.getStatus(config.getNormalThresholdPct(), config.getWarningThresholdPct()) == AirportStatus.CRITICO)
                 .count();
+
         double criticalFraction = (double) criticalCount / airports.size();
-
-        // Componente 3: fracción de envíos con problemas sobre activos (0–1)
-        List<Shipment> active      = shipmentRepository.findActiveShipments();
-        List<Shipment> problematic = shipmentRepository.findCriticalShipments();
-        double problemFraction = active.isEmpty()
+        List<Shipment> activeShipments = shipmentRepository.findActiveShipments();
+        List<Shipment> problematicShipments = shipmentRepository.findCriticalShipments();
+        double problematicFraction = activeShipments.isEmpty()
                 ? 0.0
-                : (double) problematic.size() / (active.size() + problematic.size());
+                : (double) problematicShipments.size() / (activeShipments.size() + problematicShipments.size());
 
-        double risk = 0.6 * avgOccupancy
-                    + 0.3 * criticalFraction
-                    + 0.1 * problemFraction;
-
-        log.debug("[RoutePlanner] Riesgo colapso: {:.3f} "
-                + "(avgOcc={:.1f}% criticos={} problemas={})",
-                risk, avgOccupancy * 100, criticalCount, problematic.size());
-
+        double risk = (0.6 * avgOccupancy) + (0.3 * criticalFraction) + (0.1 * problematicFraction);
         return Math.min(1.0, risk);
     }
 
-    // ── Helpers privados ─────────────────────────────────────────────────────
+    @Transactional
+    public Shipment markDelivered(Long shipmentId) {
+        Shipment shipment = shipmentRepository.findById(shipmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Envío no encontrado: " + shipmentId));
+
+        shipment.setStatus(ShipmentStatus.DELIVERED);
+        shipment.setDeliveredAt(LocalDateTime.now());
+        shipment.setProgressPercentage(100.0);
+        Shipment saved = shipmentRepository.save(shipment);
+        shipmentAuditService.log(
+                saved,
+                ShipmentAuditType.DELIVERED,
+                "Entrega final confirmada manualmente",
+                saved.getDestinationAirport(),
+                null
+        );
+        return saved;
+    }
+
+    @Transactional(readOnly = true)
+    public double calculateProgress(Shipment shipment) {
+        long totalStops = travelStopRepository.findByShipment(shipment).size();
+        if (totalStops == 0) return 0.0;
+        long completedStops = travelStopRepository.countCompletedByShipment(shipment);
+        return (completedStops * 100.0) / totalStops;
+    }
 
     private RouteOptimizer resolveOptimizer(String algorithmName) {
-        if (antColonyOptimization.getAlgorithmName().equalsIgnoreCase(algorithmName)) {
+        if (algorithmName != null && antColonyOptimization.getAlgorithmName().equalsIgnoreCase(algorithmName)) {
             return antColonyOptimization;
         }
-        return geneticAlgorithm; // default
+        return geneticAlgorithm;
     }
 
     private String getActiveAlgorithmName() {
@@ -260,8 +284,201 @@ public class RoutePlannerService {
     }
 
     private SimulationConfig getConfig() {
-        return configRepository.findAll().stream()
-                .findFirst()
-                .orElseGet(() -> SimulationConfig.builder().build());
+        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        return config != null
+                ? config
+                : configRepository.save(SimulationConfig.builder().build());
     }
+
+    private void allocateFlightLoads(Shipment shipment, List<TravelStop> stops, boolean persistImmediately) {
+        int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
+        java.util.Set<Flight> touched = new java.util.HashSet<>();
+        for (TravelStop stop : stops) {
+            Flight flight = stop.getFlight();
+            if (flight == null) continue;
+            flight.setCurrentLoad(Math.min(flight.getMaxCapacity(), flight.getCurrentLoad() + luggage));
+            touched.add(flight);
+        }
+
+        if (persistImmediately && !touched.isEmpty()) {
+            flightRepository.saveAll(touched);
+        }
+    }
+
+    private List<Flight> eligibleFlightsForShipment(Shipment shipment, List<Flight> flights) {
+        LocalDateTime registration = shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate();
+        int requiredLuggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
+
+        return flights.stream()
+                .filter(flight -> flight.getStatus() == com.tasfb2b.model.FlightStatus.SCHEDULED)
+                .filter(flight -> flight.getCurrentLoad() < flight.getMaxCapacity())
+                .filter(flight -> (flight.getMaxCapacity() - flight.getCurrentLoad()) >= requiredLuggage)
+                .filter(flight -> flight.getScheduledDeparture() != null)
+                .filter(flight -> !flight.getScheduledDeparture().isBefore(registration))
+                .toList();
+    }
+
+    private List<Flight> candidateFlightsForShipment(Shipment shipment, List<Flight> eligibleFlights) {
+        if (eligibleFlights.isEmpty()) {
+            return eligibleFlights;
+        }
+
+        Long originId = shipment.getOriginAirport() == null ? null : shipment.getOriginAirport().getId();
+        Long destinationId = shipment.getDestinationAirport() == null ? null : shipment.getDestinationAirport().getId();
+        if (originId == null || destinationId == null) {
+            return eligibleFlights;
+        }
+
+        List<Flight> firstLegs = eligibleFlights.stream()
+                .filter(flight -> flight.getOriginAirport().getId().equals(originId))
+                .toList();
+        if (firstLegs.isEmpty()) {
+            return eligibleFlights;
+        }
+
+        Set<Long> hubIds = new HashSet<>();
+        for (Flight first : firstLegs) {
+            hubIds.add(first.getDestinationAirport().getId());
+        }
+
+        Set<Long> selectedFlightIds = new HashSet<>();
+        List<Flight> reduced = new java.util.ArrayList<>();
+
+        for (Flight flight : firstLegs) {
+            if (selectedFlightIds.add(flight.getId())) {
+                reduced.add(flight);
+            }
+        }
+        for (Flight flight : eligibleFlights) {
+            if (flight.getOriginAirport().getId().equals(originId)
+                    && flight.getDestinationAirport().getId().equals(destinationId)
+                    && selectedFlightIds.add(flight.getId())) {
+                reduced.add(flight);
+            }
+        }
+        for (Flight flight : eligibleFlights) {
+            if (hubIds.contains(flight.getOriginAirport().getId())
+                    && flight.getDestinationAirport().getId().equals(destinationId)
+                    && selectedFlightIds.add(flight.getId())) {
+                reduced.add(flight);
+            }
+        }
+
+        List<Flight> base = reduced.isEmpty() ? eligibleFlights : reduced;
+        return base.stream()
+                .sorted(Comparator.comparing(Flight::getScheduledDeparture, Comparator.nullsLast(LocalDateTime::compareTo)))
+                .limit(120)
+                .toList();
+    }
+
+    private List<TravelStop> buildDirectCandidate(Shipment shipment, List<Flight> eligibleFlights) {
+        LocalDateTime registration = shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate();
+
+        return eligibleFlights.stream()
+                .filter(flight -> flight.getOriginAirport().getId().equals(shipment.getOriginAirport().getId()))
+                .filter(flight -> flight.getDestinationAirport().getId().equals(shipment.getDestinationAirport().getId()))
+                .sorted(Comparator.comparing(Flight::getScheduledArrival, Comparator.nullsLast(LocalDateTime::compareTo)))
+                .findFirst()
+                .map(flight -> List.of(
+                        TravelStop.builder()
+                                .shipment(shipment)
+                                .airport(shipment.getOriginAirport())
+                                .flight(null)
+                                .stopOrder(0)
+                                .scheduledArrival(registration)
+                                .actualArrival(registration)
+                                .stopStatus(StopStatus.COMPLETED)
+                                .build(),
+                        TravelStop.builder()
+                                .shipment(shipment)
+                                .airport(shipment.getDestinationAirport())
+                                .flight(flight)
+                                .stopOrder(1)
+                                .scheduledArrival(flight.getScheduledArrival())
+                                .stopStatus(StopStatus.PENDING)
+                                .build()
+                ))
+                .orElse(List.of());
+    }
+
+    private CandidatePlan selectBestCandidate(Shipment shipment,
+                                              List<TravelStop> directStops,
+                                              List<TravelStop> multiHopStops) {
+        CandidatePlan direct = evaluateCandidate(shipment, "DIRECT", directStops);
+        CandidatePlan multi = evaluateCandidate(shipment, "MULTI_HOP", multiHopStops);
+
+        if (direct.stops().isEmpty() && multi.stops().isEmpty()) {
+            return direct;
+        }
+        if (direct.stops().isEmpty()) return multi;
+        if (multi.stops().isEmpty()) return direct;
+
+        return direct.score() <= multi.score()
+                ? new CandidatePlan(direct.strategy(), direct.stops(), direct.score(), direct.etaHours(), multi.etaHours())
+                : new CandidatePlan(multi.strategy(), multi.stops(), multi.score(), multi.etaHours(), direct.etaHours());
+    }
+
+    private CandidatePlan evaluateCandidate(Shipment shipment, String strategy, List<TravelStop> stops) {
+        if (stops == null || stops.isEmpty()) {
+            return new CandidatePlan(strategy, List.of(), Double.POSITIVE_INFINITY, null, null);
+        }
+
+        SimulationConfig config = getConfig();
+        LocalDateTime registration = shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate();
+        LocalDateTime finalArrival = stops.stream()
+                .filter(stop -> stop.getFlight() != null)
+                .map(stop -> stop.getFlight().getScheduledArrival())
+                .filter(java.util.Objects::nonNull)
+                .max(LocalDateTime::compareTo)
+                .orElse(registration.plusHours(36));
+
+        double etaHours = Math.max(0.0, ChronoUnit.MINUTES.between(registration, finalArrival) / 60.0);
+        double hopPenalty = Math.max(0, stops.size() - 2) * 0.75;
+        double loadPenalty = stops.stream()
+                .filter(stop -> stop.getFlight() != null)
+                .map(TravelStop::getFlight)
+                .mapToDouble(flight -> {
+                    double load = flight.getLoadPct();
+                    return load > 85.0 ? (load - 85.0) * 0.08 : 0.0;
+                })
+                .sum();
+        double nodePenalty = stops.stream()
+                .map(TravelStop::getAirport)
+                .distinct()
+                .mapToDouble(airport -> {
+                    double occupancy = airport.getOccupancyPct();
+                    return occupancy >= config.getWarningThresholdPct() ? 2.0 : 0.0;
+                })
+                .sum();
+        double deadlinePenalty = 0.0;
+        if (shipment.getDeadline() != null && finalArrival.isAfter(shipment.getDeadline())) {
+            long hoursLate = Math.max(1L, ChronoUnit.HOURS.between(shipment.getDeadline(), finalArrival));
+            deadlinePenalty = 500.0 + hoursLate * 25.0;
+        }
+
+        double score = etaHours + hopPenalty + loadPenalty + nodePenalty + deadlinePenalty;
+        return new CandidatePlan(strategy, stops, score, etaHours, null);
+    }
+
+    private String buildPlanningMessage(String algorithmName, CandidatePlan selected) {
+        String alt = selected.alternativeEtaHours() == null
+                ? "sin alternativa"
+                : String.format("ETA alternativa %.2fh", selected.alternativeEtaHours());
+        return String.format(
+                "Ruta planificada con %s (%s, %d tramos, ETA %.2fh, %s)",
+                algorithmName,
+                selected.strategy(),
+                Math.max(0, selected.stops().size() - 1),
+                selected.etaHours() == null ? 0.0 : selected.etaHours(),
+                alt
+        );
+    }
+
+    private record CandidatePlan(
+            String strategy,
+            List<TravelStop> stops,
+            double score,
+            Double etaHours,
+            Double alternativeEtaHours
+    ) {}
 }

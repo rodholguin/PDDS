@@ -38,6 +38,8 @@ services:
       DB_URL:  jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tasfb2b}
       DB_USER: ${POSTGRES_USER:-tasfb2b}
       DB_PASS: ${POSTGRES_PASSWORD:-tasfb2b}
+    volumes:
+      - ./datos:/app/datos:ro
     ports:
       - "8080:8080"
 

@@ -20,6 +20,24 @@ public record SimulationConfigUpdateDto(
         @Min(10) @Max(180)
         Integer executionMinutes,
 
+        @Min(1) @Max(500)
+        Integer initialVolumeAvg,
+
+        @Min(0) @Max(300)
+        Integer initialVolumeVariance,
+
+        @Min(1) @Max(10)
+        Integer flightFrequencyMultiplier,
+
+        @Min(0) @Max(100)
+        Integer cancellationRatePct,
+
+        @Min(200) @Max(5000)
+        Integer intraNodeCapacity,
+
+        @Min(200) @Max(5000)
+        Integer interNodeCapacity,
+
         @Min(50) @Max(99)
         Integer normalThresholdPct,
 

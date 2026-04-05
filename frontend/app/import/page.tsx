@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { DataImportLog, ImportStatus } from '@/lib/types';
+import type { BenchmarkJobState, DataImportLog, DatasetImportResult, ImportStatus } from '@/lib/types';
 import { importApi, type ImportType } from '@/lib/api/importApi';
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -101,6 +101,12 @@ export default function ImportPage() {
   });
   const [logs, setLogs] = useState<DataImportLog[]>([]);
   const [dlLoading, setDlLoading] = useState<ImportType | null>(null);
+  const [datasetLoading, setDatasetLoading] = useState(false);
+  const [datasetResult, setDatasetResult] = useState<DatasetImportResult | null>(null);
+  const [datasetError, setDatasetError] = useState<string | null>(null);
+  const [benchmarkLoading, setBenchmarkLoading] = useState(false);
+  const [benchmarkJob, setBenchmarkJob] = useState<BenchmarkJobState | null>(null);
+  const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load import history
@@ -171,6 +177,55 @@ export default function ImportPage() {
     finally { setDlLoading(null); }
   }
 
+  async function handleImportDefaultDataset() {
+    setDatasetLoading(true);
+    setDatasetError(null);
+    try {
+      const result = await importApi.importDefaultDataset();
+      setDatasetResult(result);
+      await loadLogs();
+    } catch (err) {
+      setDatasetResult(null);
+      setDatasetError(err instanceof Error ? err.message : 'No se pudo importar el dataset real.');
+    } finally {
+      setDatasetLoading(false);
+    }
+  }
+
+  async function handleDownloadScenarioDemand() {
+    try {
+      await importApi.downloadScenarioDemandTemplate();
+    } catch {
+      setBenchmarkError('No se pudo descargar la demanda de escenarios.');
+    }
+  }
+
+  async function handleStartBenchmark() {
+    setBenchmarkLoading(true);
+    setBenchmarkError(null);
+    try {
+      const started = await importApi.startBenchmarkJob();
+      let attempts = 0;
+      let current: BenchmarkJobState | null = null;
+      while (attempts < 120) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        current = await importApi.getBenchmarkJobStatus(started.jobId);
+        setBenchmarkJob(current);
+        if (current.status === 'DONE' || current.status === 'FAILED') {
+          break;
+        }
+        attempts++;
+      }
+      if (!current || (current.status !== 'DONE' && current.status !== 'FAILED')) {
+        setBenchmarkError('Benchmark sigue ejecutandose. Recarga para consultar estado.');
+      }
+    } catch (err) {
+      setBenchmarkError(err instanceof Error ? err.message : 'No se pudo ejecutar benchmark.');
+    } finally {
+      setBenchmarkLoading(false);
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
@@ -193,6 +248,116 @@ export default function ImportPage() {
           {' '}<strong>Descarga la plantilla</strong> para ver el formato exacto esperado
           por el sistema.
         </p>
+      </div>
+
+      <div className="rounded-xl mb-6 p-5" style={{ background: '#1c1c24', border: '1px solid #2d2d40' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: '#f0f0f8' }}>Carga inicial con dataset real</p>
+            <p className="text-xs mt-1" style={{ color: '#8484a0' }}>
+              Importa aeropuertos y planes de vuelo desde `/datos` en un solo paso.
+            </p>
+          </div>
+          <button
+            onClick={handleImportDefaultDataset}
+            disabled={datasetLoading}
+            className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
+            style={{ background: '#6685ff', color: '#fff', opacity: datasetLoading ? 0.7 : 1 }}
+          >
+            {datasetLoading ? 'Importando...' : 'Importar dataset /datos'}
+          </button>
+        </div>
+
+        {datasetError && (
+          <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
+            <p className="text-xs">⚠ {datasetError}</p>
+          </div>
+        )}
+
+        {datasetResult && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div className="rounded-lg p-3" style={{ background: '#232330', border: '1px solid #2d2d40' }}>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold" style={{ color: '#f0f0f8' }}>Aeropuertos</p>
+                {statusBadge(datasetResult.airports.status)}
+              </div>
+              <p className="text-xs mt-2" style={{ color: '#8484a0' }}>
+                {datasetResult.airports.successRows}/{datasetResult.airports.totalRows} filas exitosas
+              </p>
+            </div>
+            <div className="rounded-lg p-3" style={{ background: '#232330', border: '1px solid #2d2d40' }}>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold" style={{ color: '#f0f0f8' }}>Vuelos</p>
+                {statusBadge(datasetResult.flights.status)}
+              </div>
+              <p className="text-xs mt-2" style={{ color: '#8484a0' }}>
+                {datasetResult.flights.successRows}/{datasetResult.flights.totalRows} filas exitosas
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl mb-6 p-5" style={{ background: '#1c1c24', border: '1px solid #2d2d40' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: '#f0f0f8' }}>Benchmark y tuning asíncrono</p>
+            <p className="text-xs mt-1" style={{ color: '#8484a0' }}>
+              Descarga demanda de escenarios y ejecuta benchmark sin bloquear la interfaz.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadScenarioDemand}
+              className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
+              style={{ background: '#2f3b5c', color: '#fff' }}
+            >
+              Descargar demanda
+            </button>
+            <button
+              onClick={handleStartBenchmark}
+              disabled={benchmarkLoading}
+              className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
+              style={{ background: '#6685ff', color: '#fff', opacity: benchmarkLoading ? 0.7 : 1 }}
+            >
+              {benchmarkLoading ? 'Ejecutando...' : 'Ejecutar benchmark'}
+            </button>
+          </div>
+        </div>
+
+        {benchmarkError && (
+          <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
+            <p className="text-xs">⚠ {benchmarkError}</p>
+          </div>
+        )}
+
+        {benchmarkJob && (
+          <div className="mt-3 rounded-lg p-3" style={{ background: '#232330', border: '1px solid #2d2d40' }}>
+            <p className="text-xs font-semibold" style={{ color: '#f0f0f8' }}>
+              Estado: {benchmarkJob.status} · {benchmarkJob.message}
+            </p>
+            {benchmarkJob.result && (
+              <>
+                <p className="text-xs mt-2" style={{ color: '#8484a0' }}>
+                  Winner global: {benchmarkJob.result.winner} · muestra {benchmarkJob.result.sampleSize} · envíos {benchmarkJob.result.createdShipments}/{benchmarkJob.result.generatedRows}
+                </p>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  {benchmarkJob.result.scenarios.map((scenario) => (
+                    <div key={scenario.scenario} className="rounded p-2" style={{ background: '#1b1e2d', border: '1px solid #2d2d40' }}>
+                      <p className="text-[11px] font-semibold" style={{ color: '#f0f0f8' }}>{scenario.scenario}</p>
+                      <p className="text-[11px]" style={{ color: '#9aa3be' }}>
+                        winner {scenario.winner} · envíos {scenario.createdShipments}/{scenario.sampleSize}
+                      </p>
+                      <p className="text-[11px]" style={{ color: '#9aa3be' }}>
+                        cancelados {scenario.cancelledFlights} · replans {scenario.replannings}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Import section ── */}

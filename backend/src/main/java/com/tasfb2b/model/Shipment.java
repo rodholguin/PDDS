@@ -54,6 +54,10 @@ public class Shipment {
     @Builder.Default
     private ShipmentStatus status = ShipmentStatus.PENDING;
 
+    /** Timestamp de confirmacion de entrega final. */
+    @Column(name = "delivered_at")
+    private LocalDateTime deliveredAt;
+
     /**
      * Porcentaje de avance calculado por el servicio de simulación
      * a partir de las paradas completadas vs. totales.
@@ -91,5 +95,13 @@ public class Shipment {
         return deadline != null
                 && LocalDateTime.now().isAfter(deadline)
                 && status != ShipmentStatus.DELIVERED;
+    }
+
+    @Transient
+    public boolean isDeliveredOnTime() {
+        return status == ShipmentStatus.DELIVERED
+                && deliveredAt != null
+                && deadline != null
+                && !deliveredAt.isAfter(deadline);
     }
 }

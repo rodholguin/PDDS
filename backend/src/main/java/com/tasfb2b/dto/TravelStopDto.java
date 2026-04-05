@@ -10,6 +10,8 @@ public record TravelStopDto(
         Integer stopOrder,
         String airportIcaoCode,
         String airportCity,
+        Double airportLatitude,
+        Double airportLongitude,
         String flightCode,
         LocalDateTime scheduledArrival,
         LocalDateTime actualArrival,

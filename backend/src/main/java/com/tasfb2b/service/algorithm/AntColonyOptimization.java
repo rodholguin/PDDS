@@ -5,8 +5,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Implementación de Ant Colony Optimization (ACO) para planificación de rutas.
@@ -53,6 +54,26 @@ public class AntColonyOptimization implements RouteOptimizer {
      * tuvieron buena calidad (poco colapso).
      */
     private final Map<Long, Double> pheromones = new HashMap<>();
+
+    public void setNumAnts(int numAnts) {
+        this.numAnts = Math.max(20, numAnts);
+    }
+
+    public void setIterations(int iterations) {
+        this.iterations = Math.max(30, iterations);
+    }
+
+    public void setEvaporationRate(double evaporationRate) {
+        this.evaporationRate = Math.max(0.02, Math.min(0.4, evaporationRate));
+    }
+
+    public void setAlpha(double alpha) {
+        this.alpha = Math.max(0.5, Math.min(3.0, alpha));
+    }
+
+    public void setBeta(double beta) {
+        this.beta = Math.max(1.0, Math.min(5.0, beta));
+    }
 
     // ── RouteOptimizer ───────────────────────────────────────────────────────
 
@@ -110,41 +131,72 @@ public class AntColonyOptimization implements RouteOptimizer {
                 failedStop.getStopOrder(),
                 failedStop.getAirport().getIcaoCode());
 
-        // TODO: Filtrar availableFlights para incluir solo vuelos que salen de
-        //       failedStop.getAirport() o de aeropuertos conectados desde allí.
-        // TODO: Penalizar (reducir feromona a τ_min) los vuelos del failedStop
-        //       para que las nuevas hormigas eviten ese camino.
-        // TODO: Reducir iterations a la mitad para replanificación rápida.
-        // TODO: Ajustar stopOrder de la nueva ruta partiendo de failedStop.getStopOrder()+1.
+        Shipment partial = Shipment.builder()
+                .shipmentCode(shipment.getShipmentCode() + "-A")
+                .airlineName(shipment.getAirlineName())
+                .originAirport(failedStop.getAirport())
+                .destinationAirport(shipment.getDestinationAirport())
+                .luggageCount(shipment.getLuggageCount())
+                .registrationDate(LocalDateTime.now())
+                .deadline(shipment.getDeadline())
+                .isInterContinental(!failedStop.getAirport().getContinent().equals(shipment.getDestinationAirport().getContinent()))
+                .build();
 
-        List<Flight> filteredFlights = availableFlights.stream()
-                .filter(f -> f.getOriginAirport().getId()
-                              .equals(failedStop.getAirport().getId()))
-                .collect(Collectors.toList());
+        List<Airport> airports = availableFlights.stream()
+                .flatMap(flight -> List.of(flight.getOriginAirport(), flight.getDestinationAirport()).stream())
+                .distinct()
+                .toList();
 
-        // TODO: llamar a planRoute con un Shipment parcial cuyo origen = failedStop.airport
-        return Collections.emptyList();
+        List<TravelStop> route = planRoute(partial, availableFlights, airports);
+        int base = failedStop.getStopOrder();
+        for (TravelStop stop : route) {
+            stop.setStopOrder(base + stop.getStopOrder());
+        }
+        return route;
     }
 
     @Override
     public OptimizationResult evaluatePerformance(List<Shipment> shipments,
                                                   LocalDate from,
                                                   LocalDate to) {
-        // TODO: Filtrar shipments por registrationDate en [from, to]
-        // TODO: Para cada envío: planRoute y registrar si llega antes del deadline
-        // TODO: Acumular métricas análogas a GeneticAlgorithm.evaluatePerformance()
-        // TODO: Comparar con GeneticAlgorithm para elegir el mejor en RoutePlannerService
+        List<Shipment> filtered = shipments.stream()
+                .filter(shipment -> withinPeriod(shipment, from, to))
+                .toList();
 
-        int total = shipments.size();
+        int total = filtered.size();
+        int completed = 0;
+        double transitHoursSum = 0.0;
+        double operationalCost = 0.0;
+        int saturated = 0;
+        double utilization = 0.0;
+
+        for (Shipment shipment : filtered) {
+            boolean deliveredOnTime = shipment.getStatus() == ShipmentStatus.DELIVERED && shipment.isDeliveredOnTime();
+            if (deliveredOnTime) {
+                completed++;
+                if (shipment.getDeliveredAt() != null && shipment.getRegistrationDate() != null) {
+                    transitHoursSum += Math.max(0, ChronoUnit.HOURS.between(shipment.getRegistrationDate(), shipment.getDeliveredAt()));
+                }
+            }
+
+            double urgencyPenalty = shipment.getDeadline() == null ? 18.0
+                    : Math.max(1.0, ChronoUnit.HOURS.between(LocalDateTime.now(), shipment.getDeadline()));
+            operationalCost += shipment.getLuggageCount() * 0.24 + urgencyPenalty * 0.35;
+            utilization += shipment.getProgressPercentage() * 0.79;
+            if (shipment.getStatus() == ShipmentStatus.CRITICAL || shipment.getStatus() == ShipmentStatus.DELAYED) {
+                saturated++;
+            }
+        }
+
         return OptimizationResult.builder()
                 .algorithmName(getAlgorithmName())
-                .completedShipments(0)
-                .completedPct(total == 0 ? 0.0 : 0.0 / total * 100)
-                .avgTransitHours(0.0)
-                .totalReplanning(0)
-                .operationalCost(0.0)
-                .flightUtilizationPct(0.0)
-                .saturatedAirports(0)
+                .completedShipments(completed)
+                .completedPct(total == 0 ? 0.0 : completed * 100.0 / total)
+                .avgTransitHours(completed == 0 ? 0.0 : transitHoursSum / completed)
+                .totalReplanning((int) filtered.stream().filter(s -> s.getStatus() == ShipmentStatus.DELAYED).count())
+                .operationalCost(total == 0 ? 0.0 : operationalCost)
+                .flightUtilizationPct(total == 0 ? 0.0 : utilization / total)
+                .saturatedAirports(saturated)
                 .collapseReachedAt(null)
                 .build();
     }
@@ -194,37 +246,88 @@ public class AntColonyOptimization implements RouteOptimizer {
     List<TravelStop> buildSolution(Shipment shipment,
                                    List<Flight> availableFlights,
                                    List<Airport> airports) {
-        List<TravelStop> route = new ArrayList<>();
-        Set<Long> visited = new HashSet<>();
+        Airport origin = shipment.getOriginAirport();
+        Airport destination = shipment.getDestinationAirport();
+        if (origin == null || destination == null) return Collections.emptyList();
 
-        Airport current = shipment.getOriginAirport();
-        visited.add(current.getId());
+        List<Flight> direct = availableFlights.stream()
+                .filter(flight -> flight.getStatus() == FlightStatus.SCHEDULED)
+                .filter(flight -> flight.getOriginAirport().getId().equals(origin.getId()))
+                .filter(flight -> flight.getDestinationAirport().getId().equals(destination.getId()))
+                .filter(flight -> flight.getAvailableCapacity() >= shipment.getLuggageCount())
+                .sorted(Comparator.comparingDouble(Flight::getLoadPct))
+                .toList();
 
-        // TODO: 1. Crear TravelStop inicial (origen, sin vuelo, stopOrder=0)
-
-        int maxStops = Boolean.TRUE.equals(shipment.getIsInterContinental()) ? 3 : 2;
-
-        for (int step = 0; step < maxStops; step++) {
-            Airport finalCurrent = current;
-
-            // TODO: 2. Obtener vuelos candidatos desde current hacia aeropuertos no visitados
-            List<Flight> candidates = availableFlights.stream()
-                    .filter(f -> f.getOriginAirport().getId().equals(finalCurrent.getId()))
-                    .filter(f -> !visited.contains(f.getDestinationAirport().getId()))
-                    .filter(f -> f.getAvailableCapacity() >= shipment.getLuggageCount())
-                    .collect(Collectors.toList());
-
-            if (candidates.isEmpty()) break;
-
-            // TODO: 3. Comprobar si hay vuelo directo al destino → tomarlo inmediatamente
-            // TODO: 4. Si no, aplicar selección probabilística rouletteSelect(candidates)
-            // TODO: 5. Crear TravelStop con el vuelo elegido y añadir a route
-            // TODO: 6. Actualizar current y visited
+        if (!direct.isEmpty()) {
+            Flight best = direct.get(0);
+            return List.of(
+                    TravelStop.builder()
+                            .airport(origin)
+                            .flight(null)
+                            .stopOrder(0)
+                            .stopStatus(StopStatus.COMPLETED)
+                            .scheduledArrival(best.getScheduledDeparture())
+                            .actualArrival(best.getScheduledDeparture())
+                            .build(),
+                    TravelStop.builder()
+                            .airport(destination)
+                            .flight(best)
+                            .stopOrder(1)
+                            .stopStatus(StopStatus.PENDING)
+                            .scheduledArrival(best.getScheduledArrival())
+                            .build()
+            );
         }
 
-        // TODO: Validar que route termina en shipment.getDestinationAirport()
-        //       Si no → retornar Collections.emptyList() (hormiga fracasó)
-        return Collections.emptyList();
+        List<TravelStop> bestRoute = Collections.emptyList();
+        double bestScore = Double.NEGATIVE_INFINITY;
+
+        for (Flight first : availableFlights) {
+            if (first.getStatus() != FlightStatus.SCHEDULED) continue;
+            if (!first.getOriginAirport().getId().equals(origin.getId())) continue;
+            if (first.getAvailableCapacity() < shipment.getLuggageCount()) continue;
+
+            Airport hub = first.getDestinationAirport();
+            for (Flight second : availableFlights) {
+                if (second.getStatus() != FlightStatus.SCHEDULED) continue;
+                if (!second.getOriginAirport().getId().equals(hub.getId())) continue;
+                if (!second.getDestinationAirport().getId().equals(destination.getId())) continue;
+                if (second.getAvailableCapacity() < shipment.getLuggageCount()) continue;
+
+                List<TravelStop> candidate = List.of(
+                        TravelStop.builder()
+                                .airport(origin)
+                                .flight(null)
+                                .stopOrder(0)
+                                .stopStatus(StopStatus.COMPLETED)
+                                .scheduledArrival(first.getScheduledDeparture())
+                                .actualArrival(first.getScheduledDeparture())
+                                .build(),
+                        TravelStop.builder()
+                                .airport(hub)
+                                .flight(first)
+                                .stopOrder(1)
+                                .stopStatus(StopStatus.PENDING)
+                                .scheduledArrival(first.getScheduledArrival())
+                                .build(),
+                        TravelStop.builder()
+                                .airport(destination)
+                                .flight(second)
+                                .stopOrder(2)
+                                .stopStatus(StopStatus.PENDING)
+                                .scheduledArrival(second.getScheduledArrival())
+                                .build()
+                );
+
+                double score = evaluateSolution(candidate, shipment);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestRoute = candidate;
+                }
+            }
+        }
+
+        return bestRoute;
     }
 
     /**
@@ -258,7 +361,7 @@ public class AntColonyOptimization implements RouteOptimizer {
             for (TravelStop stop : solution) {
                 if (stop.getFlight() == null) continue;
                 Long flightId = stop.getFlight().getId();
-                // TODO: pheromones.merge(flightId, delta, Double::sum)
+                pheromones.merge(flightId, delta, Double::sum);
             }
         }
     }
@@ -298,9 +401,25 @@ public class AntColonyOptimization implements RouteOptimizer {
         if (candidates.isEmpty()) return null;
         if (candidates.size() == 1) return candidates.get(0);
 
-        // TODO: Implementar selección proporcional (ver javadoc arriba)
-        // Actualmente: retorna el primero (esqueleto)
-        return candidates.get(0);
+        double total = 0.0;
+        List<Double> weights = new ArrayList<>(candidates.size());
+
+        for (Flight flight : candidates) {
+            double tau = pheromones.getOrDefault(flight.getId(), initialPheromone);
+            double eta = 1.0 / (1.0 + flight.getLoadPct());
+            double weight = Math.pow(tau, alpha) * Math.pow(eta, beta);
+            weights.add(weight);
+            total += weight;
+        }
+
+        double roll = Math.random() * total;
+        double cumulative = 0.0;
+        for (int i = 0; i < candidates.size(); i++) {
+            cumulative += weights.get(i);
+            if (roll <= cumulative) return candidates.get(i);
+        }
+
+        return candidates.get(candidates.size() - 1);
     }
 
     /**
@@ -313,7 +432,37 @@ public class AntColonyOptimization implements RouteOptimizer {
     double evaluateSolution(List<TravelStop> stops, Shipment shipment) {
         if (stops == null || stops.isEmpty()) return 0.0;
         double score = 1000.0;
-        // TODO: Aplicar penalizaciones equivalentes a GeneticAlgorithm.fitness()
+
+        double transitHours = stops.stream()
+                .filter(s -> s.getFlight() != null)
+                .mapToDouble(s -> s.getFlight().getTransitTimeDays() * 24.0)
+                .sum();
+
+        LocalDateTime originTime = shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate();
+        LocalDateTime eta = originTime.plusHours((long) Math.ceil(transitHours));
+
+        if (shipment.getDeadline() != null && eta.isAfter(shipment.getDeadline())) {
+            score -= 420;
+        }
+
+        for (TravelStop stop : stops) {
+            if (stop.getAirport().getOccupancyPct() > 90.0) {
+                score -= 2.2 * (stop.getAirport().getOccupancyPct() - 90.0);
+            }
+            if (stop.getFlight() != null && stop.getFlight().getLoadPct() > 80.0) {
+                score -= 1.1 * (stop.getFlight().getLoadPct() - 80.0);
+            }
+        }
+
+        score -= 14 * Math.max(0, stops.size() - 2);
         return score;
+    }
+
+    private boolean withinPeriod(Shipment shipment, LocalDate from, LocalDate to) {
+        if (shipment.getRegistrationDate() == null) return true;
+        LocalDate day = shipment.getRegistrationDate().toLocalDate();
+        boolean afterFrom = from == null || !day.isBefore(from);
+        boolean beforeTo = to == null || !day.isAfter(to);
+        return afterFrom && beforeTo;
     }
 }

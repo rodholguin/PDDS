@@ -26,6 +26,12 @@ public class Airport {
     @Column(nullable = false, length = 100)
     private String country;
 
+    @Column(nullable = false)
+    private Double latitude;
+
+    @Column(nullable = false)
+    private Double longitude;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 10)
     private Continent continent;

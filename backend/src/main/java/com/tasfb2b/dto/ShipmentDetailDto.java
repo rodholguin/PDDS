@@ -20,8 +20,10 @@ public record ShipmentDetailDto(
         Integer luggageCount,
         LocalDateTime registrationDate,
         LocalDateTime deadline,
+        LocalDateTime deliveredAt,
         ShipmentStatus status,
         Double progressPercentage,
         Boolean isInterContinental,
-        List<TravelStopDto> stops
+        List<TravelStopDto> stops,
+        List<ShipmentAuditLogDto> audit
 ) {}

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import Sidebar from '@/components/Sidebar';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import './globals.css';
 
 const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
@@ -14,18 +15,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable} h-full`}>
-      <body className="h-full flex" style={{ background: '#121217', color: '#f0f0f8' }}>
-
-        {/* Fixed sidebar */}
+      <body className="app-shell">
         <Sidebar />
 
-        {/* Scrollable content area, offset by sidebar width */}
-        <div className="flex-1 min-h-screen overflow-auto" style={{ marginLeft: '240px' }}>
-          <main className="min-h-screen p-8">
+        <div className="content-shell">
+          <main className="content-main">
             {children}
           </main>
         </div>
-
       </body>
     </html>
   );

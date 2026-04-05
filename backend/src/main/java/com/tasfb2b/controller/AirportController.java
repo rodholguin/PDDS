@@ -74,23 +74,32 @@ public class AirportController {
 
         // Proyección ligera de los vuelos para no exponer toda la entidad
         List<Map<String, Object>> flightSummaries = activeFlights.stream()
-                .map(f -> Map.<String, Object>of(
-                        "id",               f.getId(),
-                        "flightCode",       f.getFlightCode(),
-                        "originIcao",       f.getOriginAirport().getIcaoCode(),
-                        "destinationIcao",  f.getDestinationAirport().getIcaoCode(),
-                        "isInterContinental", f.getIsInterContinental(),
-                        "maxCapacity",      f.getMaxCapacity(),
-                        "currentLoad",      f.getCurrentLoad(),
-                        "loadPct",          f.getLoadPct(),
-                        "scheduledDeparture", f.getScheduledDeparture(),
-                        "status",           f.getStatus()
+                .map(f -> Map.<String, Object>ofEntries(
+                        Map.entry("id", f.getId()),
+                        Map.entry("flightCode", f.getFlightCode()),
+                        Map.entry("originIcao", f.getOriginAirport().getIcaoCode()),
+                        Map.entry("destinationIcao", f.getDestinationAirport().getIcaoCode()),
+                        Map.entry("isInterContinental", f.getIsInterContinental()),
+                        Map.entry("maxCapacity", f.getMaxCapacity()),
+                        Map.entry("currentLoad", f.getCurrentLoad()),
+                        Map.entry("availableCapacity", f.getAvailableCapacity()),
+                        Map.entry("loadPct", f.getLoadPct()),
+                        Map.entry("scheduledDeparture", f.getScheduledDeparture()),
+                        Map.entry("status", f.getStatus())
                 ))
                 .toList();
 
         return ResponseEntity.ok(Map.of(
                 "airport",      dto,
-                "activeFlights", flightSummaries
+                "activeFlights", flightSummaries,
+                "intraAvailableCapacity", flightSummaries.stream()
+                        .filter(f -> Boolean.FALSE.equals(f.get("isInterContinental")))
+                        .mapToInt(f -> ((Number) f.getOrDefault("availableCapacity", 0)).intValue())
+                        .sum(),
+                "interAvailableCapacity", flightSummaries.stream()
+                        .filter(f -> Boolean.TRUE.equals(f.get("isInterContinental")))
+                        .mapToInt(f -> ((Number) f.getOrDefault("availableCapacity", 0)).intValue())
+                        .sum()
         ));
     }
 

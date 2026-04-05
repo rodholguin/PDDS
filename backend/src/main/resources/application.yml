@@ -15,20 +15,18 @@ spring:
   # ── JPA / Hibernate ────────────────────────────────────────────────────────
   jpa:
     hibernate:
-      ddl-auto: create-drop      # Esquema limpio en cada inicio (demo/dev)
+      ddl-auto: update
     show-sql: false
     open-in-view: false
     properties:
       hibernate:
         format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
-    # data.sql se ejecuta DESPUÉS de que Hibernate crea el esquema
-    defer-datasource-initialization: true
+    defer-datasource-initialization: false
 
-  # ── Seed SQL ───────────────────────────────────────────────────────────────
   sql:
     init:
-      mode: always               # Ejecutar data.sql siempre
+      mode: never
 
   # ── Multipart (importación CSV/Excel) ─────────────────────────────────────
   servlet:

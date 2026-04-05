@@ -41,6 +41,30 @@ public class SimulationConfig {
     @Builder.Default
     private Integer executionMinutes = 60;
 
+    @Column(name = "initial_volume_avg")
+    @Builder.Default
+    private Integer initialVolumeAvg = 8;
+
+    @Column(name = "initial_volume_variance")
+    @Builder.Default
+    private Integer initialVolumeVariance = 3;
+
+    @Column(name = "flight_frequency_multiplier")
+    @Builder.Default
+    private Integer flightFrequencyMultiplier = 1;
+
+    @Column(name = "cancellation_rate_pct")
+    @Builder.Default
+    private Integer cancellationRatePct = 5;
+
+    @Column(name = "intra_node_capacity")
+    @Builder.Default
+    private Integer intraNodeCapacity = 700;
+
+    @Column(name = "inter_node_capacity")
+    @Builder.Default
+    private Integer interNodeCapacity = 800;
+
     /**
      * Umbral (%) hasta el que el semáforo del aeropuerto es verde (NORMAL).
      * Por defecto 70.

@@ -1,4 +1,4 @@
-import type { DataImportLog } from '@/lib/types';
+import type { BenchmarkJobState, DataImportLog, DatasetImportResult } from '@/lib/types';
 import { download, upload, api } from './client';
 
 export type ImportType = 'shipments' | 'airports' | 'flights';
@@ -14,4 +14,19 @@ export const importApi = {
     download(`/api/import/template/${type}`, `template-${type}.xlsx`),
 
   getLogs: () => api<DataImportLog[]>('/api/import/logs'),
+
+  importDefaultDataset: () =>
+    api<DatasetImportResult>('/api/import/dataset/default', { method: 'POST' }),
+
+  downloadScenarioDemandTemplate: () =>
+    download('/api/import/template/shipments-scenarios', 'demand-scenarios.csv'),
+
+  startBenchmarkJob: () =>
+    api<{ message: string; jobId: string }>('/api/import/benchmark/start', { method: 'POST' }),
+
+  getBenchmarkJobStatus: (jobId: string) =>
+    api<BenchmarkJobState>(`/api/import/benchmark/status/${encodeURIComponent(jobId)}`),
+
+  getLatestBenchmarkStatus: () =>
+    api<BenchmarkJobState | { status: 'IDLE'; message: string }>('/api/import/benchmark/status'),
 };

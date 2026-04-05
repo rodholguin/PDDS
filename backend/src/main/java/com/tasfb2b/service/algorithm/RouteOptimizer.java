@@ -58,6 +58,15 @@ public interface RouteOptimizer {
                                  List<Flight> availableFlights);
 
     /**
+     * Evalúa si existe al menos una ruta factible sin persistir cambios.
+     */
+    default boolean hasFeasibleRoute(Shipment shipment,
+                                     List<Flight> availableFlights,
+                                     List<Airport> airports) {
+        return !planRoute(shipment, availableFlights, airports).isEmpty();
+    }
+
+    /**
      * Evalúa el rendimiento del algoritmo sobre los envíos registrados
      * en un período dado y devuelve métricas agregadas.
      *
