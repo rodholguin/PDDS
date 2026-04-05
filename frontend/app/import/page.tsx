@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BenchmarkJobState, DataImportLog, DatasetImportResult, ImportStatus } from '@/lib/types';
 import { importApi, type ImportType } from '@/lib/api/importApi';
+import { simulationApi } from '@/lib/api/simulationApi';
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -107,6 +108,15 @@ export default function ImportPage() {
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
   const [benchmarkJob, setBenchmarkJob] = useState<BenchmarkJobState | null>(null);
   const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
+  const [demandLoading, setDemandLoading] = useState(false);
+  const [demandError, setDemandError] = useState<string | null>(null);
+  const [demandResult, setDemandResult] = useState<{
+    scenario: string;
+    requested: number;
+    created: number;
+    failed: number;
+    seed: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load import history
@@ -157,6 +167,10 @@ export default function ImportPage() {
     if (!file) return;
     setTab(activeTab, { loading: true, error: null, result: null });
     try {
+      if (activeTab === 'shipments') {
+        await simulationApi.stop();
+        await simulationApi.setSpeed(1);
+      }
       const log = await importApi.importFile(file, activeTab);
       setTab(activeTab, { loading: false, result: log, file: null });
       loadLogs();
@@ -194,9 +208,30 @@ export default function ImportPage() {
 
   async function handleDownloadScenarioDemand() {
     try {
+      await simulationApi.stop();
+      await simulationApi.setSpeed(1);
       await importApi.downloadScenarioDemandTemplate();
     } catch {
       setBenchmarkError('No se pudo descargar la demanda de escenarios.');
+    }
+  }
+
+  async function handleGenerateDemand() {
+    setDemandLoading(true);
+    setDemandError(null);
+    try {
+      const response = await importApi.generateDemand({
+        scenario: 'PEAK',
+        size: 4000,
+        seed: 7,
+        startHour: 1,
+      });
+      setDemandResult(response.result);
+    } catch (err) {
+      setDemandError(err instanceof Error ? err.message : 'No se pudo generar demanda masiva.');
+      setDemandResult(null);
+    } finally {
+      setDemandLoading(false);
     }
   }
 
@@ -267,6 +302,27 @@ export default function ImportPage() {
             {datasetLoading ? 'Importando...' : 'Importar dataset /datos'}
           </button>
         </div>
+
+        <div className="mt-4 flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleGenerateDemand}
+            disabled={demandLoading}
+            className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
+            style={{ background: '#2f3b5c', color: '#fff', opacity: demandLoading ? 0.7 : 1 }}
+          >
+            {demandLoading ? 'Generando demanda...' : 'Generar demanda masiva (4000, PEAK, seed 7)'}
+          </button>
+          {demandResult && (
+            <p className="text-xs" style={{ color: '#9aa3be' }}>
+              Escenario {demandResult.scenario}: {demandResult.created}/{demandResult.requested} creados (fallidos {demandResult.failed})
+            </p>
+          )}
+        </div>
+        {demandError && (
+          <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
+            <p className="text-xs">⚠ {demandError}</p>
+          </div>
+        )}
 
         {datasetError && (
           <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
@@ -354,6 +410,12 @@ export default function ImportPage() {
                     </div>
                   ))}
                 </div>
+                {benchmarkJob.result.confidence && (
+                  <p className="text-[11px] mt-2" style={{ color: '#9aa3be' }}>
+                    IC95 score ganador [{benchmarkJob.result.confidence.ci95Low.toFixed(2)}, {benchmarkJob.result.confidence.ci95High.toFixed(2)}] ·
+                    delta vs runner-up {benchmarkJob.result.confidence.deltaVsRunnerUp.toFixed(2)}
+                  </p>
+                )}
               </>
             )}
           </div>

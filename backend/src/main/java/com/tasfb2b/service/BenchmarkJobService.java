@@ -81,12 +81,57 @@ public class BenchmarkJobService {
                     "results", summary.results(),
                     "scenarios", summary.scenarios(),
                     "rows", summary.rows(),
-                    "bestProfile", summary.bestProfile()
+                    "bestProfile", summary.bestProfile(),
+                    "confidence", computeWinnerConfidence(summary)
             );
             update(id, "DONE", "Benchmark finalizado", result);
         } catch (Exception ex) {
             update(id, "FAILED", "Benchmark fallo: " + ex.getMessage(), null);
         }
+    }
+
+    private Map<String, Object> computeWinnerConfidence(BenchmarkTuningService.BenchmarkSummary summary) {
+        if (summary == null || summary.bestProfile() == null || summary.rows() == null || summary.rows().isEmpty()) {
+            return Map.of("winner", "N/A", "ci95Low", 0.0, "ci95High", 0.0, "deltaVsRunnerUp", 0.0);
+        }
+
+        String winnerProfile = summary.bestProfile().profile().profileName();
+        var grouped = summary.rows().stream().collect(java.util.stream.Collectors.groupingBy(
+                BenchmarkTuningService.BenchmarkRow::profileName,
+                java.util.stream.Collectors.mapping(BenchmarkTuningService.BenchmarkRow::compositeScore, java.util.stream.Collectors.toList())
+        ));
+
+        java.util.List<Double> winnerScores = grouped.getOrDefault(winnerProfile, java.util.List.of());
+        double mean = winnerScores.stream().mapToDouble(Double::doubleValue).average().orElse(0.0);
+        double std = stdDev(winnerScores, mean);
+        double margin = winnerScores.isEmpty() ? 0.0 : 1.96 * (std / Math.sqrt(winnerScores.size()));
+
+        double winnerMean = mean;
+        double runnerUpMean = grouped.entrySet().stream()
+                .filter(e -> !e.getKey().equals(winnerProfile))
+                .mapToDouble(e -> e.getValue().stream().mapToDouble(Double::doubleValue).average().orElse(0.0))
+                .max()
+                .orElse(0.0);
+
+        return Map.of(
+                "winner", summary.winner(),
+                "ci95Low", winnerMean - margin,
+                "ci95High", winnerMean + margin,
+                "deltaVsRunnerUp", winnerMean - runnerUpMean
+        );
+    }
+
+    private double stdDev(java.util.List<Double> values, double mean) {
+        if (values == null || values.size() < 2) {
+            return 0.0;
+        }
+        double variance = values.stream()
+                .mapToDouble(v -> {
+                    double d = v - mean;
+                    return d * d;
+                })
+                .sum() / (values.size() - 1);
+        return Math.sqrt(Math.max(0.0, variance));
     }
 
     private void update(String id, String status, String message, Map<String, Object> result) {

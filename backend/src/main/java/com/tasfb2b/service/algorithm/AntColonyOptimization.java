@@ -169,10 +169,11 @@ public class AntColonyOptimization implements RouteOptimizer {
         double operationalCost = 0.0;
         int saturated = 0;
         double utilization = 0.0;
+        LocalDateTime collapseReachedAt = null;
 
         for (Shipment shipment : filtered) {
-            boolean deliveredOnTime = shipment.getStatus() == ShipmentStatus.DELIVERED && shipment.isDeliveredOnTime();
-            if (deliveredOnTime) {
+            boolean delivered = shipment.getStatus() == ShipmentStatus.DELIVERED;
+            if (delivered) {
                 completed++;
                 if (shipment.getDeliveredAt() != null && shipment.getRegistrationDate() != null) {
                     transitHoursSum += Math.max(0, ChronoUnit.HOURS.between(shipment.getRegistrationDate(), shipment.getDeliveredAt()));
@@ -185,19 +186,30 @@ public class AntColonyOptimization implements RouteOptimizer {
             utilization += shipment.getProgressPercentage() * 0.79;
             if (shipment.getStatus() == ShipmentStatus.CRITICAL || shipment.getStatus() == ShipmentStatus.DELAYED) {
                 saturated++;
+                if (collapseReachedAt == null) {
+                    collapseReachedAt = shipment.getRegistrationDate() != null ? shipment.getRegistrationDate() : LocalDateTime.now();
+                }
             }
         }
+
+        long missed = filtered.stream()
+                .filter(shipment -> shipment.getStatus() != ShipmentStatus.DELIVERED || !shipment.isDeliveredOnTime())
+                .count();
+        double deadlineMissRate = total == 0 ? 0.0 : (missed * 100.0 / total);
+        double collapsePenalty = collapseReachedAt == null ? 0.0 : Math.max(0.0, 100.0 - deadlineMissRate);
+        double collapseDelayScore = (total == 0 ? 0.0 : ((total - saturated) * 100.0 / total));
+        double weightedCompleted = (total == 0 ? 0.0 : completed * 100.0 / total);
 
         return OptimizationResult.builder()
                 .algorithmName(getAlgorithmName())
                 .completedShipments(completed)
-                .completedPct(total == 0 ? 0.0 : completed * 100.0 / total)
+                .completedPct((weightedCompleted * 0.55) + (collapseDelayScore * 0.35) + (collapsePenalty * 0.10))
                 .avgTransitHours(completed == 0 ? 0.0 : transitHoursSum / completed)
                 .totalReplanning((int) filtered.stream().filter(s -> s.getStatus() == ShipmentStatus.DELAYED).count())
                 .operationalCost(total == 0 ? 0.0 : operationalCost)
                 .flightUtilizationPct(total == 0 ? 0.0 : utilization / total)
                 .saturatedAirports(saturated)
-                .collapseReachedAt(null)
+                .collapseReachedAt(collapseReachedAt)
                 .build();
     }
 
@@ -265,9 +277,8 @@ public class AntColonyOptimization implements RouteOptimizer {
                             .airport(origin)
                             .flight(null)
                             .stopOrder(0)
-                            .stopStatus(StopStatus.COMPLETED)
+                            .stopStatus(StopStatus.PENDING)
                             .scheduledArrival(best.getScheduledDeparture())
-                            .actualArrival(best.getScheduledDeparture())
                             .build(),
                     TravelStop.builder()
                             .airport(destination)
@@ -299,9 +310,8 @@ public class AntColonyOptimization implements RouteOptimizer {
                                 .airport(origin)
                                 .flight(null)
                                 .stopOrder(0)
-                                .stopStatus(StopStatus.COMPLETED)
+                                .stopStatus(StopStatus.PENDING)
                                 .scheduledArrival(first.getScheduledDeparture())
-                                .actualArrival(first.getScheduledDeparture())
                                 .build(),
                         TravelStop.builder()
                                 .airport(hub)

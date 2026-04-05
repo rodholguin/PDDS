@@ -17,6 +17,7 @@ import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
+import com.tasfb2b.service.AlgorithmProfileService;
 import com.tasfb2b.service.algorithm.OptimizationResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -53,6 +54,7 @@ public class SimulationController {
     private final OperationalBootstrapService operationalBootstrapService;
     private final SimulationExportService simulationExportService;
     private final SimulationEngineService simulationEngineService;
+    private final AlgorithmProfileService algorithmProfileService;
 
     @GetMapping("/state")
     @Operation(summary = "Obtener estado actual de la simulación")
@@ -86,6 +88,7 @@ public class SimulationController {
         if (dto.secondaryAlgorithm() != null) config.setSecondaryAlgorithm(dto.secondaryAlgorithm());
 
         configRepository.save(config);
+        algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
         return ResponseEntity.ok(runtimeService.getState());
     }
 
@@ -106,7 +109,6 @@ public class SimulationController {
         }
         configRepository.save(config);
         runtimeService.markStarted();
-        simulationEngineService.tick();
 
         return ResponseEntity.ok(Map.of(
                 "message", "Simulacion iniciada",

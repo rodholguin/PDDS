@@ -1,6 +1,7 @@
 package com.tasfb2b.repository;
 
 import com.tasfb2b.model.Shipment;
+import com.tasfb2b.model.Flight;
 import com.tasfb2b.model.StopStatus;
 import com.tasfb2b.model.TravelStop;
 import org.springframework.data.jpa.repository.EntityGraph;
@@ -28,6 +29,9 @@ public interface TravelStopRepository extends JpaRepository<TravelStop, Long> {
 
     @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
     List<TravelStop> findByStopStatusIn(List<StopStatus> statuses);
+
+    @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
+    List<TravelStop> findByFlightAndStopStatus(Flight flight, StopStatus stopStatus);
 
     /**
      * Cuenta las paradas completadas de un envío

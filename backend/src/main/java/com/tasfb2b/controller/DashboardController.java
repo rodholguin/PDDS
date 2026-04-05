@@ -25,6 +25,7 @@ import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.RoutePlannerService;
+import com.tasfb2b.service.SimulationRuntimeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -60,6 +61,7 @@ public class DashboardController {
     private final CollapseMonitorService collapseMonitorService;
     private final OperationalAlertRepository operationalAlertRepository;
     private final ShipmentAuditLogRepository shipmentAuditLogRepository;
+    private final SimulationRuntimeService simulationRuntimeService;
 
     @GetMapping("/kpis")
     @Operation(summary = "KPIs principales para la cabecera del dashboard")
@@ -137,7 +139,7 @@ public class DashboardController {
     @GetMapping("/overview")
     @Operation(summary = "Resumen operacional extendido del panel principal")
     public ResponseEntity<DashboardOverviewDto> getOverview() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = effectiveNow();
         LocalDateTime todayStart = now.toLocalDate().atStartOfDay();
         LocalDateTime tomorrow = todayStart.plusDays(1);
         LocalDateTime yesterdayStart = todayStart.minusDays(1);
@@ -228,7 +230,7 @@ public class DashboardController {
             @RequestParam(required = false) String destination,
             @RequestParam(required = false) ShipmentStatus status
     ) {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = effectiveNow();
         List<Shipment> shipments = shipmentRepository.searchShipments(
                 normalizeUpper(airline),
                 normalizeUpper(origin),
@@ -250,13 +252,13 @@ public class DashboardController {
                 .orElseThrow(() -> new IllegalArgumentException("Envio no encontrado: " + code));
 
         List<TravelStop> stops = travelStopRepository.findByShipmentOrderByStopOrderAsc(shipment);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = effectiveNow();
         Position current = computeCurrentPosition(shipment, stops, now);
         String lastVisited = stops.stream()
                 .filter(stop -> stop.getStopStatus() == StopStatus.COMPLETED)
                 .max(Comparator.comparingInt(TravelStop::getStopOrder))
                 .map(stop -> stop.getAirport().getIcaoCode())
-                .orElse("N/A");
+                .orElse(shipment.getOriginAirport().getIcaoCode());
 
         String currentNode = stops.stream()
                 .filter(stop -> stop.getStopStatus() == StopStatus.IN_TRANSIT)
@@ -264,7 +266,7 @@ public class DashboardController {
                 .map(stop -> stop.getAirport().getIcaoCode())
                 .orElse(lastVisited);
 
-        String remaining = computeRemainingTime(shipment.getDeadline());
+        String remaining = computeRemainingTime(shipment.getDeadline(), now);
         boolean atRisk = isAtRisk(shipment, now);
 
         ShipmentSearchResultDto dto = new ShipmentSearchResultDto(
@@ -300,7 +302,7 @@ public class DashboardController {
                 .orElseThrow(() -> new IllegalArgumentException("Aeropuerto no encontrado: " + icao));
 
         int[] thresholds = getThresholds();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = effectiveNow();
         LocalDate agendaDate = (date == null || date.isBlank()) ? now.toLocalDate() : LocalDate.parse(date);
         LocalDateTime dayStart = agendaDate.atStartOfDay();
         LocalDateTime dayEnd = agendaDate.plusDays(1).atStartOfDay();
@@ -385,7 +387,7 @@ public class DashboardController {
                 .filter(stop -> stop.getStopStatus() == StopStatus.COMPLETED)
                 .max(Comparator.comparingInt(TravelStop::getStopOrder))
                 .map(stop -> stop.getAirport().getIcaoCode())
-                .orElse("N/A");
+                .orElse(shipment.getOriginAirport().getIcaoCode());
 
         return new ShipmentSummaryDto(
                 shipment.getId(),
@@ -401,10 +403,11 @@ public class DashboardController {
                 lastVisited,
                 current.latitude(),
                 current.longitude(),
-                computeRemainingTime(shipment.getDeadline()),
+                computeRemainingTime(shipment.getDeadline(), now),
                 shipment.getProgressPercentage(),
                 isAtRisk(shipment, now),
-                shipment.isOverdue()
+                shipment.isOverdue(),
+                computeCriticalReason(shipment)
         );
     }
 
@@ -560,9 +563,9 @@ public class DashboardController {
         }
     }
 
-    private String computeRemainingTime(LocalDateTime deadline) {
+    private String computeRemainingTime(LocalDateTime deadline, LocalDateTime now) {
         if (deadline == null) return "N/A";
-        Duration duration = Duration.between(LocalDateTime.now(), deadline);
+        Duration duration = Duration.between(now, deadline);
         long hours = duration.toHours();
         long minutes = Math.abs(duration.toMinutesPart());
 
@@ -570,6 +573,23 @@ public class DashboardController {
             return "Vencido";
         }
         return String.format("%dh %02dm", hours, minutes);
+    }
+
+    private String computeCriticalReason(Shipment shipment) {
+        if (shipment.getStatus() != ShipmentStatus.CRITICAL && shipment.getStatus() != ShipmentStatus.DELAYED) {
+            return null;
+        }
+
+        return shipmentAuditLogRepository.findTopByShipmentOrderByEventAtDesc(shipment)
+                .map(log -> {
+                    String message = log.getMessage() == null ? "Sin detalle" : log.getMessage().trim();
+                    return message.isEmpty() ? "Sin detalle" : message;
+                })
+                .orElse("Sin detalle de auditoria");
+    }
+
+    private LocalDateTime effectiveNow() {
+        return simulationRuntimeService.currentSimulationTime().orElse(LocalDateTime.now());
     }
 
     private boolean isAtRisk(Shipment shipment, LocalDateTime now) {

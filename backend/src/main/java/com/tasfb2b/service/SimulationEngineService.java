@@ -28,6 +28,8 @@ import java.util.List;
 @Slf4j
 public class SimulationEngineService {
 
+    private static final int BASE_SIM_MINUTES_PER_TICK = 2;
+
     private final SimulationConfigRepository simulationConfigRepository;
     private final FlightRepository flightRepository;
     private final ShipmentRepository shipmentRepository;
@@ -36,7 +38,7 @@ public class SimulationEngineService {
     private final ShipmentAuditService shipmentAuditService;
     private final SimulationRuntimeService runtimeService;
 
-    @Scheduled(fixedDelay = 10_000)
+    @Scheduled(fixedDelay = 2_000)
     @Transactional
     public void tick() {
         SimulationConfig config = getConfig();
@@ -46,7 +48,10 @@ public class SimulationEngineService {
 
         LocalDateTime now = LocalDateTime.now();
         int speed = Math.max(1, runtimeService.currentSpeed());
-        LocalDateTime horizon = now.plusMinutes(20L * speed);
+        LocalDateTime simulatedNow = runtimeService.currentSimulationTime().orElseGet(() -> resolveInitialSimulationTime(now));
+        int minutesAdvance = Math.min(40, BASE_SIM_MINUTES_PER_TICK * speed);
+        LocalDateTime horizon = simulatedNow.plusMinutes(minutesAdvance);
+        runtimeService.setSimulationTime(horizon);
 
         activateFlights(horizon);
         closeFlightsAndAdvanceStops(horizon);
@@ -66,11 +71,18 @@ public class SimulationEngineService {
             flight.setStatus(FlightStatus.IN_FLIGHT);
             flightRepository.save(flight);
 
-            List<TravelStop> stops = travelStopRepository.findByStopStatusIn(List.of(StopStatus.PENDING)).stream()
-                    .filter(stop -> stop.getFlight() != null && stop.getFlight().getId().equals(flight.getId()))
-                    .toList();
+            List<TravelStop> stops = travelStopRepository.findByFlightAndStopStatus(flight, StopStatus.PENDING);
 
             for (TravelStop stop : stops) {
+                List<TravelStop> allStops = travelStopRepository.findByShipmentOrderByStopOrderAsc(stop.getShipment());
+                allStops.stream()
+                        .filter(s -> s.getStopOrder() == 0 && s.getStopStatus() == StopStatus.PENDING)
+                        .forEach(originStop -> {
+                            originStop.setStopStatus(StopStatus.COMPLETED);
+                            originStop.setActualArrival(flight.getScheduledDeparture() != null ? flight.getScheduledDeparture() : horizon);
+                            travelStopRepository.save(originStop);
+                        });
+
                 stop.setStopStatus(StopStatus.IN_TRANSIT);
                 travelStopRepository.save(stop);
 
@@ -93,9 +105,7 @@ public class SimulationEngineService {
             flight.setStatus(FlightStatus.COMPLETED);
             flightRepository.save(flight);
 
-            List<TravelStop> impacted = travelStopRepository.findByStopStatusIn(List.of(StopStatus.IN_TRANSIT)).stream()
-                    .filter(stop -> stop.getFlight() != null && stop.getFlight().getId().equals(flight.getId()))
-                    .toList();
+            List<TravelStop> impacted = travelStopRepository.findByFlightAndStopStatus(flight, StopStatus.IN_TRANSIT);
 
             for (TravelStop stop : impacted) {
                 Shipment shipment = stop.getShipment();
@@ -159,5 +169,13 @@ public class SimulationEngineService {
         return config != null
                 ? config
                 : simulationConfigRepository.save(SimulationConfig.builder().build());
+    }
+
+    private LocalDateTime resolveInitialSimulationTime(LocalDateTime fallbackNow) {
+        return shipmentRepository.findAll().stream()
+                .map(Shipment::getRegistrationDate)
+                .filter(java.util.Objects::nonNull)
+                .min(LocalDateTime::compareTo)
+                .orElse(fallbackNow);
     }
 }

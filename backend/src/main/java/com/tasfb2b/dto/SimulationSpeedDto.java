@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Min;
  */
 public record SimulationSpeedDto(
         @Min(value = 1, message = "La velocidad minima es 1x")
-        @Max(value = 10, message = "La velocidad maxima es 10x")
+        @Max(value = 20, message = "La velocidad maxima es 20x")
         int speed
 ) {
 }

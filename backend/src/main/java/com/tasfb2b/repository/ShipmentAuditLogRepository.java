@@ -10,11 +10,14 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface ShipmentAuditLogRepository extends JpaRepository<ShipmentAuditLog, Long> {
 
     List<ShipmentAuditLog> findByShipmentOrderByEventAtAsc(Shipment shipment);
+
+    Optional<ShipmentAuditLog> findTopByShipmentOrderByEventAtDesc(Shipment shipment);
 
     @Query("""
             SELECT COUNT(l) FROM ShipmentAuditLog l

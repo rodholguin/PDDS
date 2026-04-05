@@ -29,6 +29,7 @@ public record SimulationStateDto(
         long replannings,
         long injectedEvents,
         LocalDateTime startedAt,
+        LocalDateTime simulatedNow,
         LocalDateTime lastTickAt,
         LocalDateTime updatedAt
 ) {

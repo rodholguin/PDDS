@@ -176,6 +176,7 @@ export interface SimulationState {
   replannings: number;
   injectedEvents: number;
   startedAt: string | null;
+  simulatedNow: string | null;
   lastTickAt: string | null;
   updatedAt: string;
 }
@@ -270,7 +271,23 @@ export interface BenchmarkJobState {
       sampleSize: number;
       winner: string;
     }>;
+    confidence?: {
+      winner: string;
+      ci95Low: number;
+      ci95High: number;
+      deltaVsRunnerUp: number;
+    };
   } | null;
+}
+
+export interface DemandGenerationResult {
+  scenario: string;
+  requested: number;
+  created: number;
+  failed: number;
+  seed: number;
+  startedAt: string;
+  finishedAt: string;
 }
 
 export interface DashboardKpis {
@@ -340,6 +357,7 @@ export interface ShipmentSummary {
   progressPct: number;
   atRisk: boolean;
   overdue: boolean;
+  criticalReason?: string | null;
 }
 
 export interface ShipmentSearchResult {

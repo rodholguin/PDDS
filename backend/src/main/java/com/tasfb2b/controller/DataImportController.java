@@ -1,12 +1,15 @@
 package com.tasfb2b.controller;
 
+import com.tasfb2b.dto.DemandGenerationRequestDto;
 import com.tasfb2b.model.DataImportLog;
 import com.tasfb2b.repository.DataImportLogRepository;
 import com.tasfb2b.service.BenchmarkTuningService;
 import com.tasfb2b.service.BenchmarkJobService;
 import com.tasfb2b.service.DataImportService;
+import com.tasfb2b.service.DemandGenerationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -29,6 +32,7 @@ public class DataImportController {
     private final DataImportLogRepository importLogRepository;
     private final BenchmarkTuningService benchmarkTuningService;
     private final BenchmarkJobService benchmarkJobService;
+    private final DemandGenerationService demandGenerationService;
 
     // ── Upload endpoints ──────────────────────────────────────────────────────
 
@@ -140,6 +144,7 @@ public class DataImportController {
     @PostMapping("/benchmark/start")
     @Operation(summary = "Iniciar benchmark asíncrono")
     public ResponseEntity<?> startBenchmarkJob() {
+        importService.importDefaultDataset();
         String jobId = benchmarkJobService.start();
         return ResponseEntity.accepted().body(java.util.Map.of(
                 "message", "Benchmark iniciado",
@@ -164,5 +169,15 @@ public class DataImportController {
             ));
         }
         return ResponseEntity.ok(latest);
+    }
+
+    @PostMapping("/demand/generate")
+    @Operation(summary = "Generar demanda masiva por escenario")
+    public ResponseEntity<?> generateDemand(@Valid @RequestBody DemandGenerationRequestDto request) {
+        var result = demandGenerationService.generate(request);
+        return ResponseEntity.ok(java.util.Map.of(
+                "message", "Demanda generada",
+                "result", result
+        ));
     }
 }

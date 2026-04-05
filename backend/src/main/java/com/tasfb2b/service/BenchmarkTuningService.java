@@ -32,9 +32,13 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class BenchmarkTuningService {
 
-    private static final int SEEDS_PER_SCENARIO = 5;
-    private static final int[] SIZES = new int[]{10, 20, 30};
-    private static final int MAX_SHIPMENTS_PER_RUN = 8;
+    private static final int SEEDS_PER_SCENARIO = 2;
+    private static final int[] SIZES = new int[]{100, 300, 600};
+    private static final int MAX_EVALUATED_SHIPMENTS_PER_RUN = 20;
+    private static final int MAX_RUNS_PER_PROFILE = 24;
+    private static final long BENCHMARK_TIMEOUT_MINUTES = 8;
+    public static final int SUMMARY_SEEDS = SEEDS_PER_SCENARIO;
+    public static final int[] SUMMARY_SIZES = SIZES;
 
     private static final double W_COMPLETED = 0.30;
     private static final double W_AVG_TRANSIT = 0.25;
@@ -51,9 +55,12 @@ public class BenchmarkTuningService {
     private final ShipmentRepository shipmentRepository;
     private final GeneticAlgorithm geneticAlgorithm;
     private final AntColonyOptimization antColonyOptimization;
+    private final ShipmentCodeService shipmentCodeService;
 
     @Transactional
     public BenchmarkSummary runBenchmarkAndTune() {
+        LocalDateTime deadline = LocalDateTime.now().plusMinutes(BENCHMARK_TIMEOUT_MINUTES);
+
         List<AlgorithmProfile> profiles = List.of(
                 new AlgorithmProfile("GA-P1", "Genetic Algorithm", 55, 24, 0.05, 24, 20, 0.10, 1.0, 2.0),
                 new AlgorithmProfile("GA-P2", "Genetic Algorithm", 70, 30, 0.06, 24, 20, 0.10, 1.0, 2.0),
@@ -65,8 +72,14 @@ public class BenchmarkTuningService {
         ProfileScore best = null;
 
         for (AlgorithmProfile profile : profiles) {
+            if (LocalDateTime.now().isAfter(deadline)) {
+                break;
+            }
             tuneAlgorithms(profile);
-            List<BenchmarkRow> rows = runProfile(profile);
+            List<BenchmarkRow> rows = runProfile(profile, deadline);
+            if (rows.isEmpty()) {
+                continue;
+            }
             allRows.addAll(rows);
             ProfileScore score = scoreProfile(profile, rows);
             if (best == null || score.totalScore() > best.totalScore()) {
@@ -137,7 +150,7 @@ public class BenchmarkTuningService {
         return all;
     }
 
-    private List<BenchmarkRow> runProfile(AlgorithmProfile profile) {
+    private List<BenchmarkRow> runProfile(AlgorithmProfile profile, LocalDateTime deadline) {
         List<BenchmarkRow> rows = new ArrayList<>();
         List<String> scenarios = List.of("NORMAL", "PEAK", "COLLAPSE", "DISRUPTION", "RECOVERY");
         LocalDateTime now = LocalDate.now().atStartOfDay().plusHours(1);
@@ -145,6 +158,9 @@ public class BenchmarkTuningService {
         for (String scenario : scenarios) {
             for (int size : SIZES) {
                 for (int seed = 1; seed <= SEEDS_PER_SCENARIO; seed++) {
+                    if (rows.size() >= MAX_RUNS_PER_PROFILE || LocalDateTime.now().isAfter(deadline)) {
+                        return rows;
+                    }
                     rows.add(runSingle(profile, scenario, size, seed, now));
                 }
             }
@@ -171,9 +187,12 @@ public class BenchmarkTuningService {
                 seed
         );
 
-        int created = generateBenchmarkShipments(scenarioRows);
+        int created = generateBenchmarkShipmentsFast(scenarioRows);
 
-        List<Shipment> shipments = shipmentRepository.findAll();
+        List<Shipment> shipments = shipmentRepository.findAll().stream()
+                .sorted(java.util.Comparator.comparing(Shipment::getRegistrationDate, java.util.Comparator.nullsLast(LocalDateTime::compareTo)))
+                .limit(MAX_EVALUATED_SHIPMENTS_PER_RUN)
+                .toList();
         List<Airport> airports = airportRepository.findAll();
         List<Flight> availableFlights = flightRepository.findFlightsWithAvailableCapacity();
 
@@ -216,12 +235,7 @@ public class BenchmarkTuningService {
             return new PlanningMetrics(0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0);
         }
 
-        List<Shipment> sample = shipments.stream()
-                .sorted(java.util.Comparator.comparing(Shipment::getRegistrationDate, java.util.Comparator.nullsLast(LocalDateTime::compareTo)))
-                .limit(MAX_SHIPMENTS_PER_RUN)
-                .toList();
-
-        int total = sample.size();
+        int total = shipments.size();
         int feasible = 0;
         int misses = 0;
         double transitHoursSum = 0.0;
@@ -230,7 +244,7 @@ public class BenchmarkTuningService {
         Map<Long, Integer> projectedFlightLoads = new HashMap<>();
         Set<String> usedAirports = new HashSet<>();
 
-        for (Shipment shipment : sample) {
+        for (Shipment shipment : shipments) {
             List<TravelStop> stops = routePlannerService.previewRoute(
                     shipment,
                     algorithmName,
@@ -328,7 +342,7 @@ public class BenchmarkTuningService {
         return Math.max(0.0, ChronoUnit.MINUTES.between(registration, finalArrival) / 60.0);
     }
 
-    private int generateBenchmarkShipments(List<ScenarioRow> rows) {
+    private int generateBenchmarkShipmentsFast(List<ScenarioRow> rows) {
         if (rows == null || rows.isEmpty()) {
             return 0;
         }
@@ -339,9 +353,6 @@ public class BenchmarkTuningService {
         }
 
         List<Shipment> toSave = new ArrayList<>();
-        int sequence = 1;
-        int year = LocalDate.now().getYear();
-
         for (ScenarioRow row : rows) {
             Airport origin = airportByIcao.get(row.originIcao().toUpperCase());
             Airport destination = airportByIcao.get(row.destinationIcao().toUpperCase());
@@ -350,7 +361,7 @@ public class BenchmarkTuningService {
             }
 
             Shipment shipment = Shipment.builder()
-                    .shipmentCode(String.format("BMK-%d-%04d", year, sequence++))
+                    .shipmentCode(shipmentCodeService.nextCode(row.registrationDate()))
                     .airlineName(row.airlineName())
                     .originAirport(origin)
                     .destinationAirport(destination)
@@ -437,7 +448,7 @@ public class BenchmarkTuningService {
                     values.isEmpty() ? "N/A" : values.get(0).algorithm(),
                     (int) Math.round(values.stream().mapToDouble(BenchmarkRow::createdShipments).average().orElse(0.0)),
                     0,
-                    0,
+                    (int) Math.round(values.stream().mapToDouble(BenchmarkRow::replanned).average().orElse(0.0)),
                     values.size(),
                     values.stream().mapToDouble(BenchmarkRow::completedPct).average().orElse(0.0),
                     values.stream().mapToDouble(BenchmarkRow::avgTransitHours).average().orElse(0.0),

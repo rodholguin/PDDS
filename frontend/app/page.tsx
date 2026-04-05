@@ -39,7 +39,8 @@ const SATELLITE_STYLE: StyleSpecification = {
 
 type MapMode = 'MAP' | 'SATELLITE';
 type MapFilter = 'ALL' | ShipmentStatus;
-const POLL_INTERVAL_MS = 12000;
+const POLL_INTERVAL_MS = 2000;
+const ANIMATION_DURATION_MS = 1700;
 const MAP_FILTERS_STORAGE_KEY = 'pdds-map-filters-v2';
 const INITIAL_VIEW_STATE = {
   latitude: 16,
@@ -74,24 +75,31 @@ type RouteData = {
 type FlightLive = {
   shipment: ShipmentSummary;
   current: GeoPoint;
-  origin: GeoPoint;
-  originIcao: string;
-  destination: GeoPoint;
-  destinationIcao: string;
   bearing: number;
 };
 
 function statusLabel(status: ShipmentStatus): string {
-  if (status === 'IN_ROUTE') return 'Normal';
-  if (status === 'PENDING') return 'Alerta';
+  if (status === 'IN_ROUTE') return 'En ruta';
+  if (status === 'PENDING') return 'Programado';
   if (status === 'CRITICAL' || status === 'DELAYED') return 'Critico';
   if (status === 'DELIVERED') return 'Entregado';
   return status;
 }
 
+function criticalLabel(reason?: string | null): string {
+  if (!reason || !reason.trim()) return 'Sin detalle';
+  const normalized = reason.toLowerCase();
+  if (normalized.includes('deadline')) return 'Deadline vencido';
+  if (normalized.includes('cancelad')) return 'Vuelo cancelado';
+  if (normalized.includes('capacidad')) return 'Capacidad saturada';
+  if (normalized.includes('replan')) return 'Replanificacion fallida';
+  return reason;
+}
+
 function markerColor(shipment: ShipmentSummary): string {
   if (shipment.overdue || shipment.status === 'CRITICAL' || shipment.status === 'DELAYED') return '#ff5a64';
-  if (shipment.atRisk || shipment.status === 'PENDING') return '#f0c13a';
+  if (shipment.status === 'PENDING') return '#5f82ff';
+  if (shipment.atRisk) return '#f0c13a';
   return '#43d29d';
 }
 
@@ -136,6 +144,15 @@ function nearestWrappedLongitude(target: number, reference: number): number {
     }
   }
   return best;
+}
+
+function approxDistanceKm(a: GeoPoint, b: GeoPoint): number {
+  const latFactor = 111.0;
+  const avgLatRad = ((a.latitude + b.latitude) / 2) * Math.PI / 180;
+  const lonFactor = 111.320 * Math.cos(avgLatRad);
+  const dLat = (a.latitude - b.latitude) * latFactor;
+  const dLon = (a.longitude - b.longitude) * lonFactor;
+  return Math.sqrt(dLat * dLat + dLon * dLon);
 }
 
 function computeBearing(from: GeoPoint, to: GeoPoint): number {
@@ -315,9 +332,12 @@ function routeLayers(stops: TravelStop[]): RouteData | null {
     : coords.slice(Math.max(0, coords.length - 2));
 
   const transitIndex = raw.findIndex((stop) => stop.status === 'IN_TRANSIT');
+  const pendingFlightIndex = raw.findIndex((stop, idx) => stop.status === 'PENDING' && idx > 0);
   const activeToIdx = transitIndex >= 1
     ? transitIndex
-    : Math.max(1, Math.min(coords.length - 1, doneIndex + 1));
+    : pendingFlightIndex >= 1
+      ? pendingFlightIndex
+      : Math.max(1, Math.min(coords.length - 1, doneIndex + 1));
   const activeFromIdx = Math.max(0, activeToIdx - 1);
   const fromPoint = coords[activeFromIdx] ?? coords[0];
   const toPoint = coords[activeToIdx] ?? coords[Math.min(coords.length - 1, activeFromIdx + 1)] ?? coords[coords.length - 1];
@@ -352,7 +372,6 @@ export default function HomePage() {
   const [selectedShipmentId, setSelectedShipmentId] = useState<number | null>(null);
   const [selectedStops, setSelectedStops] = useState<TravelStop[]>([]);
   const [search, setSearch] = useState('');
-  const [searchCode, setSearchCode] = useState('');
   const [mapMode, setMapMode] = useState<MapMode>('MAP');
   const [showOnlyActive, setShowOnlyActive] = useState(true);
   const [statusFilter, setStatusFilter] = useState<MapFilter>('ALL');
@@ -491,11 +510,13 @@ export default function HomePage() {
 
   useEffect(() => {
     const targets: Record<number, GeoPoint> = {};
+    const statusById: Record<number, ShipmentStatus> = {};
     for (const shipment of shipments) {
       targets[shipment.id] = {
         longitude: shipment.currentLongitude,
         latitude: shipment.currentLatitude,
       };
+      statusById[shipment.id] = shipment.status;
     }
 
     const previous = previousTargetsRef.current;
@@ -503,9 +524,17 @@ export default function HomePage() {
     for (const shipment of shipments) {
       const prev = previous[shipment.id];
       const target = targets[shipment.id];
-      startPositions[shipment.id] = prev
-        ? { longitude: prev.longitude, latitude: prev.latitude }
-        : { longitude: target.longitude, latitude: target.latitude };
+      if (!prev || shipment.status !== 'IN_ROUTE') {
+        startPositions[shipment.id] = { longitude: target.longitude, latitude: target.latitude };
+      } else {
+        const wrappedTargetLon = nearestWrappedLongitude(target.longitude, prev.longitude);
+        const lonJump = Math.abs(wrappedTargetLon - prev.longitude);
+        const latJump = Math.abs(target.latitude - prev.latitude);
+        const hasLargeJump = lonJump > 25 || latJump > 12 || approxDistanceKm(prev, target) > 900;
+        startPositions[shipment.id] = hasLargeJump
+          ? { longitude: target.longitude, latitude: target.latitude }
+          : { longitude: prev.longitude, latitude: prev.latitude };
+      }
     }
 
     previousTargetsRef.current = targets;
@@ -514,12 +543,19 @@ export default function HomePage() {
     animationStartRef.current = performance.now();
 
     const animate = (now: number) => {
-      const t = clamp01((now - animationStartRef.current) / POLL_INTERVAL_MS);
+      const t = clamp01((now - animationStartRef.current) / ANIMATION_DURATION_MS);
 
       const next: Record<number, GeoPoint> = {};
       for (const shipment of shipments) {
+        const status = statusById[shipment.id];
         const from = startPositions[shipment.id];
         const to = targets[shipment.id];
+
+        if (status !== 'IN_ROUTE') {
+          next[shipment.id] = { longitude: to.longitude, latitude: to.latitude };
+          continue;
+        }
+
         const wrappedToLon = nearestWrappedLongitude(to.longitude, from.longitude);
         const interpolatedLon = normalizeLongitude(lerp(from.longitude, wrappedToLon, t));
         next[shipment.id] = {
@@ -565,31 +601,12 @@ export default function HomePage() {
     }
   }
 
-  async function onRefreshDashboard(): Promise<void> {
+  async function onSetSpeed(speed: number): Promise<void> {
     try {
+      await simulationApi.setSpeed(speed);
       await loadDashboard();
     } catch {
-      setError('No fue posible refrescar el panel.');
-    }
-  }
-
-  async function onSearchByCode(): Promise<void> {
-    const code = searchCode.trim().toUpperCase();
-    if (!code) return;
-    try {
-      const result = await dashboardApi.searchShipmentByCode(code);
-      setSelectedShipmentId(result.id);
-      setSelectedNodePopup(null);
-      setShowOnlyActive(false);
-      mapRef.current?.easeTo({
-        center: [result.currentLongitude, result.currentLatitude],
-        zoom: Math.max(mapRef.current.getZoom(), 4),
-        duration: 700,
-      });
-      await loadSelectedShipment(result.id);
-      setError(null);
-    } catch {
-      setError(`No se encontro envio con codigo ${code}.`);
+      setError('No fue posible cambiar la velocidad de simulacion.');
     }
   }
 
@@ -629,12 +646,21 @@ export default function HomePage() {
     });
   }, [shipments, search, showOnlyActive, statusFilter]);
 
-  const activeShipmentIds = useMemo(
-    () => filteredShipments
-      .filter((shipment) => shipment.status !== 'DELIVERED')
-      .map((shipment) => shipment.id),
+  const visibleShipments = useMemo(
+    () => filteredShipments.slice(0, 50),
     [filteredShipments]
   );
+
+  const activeShipmentIds = useMemo(() => {
+    const ids = filteredShipments
+      .filter((shipment) => shipment.status === 'IN_ROUTE')
+      .slice(0, 150)
+      .map((shipment) => shipment.id);
+    if (selectedShipmentId && !ids.includes(selectedShipmentId)) {
+      return [...ids, selectedShipmentId];
+    }
+    return ids;
+  }, [filteredShipments, selectedShipmentId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -750,6 +776,7 @@ export default function HomePage() {
   const routeDataByShipment = useMemo(() => {
     const index: Record<number, RouteData> = {};
     for (const shipment of filteredShipments) {
+      if (shipment.status === 'PENDING') continue;
       const data = routeLayers(stopsByShipment[shipment.id] ?? []);
       if (data) {
         index[shipment.id] = data;
@@ -760,7 +787,7 @@ export default function HomePage() {
 
   const flightsLive = useMemo<FlightLive[]>(() => {
     return filteredShipments
-      .filter((shipment) => shipment.status !== 'DELIVERED')
+      .filter((shipment) => shipment.status === 'IN_ROUTE')
       .map((shipment) => {
         const smooth = smoothedPositions[shipment.id];
         const current = {
@@ -776,18 +803,9 @@ export default function HomePage() {
 
         const legDestinationStop =
           legIndex >= 0 ? ordered[legIndex] : ordered.length > 0 ? ordered[ordered.length - 1] : null;
-        const legOriginStop =
-          legIndex > 0 ? ordered[legIndex - 1] : legDestinationStop && ordered.length > 1 ? ordered[ordered.length - 2] : null;
-
-        const originPoint: GeoPoint = legOriginStop
-          ? { longitude: legOriginStop.airportLongitude, latitude: legOriginStop.airportLatitude }
-          : { longitude: shipment.originLongitude, latitude: shipment.originLatitude };
         const destinationPoint: GeoPoint = legDestinationStop
           ? { longitude: legDestinationStop.airportLongitude, latitude: legDestinationStop.airportLatitude }
           : { longitude: shipment.destinationLongitude, latitude: shipment.destinationLatitude };
-
-        const originIcao = legOriginStop ? legOriginStop.airportIcaoCode : shipment.originIcao;
-        const destinationIcao = legDestinationStop ? legDestinationStop.airportIcaoCode : shipment.destinationIcao;
 
         const route = routeDataByShipment[shipment.id];
         const currentWrapped = route
@@ -819,10 +837,6 @@ export default function HomePage() {
             longitude: normalizeLongitude(snappedCurrent.longitude),
             latitude: snappedCurrent.latitude,
           },
-          origin: originPoint,
-          originIcao,
-          destination: destinationPoint,
-          destinationIcao,
           bearing,
         };
       });
@@ -912,6 +926,11 @@ export default function HomePage() {
   const normalCount = systemStatus?.normalAirports ?? 0;
   const nodesAvailability = overview?.availableNodesPct ?? 0;
   const unresolvedAlerts = overview?.unresolvedAlerts ?? 0;
+  const simNowText = (() => {
+    if (!sim?.simulatedNow) return null;
+    const parsed = new Date(sim.simulatedNow);
+    return Number.isNaN(parsed.getTime()) ? sim.simulatedNow : parsed.toLocaleString();
+  })();
 
   return (
     <div className="app-page">
@@ -927,15 +946,19 @@ export default function HomePage() {
           </button>
           <button className="btn btn-danger" onClick={onStop} disabled={!sim?.running && !sim?.paused}>Detener</button>
           <button className="btn btn-neutral" onClick={onPause} disabled={!sim?.running}>Pausar</button>
-          <button className="chip" onClick={onRefreshDashboard}>Refrescar</button>
-          <input
-            value={searchCode}
-            onChange={(event) => setSearchCode(event.target.value)}
-            placeholder="Buscar envio por codigo"
-            className="dashboard-search"
-            style={{ width: 220 }}
-          />
-          <button className="chip" onClick={onSearchByCode}>Buscar</button>
+          {[1, 5, 10, 20].map((speed) => (
+            <button
+              key={speed}
+              className={`chip ${sim?.speed === speed ? 'is-active' : ''}`}
+              onClick={() => onSetSpeed(speed)}
+            >
+              {speed}x
+            </button>
+          ))}
+          <span className="chip is-active" title="Algoritmo operativo por defecto y parametros ganadores">
+            ACO-P1 activo
+          </span>
+          {simNowText ? <span className="chip">SimTime {simNowText}</span> : null}
         </div>
       </header>
 
@@ -992,7 +1015,7 @@ export default function HomePage() {
                 <p className="state-panel-copy">Cambia los filtros o desactiva Solo envios activos.</p>
               </div>
             ) : (
-              filteredShipments.slice(0, 10).map((shipment) => (
+              visibleShipments.map((shipment) => (
                 <button
                   key={shipment.id}
                   className={`dashboard-shipment-item${selectedShipmentId === shipment.id ? ' is-selected' : ''}`}
@@ -1011,12 +1034,21 @@ export default function HomePage() {
                         ? 'status-neutral'
                         : 'status-normal'
                   }`}
+                    title={shipment.status === 'CRITICAL' || shipment.status === 'DELAYED'
+                      ? criticalLabel(shipment.criticalReason)
+                      : undefined}
                   >
                     {statusLabel(shipment.status)}
                   </span>
                 </button>
               ))
             )}
+
+            {!loading && filteredShipments.length > visibleShipments.length ? (
+              <div style={{ padding: 12 }}>
+                <p className="state-panel-copy">Mostrando 50 de {filteredShipments.length}. Usa filtros para acotar.</p>
+              </div>
+            ) : null}
           </div>
         </aside>
 
@@ -1039,6 +1071,9 @@ export default function HomePage() {
             </button>
             <button className={`chip${showShipmentFlights ? ' is-active' : ''}`} onClick={() => setShowShipmentFlights((value) => !value)}>
               Aviones de envios {showShipmentFlights ? 'ON' : 'OFF'}
+            </button>
+            <button className={`chip${showOnlyActive ? ' is-active' : ''}`} onClick={() => setShowOnlyActive((value) => !value)}>
+              Entregados {showOnlyActive ? 'OFF' : 'ON'}
             </button>
           </div>
 
@@ -1171,33 +1206,7 @@ export default function HomePage() {
                 </Source>
               ) : null}
 
-              {showShipmentFlights ? flightsLive.flatMap(({ shipment, current, origin, originIcao, destination, destinationIcao, bearing }): ReactElement[] => [
-                <Marker
-                  key={`origin-${shipment.id}`}
-                  longitude={origin.longitude}
-                  latitude={origin.latitude}
-                  anchor="center"
-                  style={{ zIndex: selectedShipmentId === shipment.id ? 6 : 4 }}
-                  onClick={(event) => {
-                    event.originalEvent.stopPropagation();
-                    void onNodeClick(originIcao, origin, nodeAgendaDate);
-                  }}
-                >
-                  <span className="airport-node airport-node-origin" title={`Origen ${originIcao}`} />
-                </Marker>,
-                <Marker
-                  key={`destination-${shipment.id}`}
-                  longitude={destination.longitude}
-                  latitude={destination.latitude}
-                  anchor="center"
-                  style={{ zIndex: selectedShipmentId === shipment.id ? 7 : 5 }}
-                  onClick={(event) => {
-                    event.originalEvent.stopPropagation();
-                    void onNodeClick(destinationIcao, destination, nodeAgendaDate);
-                  }}
-                >
-                  <span className="airport-node airport-node-destination" title={`Destino ${destinationIcao}`} />
-                </Marker>,
+              {showShipmentFlights ? flightsLive.map(({ shipment, current, bearing }): ReactElement => (
                 <Marker
                   key={`flight-${shipment.id}`}
                   longitude={current.longitude}
@@ -1216,8 +1225,8 @@ export default function HomePage() {
                   >
                     <span style={{ transform: `rotate(${bearing}deg)` }}>✈</span>
                   </button>
-                </Marker>,
-              ]) : null}
+                </Marker>
+              )) : null}
 
               <Source id="shipment-points" type="geojson" data={markerGeoJson}>
                 <Layer
@@ -1292,6 +1301,9 @@ export default function HomePage() {
                     <p className="map-popup-line">Origen {selectedFlightLive.shipment.originIcao}</p>
                     <p className="map-popup-line">Destino {selectedFlightLive.shipment.destinationIcao}</p>
                     <p className="map-popup-line">Estado {statusLabel(selectedFlightLive.shipment.status)}</p>
+                    {selectedFlightLive.shipment.criticalReason ? (
+                      <p className="map-popup-line">Motivo {criticalLabel(selectedFlightLive.shipment.criticalReason)}</p>
+                    ) : null}
                     <p className="map-popup-line">Ultimo nodo {selectedFlightLive.shipment.lastVisitedNode || 'N/A'}</p>
                     <p className="map-popup-line">Plazo restante {selectedFlightLive.shipment.remainingTime || 'N/A'}</p>
                   </div>

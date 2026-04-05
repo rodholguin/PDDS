@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -38,6 +39,7 @@ public class SimulationRuntimeService {
     private static final String KEY_REPLANS = "replans";
     private static final String KEY_EVENTS = "events";
     private static final String KEY_LAST_TICK = "lastTick";
+    private static final String KEY_SIM_TIME = "simTime";
 
     private final SimulationConfigRepository configRepository;
     private final ShipmentRepository shipmentRepository;
@@ -47,6 +49,7 @@ public class SimulationRuntimeService {
     private final ShipmentAuditLogRepository shipmentAuditLogRepository;
     private final OperationalAlertRepository operationalAlertRepository;
     private final ShipmentAuditService shipmentAuditService;
+    private final AlgorithmProfileService algorithmProfileService;
 
     private final Map<String, Object> runtime = new ConcurrentHashMap<>();
     private final AtomicInteger defaultSpeed = new AtomicInteger(1);
@@ -75,6 +78,7 @@ public class SimulationRuntimeService {
                 replannings(),
                 injectedEvents(),
                 config.getStartedAt(),
+                currentSimulationTime().orElse(null),
                 (LocalDateTime) runtime.get(KEY_LAST_TICK),
                 LocalDateTime.now()
         );
@@ -133,15 +137,34 @@ public class SimulationRuntimeService {
         SimulationConfig config = getConfig();
         config.setIsRunning(false);
         config.setStartedAt(null);
+        if (config.getPrimaryAlgorithm() == null) {
+            config.setPrimaryAlgorithm(com.tasfb2b.model.AlgorithmType.ANT_COLONY);
+        }
+        if (config.getSecondaryAlgorithm() == null) {
+            config.setSecondaryAlgorithm(com.tasfb2b.model.AlgorithmType.GENETIC);
+        }
         configRepository.save(config);
+        algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
         markStopped();
         runtime.put(KEY_SPEED, defaultSpeed.get());
         runtime.put(KEY_REPLANS, 0L);
         runtime.put(KEY_EVENTS, 0L);
+        runtime.remove(KEY_SIM_TIME);
     }
 
     public void markTick(LocalDateTime tickAt) {
         runtime.put(KEY_LAST_TICK, tickAt == null ? LocalDateTime.now() : tickAt);
+    }
+
+    public Optional<LocalDateTime> currentSimulationTime() {
+        Object value = runtime.get(KEY_SIM_TIME);
+        return value instanceof LocalDateTime ? Optional.of((LocalDateTime) value) : Optional.empty();
+    }
+
+    public void setSimulationTime(LocalDateTime simulatedNow) {
+        if (simulatedNow != null) {
+            runtime.put(KEY_SIM_TIME, simulatedNow);
+        }
     }
 
     public void setSpeed(int speed) {

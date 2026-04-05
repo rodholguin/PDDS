@@ -1,4 +1,4 @@
-import type { BenchmarkJobState, DataImportLog, DatasetImportResult } from '@/lib/types';
+import type { BenchmarkJobState, DataImportLog, DatasetImportResult, DemandGenerationResult } from '@/lib/types';
 import { download, upload, api } from './client';
 
 export type ImportType = 'shipments' | 'airports' | 'flights';
@@ -29,4 +29,16 @@ export const importApi = {
 
   getLatestBenchmarkStatus: () =>
     api<BenchmarkJobState | { status: 'IDLE'; message: string }>('/api/import/benchmark/status'),
+
+  generateDemand: (payload: {
+    scenario: string;
+    size: number;
+    seed: number;
+    startHour: number;
+    algorithmName?: string;
+  }) =>
+    api<{ message: string; result: DemandGenerationResult }>('/api/import/demand/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 };

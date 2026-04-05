@@ -8,6 +8,8 @@ import com.tasfb2b.service.AlgorithmRaceService;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.RoutePlannerService;
+import com.tasfb2b.service.AlgorithmProfileService;
+import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +47,10 @@ class SimulationControllerSeedStatisticalTest {
     private OperationalBootstrapService operationalBootstrapService;
     @MockBean
     private SimulationExportService simulationExportService;
+    @MockBean
+    private SimulationEngineService simulationEngineService;
+    @MockBean
+    private AlgorithmProfileService algorithmProfileService;
 
     @BeforeEach
     void setup() {
@@ -81,6 +87,7 @@ class SimulationControllerSeedStatisticalTest {
                 1,
                 0,
                 0,
+                null,
                 null,
                 null,
                 java.time.LocalDateTime.now()

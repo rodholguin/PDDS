@@ -22,6 +22,7 @@ public record ShipmentSummaryDto(
         String remainingTime,
         double progressPct,
         boolean atRisk,
-        boolean overdue
+        boolean overdue,
+        String criticalReason
 ) {
 }

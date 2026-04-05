@@ -6,7 +6,16 @@ import lombok.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "shipment")
+@Table(
+        name = "shipment",
+        indexes = {
+                @Index(name = "idx_shipment_status", columnList = "status"),
+                @Index(name = "idx_shipment_registration_date", columnList = "registration_date"),
+                @Index(name = "idx_shipment_deadline", columnList = "deadline"),
+                @Index(name = "idx_shipment_origin", columnList = "origin_airport_id"),
+                @Index(name = "idx_shipment_destination", columnList = "destination_airport_id")
+        }
+)
 @Getter
 @Setter
 @NoArgsConstructor

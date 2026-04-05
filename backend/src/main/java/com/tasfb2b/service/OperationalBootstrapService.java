@@ -1,6 +1,7 @@
 package com.tasfb2b.service;
 
 import com.tasfb2b.dto.ShipmentCreateDto;
+import com.tasfb2b.model.AlgorithmType;
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Continent;
 import com.tasfb2b.model.SimulationConfig;
@@ -27,6 +28,7 @@ public class OperationalBootstrapService {
     private final ShipmentOrchestratorService shipmentOrchestratorService;
     private final SimulationConfigRepository simulationConfigRepository;
     private final DataImportService dataImportService;
+    private final AlgorithmProfileService algorithmProfileService;
 
     @EventListener(ApplicationReadyEvent.class)
     @Transactional
@@ -52,7 +54,11 @@ public class OperationalBootstrapService {
         if (config.getIntraNodeCapacity() == null) config.setIntraNodeCapacity(700);
         if (config.getInterNodeCapacity() == null) config.setInterNodeCapacity(800);
         if (config.getIsRunning() == null) config.setIsRunning(false);
+        config.setPrimaryAlgorithm(AlgorithmType.ANT_COLONY);
+        config.setSecondaryAlgorithm(AlgorithmType.GENETIC);
         simulationConfigRepository.save(config);
+
+        algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
     }
 
     private void ensureRealDatasetLoaded() {

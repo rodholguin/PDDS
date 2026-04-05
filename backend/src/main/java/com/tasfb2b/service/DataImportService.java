@@ -41,7 +41,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -72,7 +71,7 @@ public class DataImportService {
             Pattern.CASE_INSENSITIVE
     );
     private static final Pattern FLIGHT_LINE_PATTERN = Pattern.compile(
-            "^\\s*([A-Z]{4})-([A-Z]{4})-(\\d{2}:\\d{2})-(\\d{2}:\\d{2})-(\\d{4})\\s*$"
+            "^\\s*([A-Z]{4})-([A-Z]{4})-([0-9]{1,2}:[0-9]{2})-([0-9]{1,2}:[0-9]{2})-(\\d{4})\\s*$"
     );
 
     private final ShipmentRepository shipmentRepository;
@@ -81,19 +80,32 @@ public class DataImportService {
     private final DataImportLogRepository importLogRepository;
     private final RoutePlannerService routePlannerService;
     private final SimulationConfigRepository simulationConfigRepository;
+    private final ShipmentCodeService shipmentCodeService;
 
     public record DatasetImportSummary(DataImportLog airports, DataImportLog flights) {}
 
     public DatasetImportSummary importDefaultDataset() {
-        Path airportsPath = resolveDefaultPath(
-                "datos/c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt",
-                "../datos/c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt",
-                "/app/datos/c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt"
+        Path airportsPath = resolveDatasetFile(
+                List.of(
+                        "datos/c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt",
+                        "../datos/c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt",
+                        "/app/datos/c.1inf54.25.2.Aeropuerto.husos.v1.20250818__estudiantes.txt",
+                        "datos/c.1inf54.26.1.v1.Aeropuerto.husos.v1.20250818__estudiantes.txt",
+                        "../datos/c.1inf54.26.1.v1.Aeropuerto.husos.v1.20250818__estudiantes.txt",
+                        "/app/datos/c.1inf54.26.1.v1.Aeropuerto.husos.v1.20250818__estudiantes.txt"
+                ),
+                "aeropuerto"
         );
-        Path flightsPath = resolveDefaultPath(
-                "datos/c.1inf54.25.2.planes_vuelo.v4.20250818.txt",
-                "../datos/c.1inf54.25.2.planes_vuelo.v4.20250818.txt",
-                "/app/datos/c.1inf54.25.2.planes_vuelo.v4.20250818.txt"
+        Path flightsPath = resolveDatasetFile(
+                List.of(
+                        "datos/c.1inf54.25.2.planes_vuelo.v4.20250818.txt",
+                        "../datos/c.1inf54.25.2.planes_vuelo.v4.20250818.txt",
+                        "/app/datos/c.1inf54.25.2.planes_vuelo.v4.20250818.txt",
+                        "datos/planes_vuelo.txt",
+                        "../datos/planes_vuelo.txt",
+                        "/app/datos/planes_vuelo.txt"
+                ),
+                "planes_vuelo"
         );
         return importRealDataset(airportsPath, flightsPath);
     }
@@ -142,7 +154,7 @@ public class DataImportService {
                         .orElseThrow(() -> new IllegalArgumentException("Aeropuerto destino no encontrado: " + destIcao));
 
                 Shipment shipment = Shipment.builder()
-                        .shipmentCode(generateCodeFromSequence())
+                        .shipmentCode(shipmentCodeService.nextCode(regDate))
                         .airlineName(airlineName)
                         .originAirport(origin)
                         .destinationAirport(dest)
@@ -431,18 +443,22 @@ public class DataImportService {
 
                     String originIcao = matcher.group(1);
                     String destinationIcao = matcher.group(2);
-                    LocalTime departureTime = LocalTime.parse(matcher.group(3));
-                    LocalTime arrivalTime = LocalTime.parse(matcher.group(4));
+                    int departureMinutes = parseExtendedHourMinutes(matcher.group(3));
+                    int arrivalMinutes = parseExtendedHourMinutes(matcher.group(4));
                     int maxCapacity = Integer.parseInt(matcher.group(5));
+
+                    if (maxCapacity <= 0) {
+                        throw new IllegalArgumentException("Capacidad invalida: " + maxCapacity);
+                    }
 
                     Airport origin = airportRepository.findByIcaoCode(originIcao)
                             .orElseThrow(() -> new IllegalArgumentException("Origen no encontrado: " + originIcao));
                     Airport destination = airportRepository.findByIcaoCode(destinationIcao)
                             .orElseThrow(() -> new IllegalArgumentException("Destino no encontrado: " + destinationIcao));
 
-                    LocalDateTime departure = LocalDateTime.of(baseDate, departureTime);
-                    LocalDateTime arrival = LocalDateTime.of(baseDate, arrivalTime);
-                    if (arrival.isBefore(departure) || arrival.equals(departure)) {
+                    LocalDateTime departure = baseDate.atStartOfDay().plusMinutes(departureMinutes);
+                    LocalDateTime arrival = baseDate.atStartOfDay().plusMinutes(arrivalMinutes);
+                    if (!arrival.isAfter(departure)) {
                         arrival = arrival.plusDays(1);
                     }
 
@@ -530,6 +546,43 @@ public class DataImportService {
                 }
             } catch (IOException ignored) {
                 // Try next candidate.
+            }
+        }
+
+        throw new IllegalStateException("No se encontro dataset en rutas esperadas");
+    }
+
+    private Path resolveDatasetFile(List<String> explicitCandidates, String containsToken) {
+        for (String candidate : explicitCandidates) {
+            Path path = Path.of(candidate);
+            if (Files.exists(path)) {
+                return path;
+            }
+            try {
+                ClassPathResource resource = new ClassPathResource(candidate);
+                if (resource.exists()) {
+                    return resource.getFile().toPath();
+                }
+            } catch (IOException ignored) {
+                // continue
+            }
+        }
+
+        List<Path> roots = List.of(Path.of("datos"), Path.of("../datos"), Path.of("/app/datos"));
+        for (Path root : roots) {
+            if (!Files.isDirectory(root)) {
+                continue;
+            }
+            try (var stream = Files.list(root)) {
+                Optional<Path> candidate = stream
+                        .filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).contains(containsToken.toLowerCase(Locale.ROOT)))
+                        .findFirst();
+                if (candidate.isPresent()) {
+                    return candidate.get();
+                }
+            } catch (IOException ignored) {
+                // try next root
             }
         }
 
@@ -629,10 +682,21 @@ public class DataImportService {
         return true;
     }
 
-    private String generateCodeFromSequence() {
-        int year = LocalDateTime.now().getYear();
-        long count = shipmentRepository.count() + 1;
-        return String.format("ENV-%d-%04d", year, count);
+    private int parseExtendedHourMinutes(String rawHour) {
+        String value = rawHour == null ? "" : rawHour.trim();
+        Matcher matcher = Pattern.compile("^(\\d{1,2}):(\\d{2})$").matcher(value);
+        if (!matcher.matches()) {
+            throw new IllegalArgumentException("Hora no valida: " + rawHour);
+        }
+        int hour = Integer.parseInt(matcher.group(1));
+        int minute = Integer.parseInt(matcher.group(2));
+        if (hour < 0 || hour > 72) {
+            throw new IllegalArgumentException("Hora fuera de rango: " + rawHour);
+        }
+        if (minute < 0 || minute > 59) {
+            throw new IllegalArgumentException("Minutos fuera de rango: " + rawHour);
+        }
+        return hour * 60 + minute;
     }
 
     private String activeAlgorithmName() {

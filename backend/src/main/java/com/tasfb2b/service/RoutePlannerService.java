@@ -71,6 +71,7 @@ public class RoutePlannerService {
 
         if (stops.isEmpty()) {
             shipment.setStatus(ShipmentStatus.CRITICAL);
+            shipment.setProgressPercentage(0.0);
             shipmentRepository.save(shipment);
             return stops;
         }
@@ -80,8 +81,8 @@ public class RoutePlannerService {
 
         allocateFlightLoads(shipment, stops, persistFlightLoadImmediately);
 
-        shipment.setStatus(ShipmentStatus.IN_ROUTE);
-        shipment.setProgressPercentage(calculateProgress(shipment));
+        shipment.setStatus(ShipmentStatus.PENDING);
+        shipment.setProgressPercentage(0.0);
         shipmentRepository.save(shipment);
 
         shipmentAuditService.log(
@@ -386,8 +387,7 @@ public class RoutePlannerService {
                                 .flight(null)
                                 .stopOrder(0)
                                 .scheduledArrival(registration)
-                                .actualArrival(registration)
-                                .stopStatus(StopStatus.COMPLETED)
+                                .stopStatus(StopStatus.PENDING)
                                 .build(),
                         TravelStop.builder()
                                 .shipment(shipment)

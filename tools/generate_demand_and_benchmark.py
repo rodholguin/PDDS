@@ -99,6 +99,9 @@ def write_summary_md(result: dict):
     best = result.get("bestProfile") or {}
     scenarios = result.get("scenarios") or []
     rows = result.get("rows") or []
+    confidence = result.get("confidence") or {}
+    seeds = sorted({int(row.get("seed", 0)) for row in rows if row.get("seed") is not None})
+    demand_sizes = sorted({int(row.get("demandSize", 0)) for row in rows if row.get("demandSize") is not None})
 
     lines = []
     lines.append("# Benchmark Exhaustivo de Algoritmos")
@@ -108,8 +111,10 @@ def write_summary_md(result: dict):
     lines.append(f"Muestra total: {result.get('sampleSize', 0)} corridas")
     lines.append("")
     lines.append("## Defaults aplicados")
-    lines.append("- Semillas por escenario: 5")
-    lines.append("- Tamaños de demanda: small/medium/large")
+    lines.append(f"- Semillas por escenario: {len(seeds) if seeds else 'N/A'}")
+    lines.append(
+        "- Tamaños de demanda: " + (" / ".join(str(size) for size in demand_sizes) if demand_sizes else "N/A")
+    )
     lines.append("- Ponderaciones: completed 30%, avgTransit 25%, deadlineMiss 20%, replanSuccess 10%, cost 10%, saturated 5%")
     lines.append("")
     lines.append("## Perfil ganador")
@@ -120,6 +125,11 @@ def write_summary_md(result: dict):
     lines.append(f"- Avg transit hours promedio: `{best.get('avgTransitHours', 0):.2f}`")
     lines.append(f"- Deadline miss rate promedio: `{best.get('deadlineMissRate', 0):.2f}`")
     lines.append(f"- Replan success % promedio: `{best.get('replanSuccessPct', 0):.2f}`")
+    if confidence:
+        lines.append(
+            f"- IC95 winner score: `[{float(confidence.get('ci95Low', 0)):.2f}, {float(confidence.get('ci95High', 0)):.2f}]`"
+        )
+        lines.append(f"- Delta vs runner-up: `{float(confidence.get('deltaVsRunnerUp', 0)):.2f}`")
     lines.append("")
     lines.append("## Fundamentos de elección")
     lines.append("- Maximiza score multi-criterio ponderado bajo escenarios normales, picos, colapso, disrupción y recuperación.")
@@ -156,6 +166,10 @@ def parse_args():
     parser.add_argument("--job-id", type=str, help="Job ID específico a consultar")
     parser.add_argument("--wait-seconds", type=int, default=60, help="Segundos máximos de espera en esta ejecución")
     parser.add_argument("--blocking", action="store_true", help="Esperar hasta terminar (puede tardar mucho)")
+    parser.add_argument("--generate-demand", action="store_true", help="Generar demanda masiva previa para simulacion")
+    parser.add_argument("--demand-size", type=int, default=4000, help="Cantidad de envios a generar cuando --generate-demand")
+    parser.add_argument("--demand-seed", type=int, default=7, help="Semilla para generacion de demanda")
+    parser.add_argument("--demand-scenario", type=str, default="PEAK", help="Escenario para generacion de demanda")
     return parser.parse_args()
 
 
@@ -178,6 +192,24 @@ def main():
     else:
         stop_result = call("POST", "/api/simulation/reset-demand")
         print(stop_result.get("message"))
+
+        if args.generate_demand:
+            payload = {
+                "scenario": args.demand_scenario,
+                "size": args.demand_size,
+                "seed": args.demand_seed,
+                "startHour": 1,
+                "algorithmName": ""
+            }
+            req = Request(
+                BASE_URL + "/api/import/demand/generate",
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+                headers={"Content-Type": "application/json"}
+            )
+            with urlopen(req, timeout=900) as response:
+                generated = json.loads(response.read().decode("utf-8"))
+            print("Demanda masiva generada:", generated.get("result"))
 
         download_scenario_template()
         print(f"Archivo de demanda generado: {OUT_FILE}")

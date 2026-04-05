@@ -86,13 +86,13 @@ public class SimulationConfig {
     @Enumerated(EnumType.STRING)
     @Column(name = "primary_algorithm", nullable = false, length = 20)
     @Builder.Default
-    private AlgorithmType primaryAlgorithm = AlgorithmType.GENETIC;
+    private AlgorithmType primaryAlgorithm = AlgorithmType.ANT_COLONY;
 
     /** Algoritmo secundario / de respaldo. */
     @Enumerated(EnumType.STRING)
     @Column(name = "secondary_algorithm", nullable = false, length = 20)
     @Builder.Default
-    private AlgorithmType secondaryAlgorithm = AlgorithmType.ANT_COLONY;
+    private AlgorithmType secondaryAlgorithm = AlgorithmType.GENETIC;
 
     /** {@code true} mientras haya una simulación en curso. */
     @Column(name = "is_running", nullable = false)

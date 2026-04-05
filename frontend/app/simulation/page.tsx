@@ -61,8 +61,8 @@ export default function SimulationPage() {
   const [interNodeCapacity, setInterNodeCapacity] = useState(800);
   const [normalThresholdPct, setNormalThresholdPct] = useState(70);
   const [warningThresholdPct, setWarningThresholdPct] = useState(90);
-  const [primaryAlgorithm, setPrimaryAlgorithm] = useState<AlgorithmType>('GENETIC');
-  const [secondaryAlgorithm, setSecondaryAlgorithm] = useState<AlgorithmType>('ANT_COLONY');
+  const [primaryAlgorithm, setPrimaryAlgorithm] = useState<AlgorithmType>('ANT_COLONY');
+  const [secondaryAlgorithm, setSecondaryAlgorithm] = useState<AlgorithmType>('GENETIC');
 
   const [startedAtLabel, setStartedAtLabel] = useState<string>('-');
 
@@ -500,6 +500,16 @@ export default function SimulationPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            <div className="surface-panel" style={{ marginTop: 10, padding: 10, background: 'rgba(67,210,157,0.14)' }}>
+              <p style={{ margin: 0, fontSize: 12, color: '#aab3cf' }}>Perfil operativo activo</p>
+              <p style={{ margin: '4px 0 0', fontSize: 16, fontWeight: 700 }}>
+                ACO-P1 (winner)
+              </p>
+              <p style={{ margin: '6px 0 0', fontSize: 12, color: '#9ca3bf' }}>
+                ants=20 · iterations=24 · evaporation=0.10 · alpha=1.1 · beta=2.1
+              </p>
             </div>
 
             <div style={{ marginTop: 14, color: '#9ca3bf', fontSize: 13 }}>

@@ -2,21 +2,25 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { reportsApi } from '@/lib/api/reportsApi';
-import type { SlaBreakdownRow } from '@/lib/types';
+import type { AlgorithmRaceReport, SlaBreakdownRow } from '@/lib/types';
 
 export default function ReportsPage() {
   const [from, setFrom] = useState(() => new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<SlaBreakdownRow[]>([]);
+  const [race, setRace] = useState<AlgorithmRaceReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     try {
       const report = await reportsApi.slaCompliance({ from, to });
       setRows(report.rows ?? []);
+      const raceReport = await reportsApi.algorithmRace({ from, to, scenario: 'DEFINITIVE' });
+      setRace(raceReport);
       setError(null);
     } catch {
       setRows([]);
+      setRace(null);
       setError('No se pudo cargar el reporte desde backend.');
     }
   }, [from, to]);
@@ -78,7 +82,30 @@ export default function ReportsPage() {
             <strong>$128.50</strong>
             <small style={{ color: '#7ce9bc' }}>-5.3% vs anterior</small>
           </article>
+          <article className="surface-panel kpi-card">
+            <p>Ganador Benchmark</p>
+            <strong>{race?.winner ?? '-'}</strong>
+            <small style={{ color: '#9aa3be' }}>{race?.scenario ?? 'N/A'}</small>
+          </article>
         </section>
+
+        {race ? (
+          <section className="surface-panel" style={{ padding: 16 }}>
+            <p className="report-card-title">Carrera de Algoritmos (Definitiva)</p>
+            <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+              {race.metrics.map((metric) => (
+                <div key={metric.algorithmName} style={{ display: 'grid', gridTemplateColumns: '200px 1fr 120px 120px', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontSize: 13 }}>{metric.algorithmName}</span>
+                  <div className="progress-track" style={{ width: '100%' }}>
+                    <div className="progress-fill" style={{ width: `${Math.max(0, Math.min(100, metric.completedPct))}%`, background: metric.algorithmName === race.winner ? '#43d29d' : '#5f82ff' }} />
+                  </div>
+                  <span style={{ fontSize: 12, color: '#9ca3bf' }}>CollapseEvents {metric.collapseEvents}</span>
+                  <span className="status-badge status-normal">Score {metric.completedPct.toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className="report-grid">
           <article className="surface-panel" style={{ padding: 16 }}>

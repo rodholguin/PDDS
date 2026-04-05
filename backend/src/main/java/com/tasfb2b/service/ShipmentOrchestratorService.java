@@ -16,7 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
@@ -27,8 +26,7 @@ public class ShipmentOrchestratorService {
     private final SimulationConfigRepository simulationConfigRepository;
     private final RoutePlannerService routePlannerService;
     private final ShipmentAuditService shipmentAuditService;
-
-    private final AtomicInteger sequence = new AtomicInteger(1000);
+    private final ShipmentCodeService shipmentCodeService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Shipment createAndPlan(ShipmentCreateDto dto) {
@@ -47,13 +45,15 @@ public class ShipmentOrchestratorService {
             throw new IllegalArgumentException("Capacidad maxima del nodo excedida");
         }
 
+        LocalDateTime registrationDate = dto.registrationDate() == null ? LocalDateTime.now() : dto.registrationDate();
+
         Shipment shipment = Shipment.builder()
-                .shipmentCode(generateCode())
+                .shipmentCode(shipmentCodeService.nextCode(registrationDate))
                 .airlineName(dto.airlineName().trim())
                 .originAirport(origin)
                 .destinationAirport(destination)
                 .luggageCount(requested)
-                .registrationDate(dto.registrationDate() == null ? LocalDateTime.now() : dto.registrationDate())
+                .registrationDate(registrationDate)
                 .status(ShipmentStatus.PENDING)
                 .progressPercentage(0.0)
                 .build();
@@ -126,20 +126,7 @@ public class ShipmentOrchestratorService {
                 .map(config -> config.getPrimaryAlgorithm().name().equals("ANT_COLONY")
                         ? "Ant Colony Optimization"
                         : "Genetic Algorithm")
-                .orElse("Genetic Algorithm");
+                .orElse("Ant Colony Optimization");
     }
 
-    private String generateCode() {
-        int year = LocalDateTime.now().getYear();
-        int attempts = 0;
-        while (attempts < 10000) {
-            int n = sequence.incrementAndGet();
-            String code = String.format("ENV-%d-%04d", year, n);
-            if (shipmentRepository.findByShipmentCode(code).isEmpty()) {
-                return code;
-            }
-            attempts++;
-        }
-        throw new IllegalStateException("No se pudo generar un codigo de envio unico");
-    }
 }
