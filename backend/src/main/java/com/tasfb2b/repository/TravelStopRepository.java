@@ -6,9 +6,11 @@ import com.tasfb2b.model.StopStatus;
 import com.tasfb2b.model.TravelStop;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -32,6 +34,10 @@ public interface TravelStopRepository extends JpaRepository<TravelStop, Long> {
 
     @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
     List<TravelStop> findByFlightAndStopStatus(Flight flight, StopStatus stopStatus);
+
+    @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
+    List<TravelStop> findByStopStatusInAndShipmentStatusInOrderByShipmentIdAscStopOrderAsc(List<StopStatus> stopStatuses,
+                                                                                            List<com.tasfb2b.model.ShipmentStatus> shipmentStatuses);
 
     /**
      * Cuenta las paradas completadas de un envío
@@ -65,4 +71,13 @@ public interface TravelStopRepository extends JpaRepository<TravelStop, Long> {
             ORDER BY ts.stopOrder ASC
             """)
     List<TravelStop> findNextStops(@Param("shipment") Shipment shipment);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM TravelStop ts")
+    int deleteAllFast();
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = "TRUNCATE TABLE travel_stop RESTART IDENTITY", nativeQuery = true)
+    void truncateFast();
 }

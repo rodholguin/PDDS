@@ -162,6 +162,7 @@ def write_summary_md(result: dict):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Genera demanda y gestiona benchmark asíncrono")
+    parser.add_argument("--base-url", type=str, default=BASE_URL, help="Base URL del backend")
     parser.add_argument("--collect", action="store_true", help="Solo consulta/recoge resultado de un job ya iniciado")
     parser.add_argument("--job-id", type=str, help="Job ID específico a consultar")
     parser.add_argument("--wait-seconds", type=int, default=60, help="Segundos máximos de espera en esta ejecución")
@@ -175,6 +176,8 @@ def parse_args():
 
 def main():
     args = parse_args()
+    global BASE_URL
+    BASE_URL = args.base_url
     wait_backend_ready()
 
     if args.collect:

@@ -4,6 +4,7 @@ import type {
   NodeDetail,
   RouteNetworkEdge,
   ShipmentSearchResult,
+  MapLiveShipment,
   ShipmentStatus,
   ShipmentSummary,
   SystemStatus,
@@ -15,6 +16,7 @@ export interface ShipmentDashboardFilter {
   origin?: string;
   destination?: string;
   status?: ShipmentStatus;
+  limit?: number;
 }
 
 export const dashboardApi = {
@@ -30,6 +32,7 @@ export const dashboardApi = {
     if (filter?.origin) query.set('origin', filter.origin);
     if (filter?.destination) query.set('destination', filter.destination);
     if (filter?.status) query.set('status', filter.status);
+    if (typeof filter?.limit === 'number') query.set('limit', String(filter.limit));
     const suffix = query.toString() ? `?${query.toString()}` : '';
     return api<ShipmentSummary[]>(`/api/dashboard/shipments${suffix}`);
   },
@@ -41,4 +44,7 @@ export const dashboardApi = {
     api<NodeDetail>(`/api/dashboard/nodes/${encodeURIComponent(icao)}${date ? `?date=${encodeURIComponent(date)}` : ''}`),
 
   getRoutesNetwork: () => api<RouteNetworkEdge[]>('/api/dashboard/routes-network'),
+
+  getMapLive: (limit = 450) =>
+    api<MapLiveShipment[]>(`/api/dashboard/map-live?limit=${encodeURIComponent(String(limit))}`),
 };

@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { simulationApi } from '@/lib/api/simulationApi';
-import type { AlgorithmRaceReport, AlgorithmType, SimScenario, SimulationResults, SimulationState } from '@/lib/types';
+import type { SimScenario, SimulationKpis, SimulationResults, SimulationState } from '@/lib/types';
 import type { CSSProperties } from 'react';
 
 const PARAM_LABEL_STYLE: CSSProperties = {
@@ -14,6 +14,7 @@ type ScenarioCard = {
   value: SimScenario;
   title: string;
   description: string;
+  hint: string;
 };
 
 const SCENARIOS: ScenarioCard[] = [
@@ -21,21 +22,26 @@ const SCENARIOS: ScenarioCard[] = [
     value: 'DAY_TO_DAY',
     title: 'Dia a dia',
     description: 'Monitoreo en tiempo real de operaciones activas.',
+    hint: 'Operacion continua y monitoreo permanente en mapa.',
   },
   {
     value: 'PERIOD_SIMULATION',
     title: 'Simulacion por periodo',
     description: 'Simula operaciones de 3, 5 o 7 dias en 30-90 minutos.',
+    hint: 'Analiza backlog y cumplimiento en una ventana acelerada.',
   },
   {
     value: 'COLLAPSE_TEST',
     title: 'Simulacion de colapso',
     description: 'Prueba de estres para evaluar capacidad y replanificacion.',
+    hint: 'Foco en saturacion, cuellos de botella y riesgo de colapso.',
   },
 ];
 
-function algoLabel(algo: AlgorithmType): string {
-  return algo === 'GENETIC' ? 'Genetico (GA)' : 'Colonia Hormigas (ACO)';
+function scenarioName(value: SimScenario): string {
+  if (value === 'PERIOD_SIMULATION') return 'Simulacion por periodo';
+  if (value === 'COLLAPSE_TEST') return 'Simulacion de colapso';
+  return 'Dia a dia';
 }
 
 function fmtPct(value: number): string {
@@ -44,8 +50,7 @@ function fmtPct(value: number): string {
 
 export default function SimulationPage() {
   const [state, setState] = useState<SimulationState | null>(null);
-  const [results, setResults] = useState<SimulationResults | null>(null);
-  const [raceReport, setRaceReport] = useState<AlgorithmRaceReport | null>(null);
+  const [kpis, setKpis] = useState<SimulationKpis | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,8 +66,7 @@ export default function SimulationPage() {
   const [interNodeCapacity, setInterNodeCapacity] = useState(800);
   const [normalThresholdPct, setNormalThresholdPct] = useState(70);
   const [warningThresholdPct, setWarningThresholdPct] = useState(90);
-  const [primaryAlgorithm, setPrimaryAlgorithm] = useState<AlgorithmType>('ANT_COLONY');
-  const [secondaryAlgorithm, setSecondaryAlgorithm] = useState<AlgorithmType>('GENETIC');
+  const [pendingScenario, setPendingScenario] = useState<SimScenario>('DAY_TO_DAY');
 
   const [startedAtLabel, setStartedAtLabel] = useState<string>('-');
 
@@ -72,10 +76,13 @@ export default function SimulationPage() {
       simulationApi.getResults(),
     ]);
 
+    let partialError: string | null = null;
+
     if (stateResult.status === 'fulfilled') {
       const value = stateResult.value;
       setState(value);
       setScenario(value.scenario);
+      setPendingScenario(value.scenario);
       setSimulationDays(value.simulationDays);
       setExecutionMinutes(value.executionMinutes);
       setInitialVolumeAvg(value.initialVolumeAvg);
@@ -86,26 +93,20 @@ export default function SimulationPage() {
       setInterNodeCapacity(value.interNodeCapacity);
       setNormalThresholdPct(value.normalThresholdPct);
       setWarningThresholdPct(value.warningThresholdPct);
-      setPrimaryAlgorithm(value.primaryAlgorithm);
-      setSecondaryAlgorithm(value.secondaryAlgorithm);
-      setError(null);
+    } else {
+      partialError = 'No se pudo cargar el estado de simulacion.';
     }
 
     if (resultResult.status === 'fulfilled') {
-      setResults(resultResult.value);
-      setError(null);
+      const payload = resultResult.value as SimulationResults;
+      setKpis(payload.kpis);
+    } else {
+      partialError = partialError
+        ? partialError + ' Tampoco se pudieron cargar los KPIs.'
+        : 'No se pudieron cargar los KPIs.';
     }
 
-    const raceResult = await Promise.allSettled([
-      simulationApi.getRaceReport(),
-    ]);
-    if (raceResult[0].status === 'fulfilled') {
-      setRaceReport(raceResult[0].value);
-    }
-
-    if (stateResult.status === 'rejected' && resultResult.status === 'rejected') {
-      setError('No se pudo cargar la simulacion desde backend.');
-    }
+    setError(partialError);
 
     setLoading(false);
   }, []);
@@ -157,12 +158,48 @@ export default function SimulationPage() {
         interNodeCapacity,
         normalThresholdPct,
         warningThresholdPct,
-        primaryAlgorithm,
-        secondaryAlgorithm,
       });
       await loadAll();
     } catch {
-      setError('No se pudo guardar la configuracion.');
+      setError('No se pudo guardar la configuracion. Valores restaurados.');
+      await loadAll();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const scenarioDirty = pendingScenario !== scenario;
+
+  async function applyScenario(nextScenario?: SimScenario, autoStart?: boolean): Promise<void> {
+    const target = nextScenario ?? pendingScenario;
+    setSaving(true);
+    setError(null);
+    try {
+      await simulationApi.resetToInitial();
+
+      const configured = await simulationApi.configure({
+        scenario: target,
+        simulationDays,
+        executionMinutes,
+        initialVolumeAvg,
+        initialVolumeVariance,
+        flightFrequencyMultiplier,
+        cancellationRatePct,
+        intraNodeCapacity,
+        interNodeCapacity,
+        normalThresholdPct,
+        warningThresholdPct,
+      });
+
+      setState(configured);
+      setScenario(target);
+      if (autoStart !== false) {
+        const started = await simulationApi.start();
+        setState(started.state);
+      }
+      void loadAll();
+    } catch {
+      setError('No se pudo aplicar el escenario seleccionado.');
     } finally {
       setSaving(false);
     }
@@ -170,8 +207,10 @@ export default function SimulationPage() {
 
   async function startSimulation(): Promise<void> {
     try {
-      await simulationApi.start();
-      await loadAll();
+      const res = await simulationApi.start();
+      setState(res.state);
+      setError(null);
+      void loadAll();
     } catch {
       setError('No se pudo iniciar la simulacion.');
     }
@@ -179,8 +218,10 @@ export default function SimulationPage() {
 
   async function stopSimulation(): Promise<void> {
     try {
-      await simulationApi.stop();
-      await loadAll();
+      const res = await simulationApi.resetToInitial();
+      setState(res.state);
+      setError(null);
+      void loadAll();
     } catch {
       setError('No se pudo detener la simulacion.');
     }
@@ -188,8 +229,10 @@ export default function SimulationPage() {
 
   async function changeSpeed(speed: number): Promise<void> {
     try {
-      await simulationApi.setSpeed(speed);
-      await loadAll();
+      const res = await simulationApi.setSpeed(speed);
+      setState(res.state);
+      setError(null);
+      void loadAll();
     } catch {
       setError('No se pudo cambiar la velocidad.');
     }
@@ -217,9 +260,6 @@ export default function SimulationPage() {
     }
   }
 
-  const ga = useMemo(() => results?.algorithms?.['Genetic Algorithm'], [results]);
-  const aco = useMemo(() => results?.algorithms?.['Ant Colony Optimization'], [results]);
-
   return (
     <div className="app-page">
       <header className="page-head">
@@ -237,35 +277,50 @@ export default function SimulationPage() {
           <button className="chip" onClick={() => void simulationApi.exportResults('csv')}>Exportar CSV</button>
           <button className="chip" onClick={() => void simulationApi.exportResults('pdf')}>Exportar PDF</button>
           <button className="chip" onClick={refreshNow}>Actualizar</button>
+          <span className="chip is-active">Escenario activo: {state ? scenarioName(state.scenario) : scenarioName(scenario)}</span>
         </div>
       </header>
 
       <div className="sim-layout">
         <section>
-          <p className="sim-section-title">Seleccionar Escenario</p>
-          <div className="scenario-grid">
-            {SCENARIOS.map((card) => {
-              const active = scenario === card.value;
-              return (
-                <button
-                  key={card.value}
-                  onClick={() => setScenario(card.value)}
-                  className="surface-panel"
-                  style={{
-                    minHeight: 132,
-                    textAlign: 'left',
-                    padding: 14,
-                    borderColor: active ? 'rgba(95,130,255,0.8)' : '#32364f',
-                    background: active ? 'rgba(95,130,255,0.3)' : 'linear-gradient(180deg, #1f2234 0%, #1a1d2d 100%)',
-                    color: '#eef1ff',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <p className="scenario-title">{card.title}</p>
-                  <p className="scenario-desc">{card.description}</p>
-                </button>
-              );
-            })}
+          <p className="sim-section-title">Escenario de simulacion</p>
+          <div className="surface-panel" style={{ padding: 14 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {SCENARIOS.map((card) => {
+                const selected = pendingScenario === card.value;
+                const active = state?.scenario === card.value;
+                return (
+                  <button
+                    key={card.value}
+                    className={`chip${selected ? ' is-active' : ''}`}
+                    onClick={() => setPendingScenario(card.value)}
+                    title={card.description}
+                    style={{ borderColor: active ? '#43d29d' : undefined }}
+                  >
+                    {card.title}{active ? ' (activo)' : ''}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ marginTop: 10 }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#d9def3', fontWeight: 600 }}>
+                {SCENARIOS.find((s) => s.value === pendingScenario)?.title}
+              </p>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#9ca3bf' }}>
+                {SCENARIOS.find((s) => s.value === pendingScenario)?.hint}
+              </p>
+            </div>
+            <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-primary" onClick={() => void applyScenario(undefined, true)} disabled={saving || !scenarioDirty}>
+                {saving ? 'Aplicando...' : 'Aplicar y arrancar'}
+              </button>
+              <button className="chip" onClick={() => void applyScenario(undefined, false)} disabled={saving || !scenarioDirty}>
+                Aplicar sin arrancar
+              </button>
+              {!scenarioDirty && (
+                <span className="chip">Escenario ya aplicado</span>
+              )}
+            </div>
           </div>
         </section>
 
@@ -329,30 +384,6 @@ export default function SimulationPage() {
               </label>
 
               <label style={{ display: 'grid', gap: 6 }}>
-                <span style={PARAM_LABEL_STYLE}>Algoritmo primario</span>
-                <select
-                  value={primaryAlgorithm}
-                  onChange={(e) => setPrimaryAlgorithm(e.target.value as AlgorithmType)}
-                  style={fieldStyle}
-                >
-                  <option value="GENETIC">Genetico (GA)</option>
-                  <option value="ANT_COLONY">Colonia Hormigas (ACO)</option>
-                </select>
-              </label>
-
-              <label style={{ display: 'grid', gap: 6 }}>
-                <span style={PARAM_LABEL_STYLE}>Algoritmo secundario</span>
-                <select
-                  value={secondaryAlgorithm}
-                  onChange={(e) => setSecondaryAlgorithm(e.target.value as AlgorithmType)}
-                  style={fieldStyle}
-                >
-                  <option value="GENETIC">Genetico (GA)</option>
-                  <option value="ANT_COLONY">Colonia Hormigas (ACO)</option>
-                </select>
-              </label>
-
-              <label style={{ display: 'grid', gap: 6 }}>
                 <span style={PARAM_LABEL_STYLE}>Umbral normal (%)</span>
                 <input
                   type="number"
@@ -396,120 +427,31 @@ export default function SimulationPage() {
 
           <div className="surface-panel" style={{ padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <p className="sim-panel-title">Resultados</p>
+              <p className="sim-panel-title">Resumen Operativo</p>
               <span className="chip is-active">
                 {state?.running ? 'Simulacion activa' : state?.paused ? 'Pausada' : 'Detenida'}
               </span>
             </div>
 
-            <div style={{ marginTop: 16, overflowX: 'auto' }}>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Metrica</th>
-                    <th>Genetico (GA)</th>
-                    <th>Hormigas (ACO)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Envios completados</td>
-                    <td>{ga ? fmtPct(ga.completedPct) : '-'}</td>
-                    <td>{aco ? fmtPct(aco.completedPct) : '-'}</td>
-                  </tr>
-                  <tr>
-                    <td>Tiempo promedio</td>
-                    <td>{ga ? `${ga.avgTransitHours.toFixed(1)}h` : '-'}</td>
-                    <td>{aco ? `${aco.avgTransitHours.toFixed(1)}h` : '-'}</td>
-                  </tr>
-                  <tr>
-                    <td>Replanificaciones</td>
-                    <td>{ga?.totalReplanning ?? '-'}</td>
-                    <td>{aco?.totalReplanning ?? '-'}</td>
-                  </tr>
-                  <tr>
-                    <td>Costo operativo</td>
-                    <td>{ga ? `$${ga.operationalCost.toLocaleString('es-PE')}` : '-'}</td>
-                    <td>{aco ? `$${aco.operationalCost.toLocaleString('es-PE')}` : '-'}</td>
-                  </tr>
-                  <tr>
-                    <td>Utilizacion vuelos</td>
-                    <td>{ga ? fmtPct(ga.flightUtilizationPct) : '-'}</td>
-                    <td>{aco ? fmtPct(aco.flightUtilizationPct) : '-'}</td>
-                  </tr>
-                  <tr>
-                    <td>Aeropuertos saturados</td>
-                    <td>{ga?.saturatedAirports ?? '-'}</td>
-                    <td>{aco?.saturatedAirports ?? '-'}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
             <div style={{ marginTop: 16, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}>
               <div className="surface-panel" style={{ padding: 12, background: 'rgba(67,210,157,0.18)' }}>
-                <p style={{ margin: 0, color: '#aab3cf', fontSize: 12 }}>Mejor algoritmo</p>
+                <p style={{ margin: 0, color: '#aab3cf', fontSize: 12 }}>Cumplimiento SLA</p>
                 <p style={{ margin: '4px 0 0', fontSize: 20, fontWeight: 700 }}>
-                  {ga && aco ? (ga.completedPct >= aco.completedPct ? 'GA' : 'ACO') : '-'}
+                  {kpis ? fmtPct(kpis.deliveredOnTimePct) : '-'}
                 </p>
               </div>
               <div className="surface-panel" style={{ padding: 12, background: 'rgba(95,130,255,0.2)' }}>
-                <p style={{ margin: 0, color: '#aab3cf', fontSize: 12 }}>Diferencia %</p>
+                <p style={{ margin: 0, color: '#aab3cf', fontSize: 12 }}>Envios entregados</p>
                 <p style={{ margin: '4px 0 0', fontSize: 20, fontWeight: 700 }}>
-                  {ga && aco ? fmtPct(Math.abs(ga.completedPct - aco.completedPct)) : '-'}
+                  {kpis?.delivered ?? 0}
                 </p>
               </div>
               <div className="surface-panel" style={{ padding: 12, background: 'rgba(240,193,58,0.18)' }}>
                 <p style={{ margin: 0, color: '#aab3cf', fontSize: 12 }}>Alertas</p>
                 <p style={{ margin: '4px 0 0', fontSize: 20, fontWeight: 700 }}>
-                  {results?.kpis.critical ?? 0}
+                  {kpis?.critical ?? 0}
                 </p>
               </div>
-            </div>
-
-            <div className="surface-panel" style={{ marginTop: 12, padding: 10, background: 'rgba(95,130,255,0.14)' }}>
-              <p style={{ margin: 0, fontSize: 12, color: '#aab3cf' }}>Benchmark recomendado</p>
-              <p style={{ margin: '4px 0 0', fontSize: 16, fontWeight: 700 }}>
-                {results?.benchmarkWinner ?? 'N/A'}
-              </p>
-            </div>
-
-            <div className="surface-panel" style={{ marginTop: 10, padding: 10 }}>
-              <p style={{ margin: 0, fontSize: 12, color: '#aab3cf' }}>Race report</p>
-              <div style={{ marginTop: 8, overflowX: 'auto' }}>
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Algoritmo</th>
-                      <th>Completed%</th>
-                      <th>Avg h</th>
-                      <th>P95 h</th>
-                      <th>Costo/maleta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(raceReport?.metrics ?? []).map((metric) => (
-                      <tr key={metric.algorithmName}>
-                        <td>{metric.algorithmName}</td>
-                        <td>{metric.completedPct.toFixed(1)}%</td>
-                        <td>{metric.avgTransitHours.toFixed(1)}h</td>
-                        <td>{metric.p95TransitHours.toFixed(1)}h</td>
-                        <td>${metric.costPerLuggage.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="surface-panel" style={{ marginTop: 10, padding: 10, background: 'rgba(67,210,157,0.14)' }}>
-              <p style={{ margin: 0, fontSize: 12, color: '#aab3cf' }}>Perfil operativo activo</p>
-              <p style={{ margin: '4px 0 0', fontSize: 16, fontWeight: 700 }}>
-                ACO-P1 (winner)
-              </p>
-              <p style={{ margin: '6px 0 0', fontSize: 12, color: '#9ca3bf' }}>
-                ants=20 · iterations=24 · evaporation=0.10 · alpha=1.1 · beta=2.1
-              </p>
             </div>
 
             <div style={{ marginTop: 14, color: '#9ca3bf', fontSize: 13 }}>
@@ -525,7 +467,7 @@ export default function SimulationPage() {
         {loading && (
           <div className="state-panel">
             <p className="state-panel-title">Cargando simulacion</p>
-            <p className="state-panel-copy">Leyendo configuracion runtime y resultados de algoritmos.</p>
+            <p className="state-panel-copy">Leyendo configuracion runtime y metricas operativas.</p>
           </div>
         )}
         {error && (
@@ -536,7 +478,7 @@ export default function SimulationPage() {
         )}
 
         <div className="surface-panel" style={{ padding: 14, color: '#aab3cf', fontSize: 13 }}>
-          {state ? `Escenario: ${state.scenario} | Algoritmo primario: ${algoLabel(state.primaryAlgorithm)}` : 'Sin datos de estado'}
+          {state ? `Escenario: ${state.scenario}` : 'Sin datos de estado'}
         </div>
       </div>
     </div>

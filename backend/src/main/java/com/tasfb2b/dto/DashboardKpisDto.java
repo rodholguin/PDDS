@@ -7,6 +7,7 @@ package com.tasfb2b.dto;
 public record DashboardKpisDto(
         long totalShipments,
         long activeShipments,       // PENDING + IN_ROUTE
+        long inRouteShipments,      // solo IN_ROUTE (coincide con map-live)
         long criticalShipments,     // CRITICAL + DELAYED
         long deliveredShipments,    // DELIVERED
         double systemLoadPct,       // ocupación promedio de almacenes

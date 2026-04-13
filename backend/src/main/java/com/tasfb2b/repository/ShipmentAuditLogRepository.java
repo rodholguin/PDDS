@@ -4,9 +4,11 @@ import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentAuditLog;
 import com.tasfb2b.model.ShipmentAuditType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -30,4 +32,9 @@ public interface ShipmentAuditLogRepository extends JpaRepository<ShipmentAuditL
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to
     );
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = "TRUNCATE TABLE shipment_audit_log RESTART IDENTITY", nativeQuery = true)
+    void truncateFast();
 }

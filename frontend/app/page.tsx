@@ -11,6 +11,7 @@ import { shipmentsApi } from '@/lib/api/shipmentsApi';
 import type {
   Airport,
   DashboardOverview,
+  MapLiveShipment,
   NodeDetail,
   RouteNetworkEdge,
   ShipmentStatus,
@@ -40,8 +41,15 @@ const SATELLITE_STYLE: StyleSpecification = {
 type MapMode = 'MAP' | 'SATELLITE';
 type MapFilter = 'ALL' | ShipmentStatus;
 const POLL_INTERVAL_MS = 2000;
-const ANIMATION_DURATION_MS = 1700;
-const MAP_FILTERS_STORAGE_KEY = 'pdds-map-filters-v2';
+const SHIPMENTS_REFRESH_MS = 6000;
+const MAP_STATIC_REFRESH_MS = 15000;
+const MAP_LIVE_REFRESH_MS = 1200;
+const MAX_SHIPMENTS_FETCH = 2500;
+const MAX_MAP_SHIPMENTS = 1200;
+const MAX_FLIGHT_ANIMATION = 200;
+const PLANE_ICON_ROTATION_OFFSET_DEG = -90;
+const MAP_FILTERS_STORAGE_KEY = 'pdds-map-filters-v3';
+const DASHBOARD_CACHE_KEY = 'pdds-dashboard-cache-v1';
 const INITIAL_VIEW_STATE = {
   latitude: 16,
   longitude: -38,
@@ -75,7 +83,19 @@ type RouteData = {
 type FlightLive = {
   shipment: ShipmentSummary;
   current: GeoPoint;
+  next: GeoPoint;
   bearing: number;
+};
+
+type PersistedDashboardState = {
+  systemStatus: SystemStatus | null;
+  overview: DashboardOverview | null;
+  sim: SimulationState | null;
+  shipments: ShipmentSummary[];
+  networkEdges: RouteNetworkEdge[];
+  airportNodes: Airport[];
+  activeAlerts: Array<{ id: number; shipmentCode: string; type: string; note: string }>;
+  timestamp: number;
 };
 
 function statusLabel(status: ShipmentStatus): string {
@@ -146,15 +166,6 @@ function nearestWrappedLongitude(target: number, reference: number): number {
   return best;
 }
 
-function approxDistanceKm(a: GeoPoint, b: GeoPoint): number {
-  const latFactor = 111.0;
-  const avgLatRad = ((a.latitude + b.latitude) / 2) * Math.PI / 180;
-  const lonFactor = 111.320 * Math.cos(avgLatRad);
-  const dLat = (a.latitude - b.latitude) * latFactor;
-  const dLon = (a.longitude - b.longitude) * lonFactor;
-  return Math.sqrt(dLat * dLat + dLon * dLon);
-}
-
 function computeBearing(from: GeoPoint, to: GeoPoint): number {
   const lat1 = (from.latitude * Math.PI) / 180;
   const lat2 = (to.latitude * Math.PI) / 180;
@@ -190,83 +201,6 @@ function projectPointToSegment(point: GeoPoint, from: GeoPoint, to: GeoPoint): G
   return {
     longitude: from.longitude + vx * t,
     latitude: from.latitude + vy * t,
-  };
-}
-
-function snapPointToSegmentRange(
-  point: GeoPoint,
-  nodes: Array<[number, number]>,
-  fromIdx: number,
-  toIdx: number
-) {
-  if (nodes.length < 2) {
-    return {
-      point,
-      segmentStart: point,
-      segmentEnd: point,
-    };
-  }
-
-  const safeFrom = Math.max(0, Math.min(nodes.length - 2, fromIdx));
-  const safeTo = Math.max(safeFrom + 1, Math.min(nodes.length - 1, toIdx));
-
-  let best = point;
-  let bestDist = Number.POSITIVE_INFINITY;
-  let bestStart = { longitude: nodes[safeFrom][0], latitude: nodes[safeFrom][1] };
-  let bestEnd = { longitude: nodes[safeTo][0], latitude: nodes[safeTo][1] };
-
-  for (let i = safeFrom + 1; i <= safeTo; i++) {
-    const start = { longitude: nodes[i - 1][0], latitude: nodes[i - 1][1] };
-    const end = { longitude: nodes[i][0], latitude: nodes[i][1] };
-    const projected = projectPointToSegmentMercator(point, start, end);
-    const dist = mercatorDistanceSq(point, projected);
-    if (dist < bestDist) {
-      best = projected;
-      bestDist = dist;
-      bestStart = start;
-      bestEnd = end;
-    }
-  }
-
-  return {
-    point: best,
-    segmentStart: bestStart,
-    segmentEnd: bestEnd,
-  };
-}
-
-function mercatorY(lat: number): number {
-  const clamped = Math.max(-85.05112878, Math.min(85.05112878, lat));
-  const radians = (clamped * Math.PI) / 180;
-  return Math.log(Math.tan(Math.PI / 4 + radians / 2));
-}
-
-function inverseMercatorY(y: number): number {
-  return (2 * Math.atan(Math.exp(y)) - Math.PI / 2) * (180 / Math.PI);
-}
-
-function mercatorDistanceSq(a: GeoPoint, b: GeoPoint): number {
-  const dx = a.longitude - b.longitude;
-  const dy = mercatorY(a.latitude) - mercatorY(b.latitude);
-  return dx * dx + dy * dy;
-}
-
-function projectPointToSegmentMercator(point: GeoPoint, from: GeoPoint, to: GeoPoint): GeoPoint {
-  const py = mercatorY(point.latitude);
-  const fy = mercatorY(from.latitude);
-  const ty = mercatorY(to.latitude);
-
-  const vx = to.longitude - from.longitude;
-  const vy = ty - fy;
-  const wx = point.longitude - from.longitude;
-  const wy = py - fy;
-  const denom = vx * vx + vy * vy;
-  if (denom === 0) return { longitude: from.longitude, latitude: from.latitude };
-  const t = clamp01((wx * vx + wy * vy) / denom);
-  const projectedY = fy + vy * t;
-  return {
-    longitude: from.longitude + vx * t,
-    latitude: inverseMercatorY(projectedY),
   };
 }
 
@@ -373,23 +307,35 @@ export default function HomePage() {
   const [selectedStops, setSelectedStops] = useState<TravelStop[]>([]);
   const [search, setSearch] = useState('');
   const [mapMode, setMapMode] = useState<MapMode>('MAP');
-  const [showOnlyActive, setShowOnlyActive] = useState(true);
+  const [showOnlyActive, setShowOnlyActive] = useState(false);
   const [statusFilter, setStatusFilter] = useState<MapFilter>('ALL');
   const [loading, setLoading] = useState(true);
+  const [bootstrapped, setBootstrapped] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [selectedNodePopup, setSelectedNodePopup] = useState<{ detail: NodeDetail; point: GeoPoint } | null>(null);
   const [nodeAgendaDate, setNodeAgendaDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [networkEdges, setNetworkEdges] = useState<RouteNetworkEdge[]>([]);
   const [airportNodes, setAirportNodes] = useState<Airport[]>([]);
   const [activeAlerts, setActiveAlerts] = useState<Array<{ id: number; shipmentCode: string; type: string; note: string }>>([]);
+  const [mapLive, setMapLive] = useState<MapLiveShipment[]>([]);
+  const [lastLiveRefresh, setLastLiveRefresh] = useState<string>('—');
   const [showNetworkLayer, setShowNetworkLayer] = useState(true);
   const [showShipmentFlights, setShowShipmentFlights] = useState(true);
+  const filteredShipmentsRef = useRef<ShipmentSummary[]>([]);
   const [smoothedPositions, setSmoothedPositions] = useState<Record<number, GeoPoint>>({});
   const previousTargetsRef = useRef<Record<number, GeoPoint>>({});
+  const lastBearingRef = useRef<Record<number, number>>({});
   const animationFrameRef = useRef<number | null>(null);
-  const animationStartRef = useRef<number>(0);
-
-  const [stopsByShipment, setStopsByShipment] = useState<Record<number, TravelStop[]>>({});
+  const liveTargetsRef = useRef<MapLiveShipment[]>([]);
+  const shipmentsForAnimRef = useRef<ShipmentSummary[]>([]);
+  interface AnimSegment { fromLon: number; fromLat: number; toLon: number; toLat: number; startTs: number; durationMs: number; }
+  const segmentRef = useRef<Record<number, AnimSegment>>({});
+  const FALLBACK_DURATION_MS = 1200;
+  const simRunningRef = useRef(false);
+  const simTimeReceivedAtRef = useRef<number>(0);
+  const simTimeBaseRef = useRef<string | null>(null);
+  const simSpeedRef = useRef<number>(1);
 
   useEffect(() => {
     try {
@@ -409,6 +355,27 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(DASHBOARD_CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as PersistedDashboardState;
+      const maxAge = parsed.sim?.running ? 5_000 : 120_000;
+      if (!parsed?.timestamp || Date.now() - parsed.timestamp > maxAge) return;
+      setSystemStatus(parsed.systemStatus ?? null);
+      setOverview(parsed.overview ?? null);
+      setSim(parsed.sim ?? null);
+      setShipments(parsed.shipments ?? []);
+      setNetworkEdges(parsed.networkEdges ?? []);
+      setAirportNodes(parsed.airportNodes ?? []);
+      setActiveAlerts(parsed.activeAlerts ?? []);
+      setLoading(false);
+      setBootstrapped(true);
+    } catch {
+      // Ignore malformed cache.
+    }
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(
       MAP_FILTERS_STORAGE_KEY,
       JSON.stringify({
@@ -418,45 +385,114 @@ export default function HomePage() {
     );
   }, [showOnlyActive, statusFilter]);
 
-  const loadDashboard = useCallback(async () => {
-    const [sysRes, overviewRes, simRes, shipmentRes] = await Promise.allSettled([
-      dashboardApi.getSystemStatus(),
-      dashboardApi.getOverview(),
-      simulationApi.getState(),
-      dashboardApi.getShipmentSummaries({
-        status: statusFilter === 'ALL' ? undefined : statusFilter,
-      }),
-    ]);
+  useEffect(() => {
+    if (!bootstrapped) return;
+    const payload: PersistedDashboardState = {
+      systemStatus,
+      overview,
+      sim,
+      shipments,
+      networkEdges,
+      airportNodes,
+      activeAlerts,
+      timestamp: Date.now(),
+    };
+    try {
+      window.sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(payload));
+    } catch {
+      // Ignore storage quota errors.
+    }
+  }, [bootstrapped, systemStatus, overview, sim, shipments, networkEdges, airportNodes, activeAlerts]);
 
-    if (sysRes.status === 'fulfilled') setSystemStatus(sysRes.value);
-    if (overviewRes.status === 'fulfilled') setOverview(overviewRes.value);
-    if (simRes.status === 'fulfilled') setSim(simRes.value);
-      if (shipmentRes.status === 'fulfilled') {
-        const sorted = shipmentRes.value.sort((a, b) => {
-          if (a.status === 'DELIVERED' && b.status !== 'DELIVERED') return 1;
-          if (a.status !== 'DELIVERED' && b.status === 'DELIVERED') return -1;
-          return b.id - a.id;
-        });
-        setShipments(sorted);
+  const inFlightRef = useRef<{ core: boolean; shipments: boolean; static: boolean; live: boolean }>({
+    core: false,
+    shipments: false,
+    static: false,
+    live: false,
+  });
+
+  const loadCore = useCallback(async () => {
+    if (inFlightRef.current.core) return;
+    inFlightRef.current.core = true;
+    try {
+      const [sysRes, overviewRes, simRes] = await Promise.allSettled([
+        dashboardApi.getSystemStatus(),
+        dashboardApi.getOverview(),
+        simulationApi.getState(),
+      ]);
+
+      if (sysRes.status === 'fulfilled') setSystemStatus(sysRes.value);
+      if (overviewRes.status === 'fulfilled') setOverview(overviewRes.value);
+      if (simRes.status === 'fulfilled') setSim(simRes.value);
+
+      if ([sysRes, overviewRes, simRes].every((r) => r.status === 'rejected')) {
+        setError('No se pudo conectar con el backend en puerto 8080.');
+      } else {
+        setError(null);
       }
-
-    const routesRes = await dashboardApi.getRoutesNetwork().catch(() => null);
-    if (routesRes) setNetworkEdges(routesRes);
-    const airportsRes = await airportsApi.getAll().catch(() => null);
-    if (airportsRes) setAirportNodes(airportsRes);
-    const alertsRes = await alertsApi.list().catch(() => null);
-    if (alertsRes) {
-      setActiveAlerts(alertsRes.map((a) => ({ id: a.id, shipmentCode: a.shipmentCode, type: a.type, note: a.note })));
+    } finally {
+      inFlightRef.current.core = false;
+      if (!bootstrapped) {
+        setBootstrapped(true);
+        setLoading(false);
+      }
     }
+  }, [bootstrapped]);
 
-    if ([sysRes, overviewRes, simRes, shipmentRes].every((r) => r.status === 'rejected')) {
-      setError('No se pudo conectar con el backend en puerto 8080.');
-    } else {
-      setError(null);
+  const loadShipments = useCallback(async () => {
+    if (inFlightRef.current.shipments) return;
+    inFlightRef.current.shipments = true;
+    try {
+      const result = await dashboardApi.getShipmentSummaries({
+        limit: MAX_SHIPMENTS_FETCH,
+      });
+      const priority = (s: ShipmentStatus): number => {
+        if (s === 'IN_ROUTE') return 0;
+        if (s === 'PENDING') return 1;
+        if (s === 'CRITICAL' || s === 'DELAYED') return 2;
+        return 3;
+      };
+      const sorted = result.sort((a, b) => {
+        const p = priority(a.status) - priority(b.status);
+        if (p !== 0) return p;
+        return b.id - a.id;
+      });
+      setShipments(sorted);
+    } finally {
+      inFlightRef.current.shipments = false;
     }
+  }, []);
 
-    setLoading(false);
-  }, [statusFilter]);
+  const loadStaticMap = useCallback(async () => {
+    if (inFlightRef.current.static) return;
+    inFlightRef.current.static = true;
+    try {
+      const [routesRes, airportsRes, alertsRes] = await Promise.allSettled([
+        dashboardApi.getRoutesNetwork(),
+        airportsApi.getAll(),
+        alertsApi.list(),
+      ]);
+      if (routesRes.status === 'fulfilled') setNetworkEdges(routesRes.value);
+      if (airportsRes.status === 'fulfilled') setAirportNodes(airportsRes.value);
+      if (alertsRes.status === 'fulfilled') {
+        setActiveAlerts(alertsRes.value.map((a) => ({ id: a.id, shipmentCode: a.shipmentCode, type: a.type, note: a.note })));
+      }
+    } finally {
+      inFlightRef.current.static = false;
+    }
+  }, []);
+
+  const loadMapLive = useCallback(async () => {
+    if (inFlightRef.current.live) return;
+    inFlightRef.current.live = true;
+    try {
+      const live = await dashboardApi.getMapLive(MAX_MAP_SHIPMENTS);
+      setMapLive(live);
+      setLastLiveRefresh(new Date().toLocaleTimeString());
+    } finally {
+      inFlightRef.current.live = false;
+    }
+  }, []);
 
   const loadSelectedShipment = useCallback(async (id: number) => {
     try {
@@ -500,128 +536,264 @@ export default function HomePage() {
     }
   }, [shipments, selectedShipmentId]);
 
+  useEffect(() => { liveTargetsRef.current = mapLive; }, [mapLive]);
+  useEffect(() => { shipmentsForAnimRef.current = shipments; }, [shipments]);
+
+  // Helper: compute visual position from a segment at a given time.
+  // No coast — lerp capped at t=1.0 with duration stretched to 130% of poll interval,
+  // so the plane is always slightly behind the real position and never overshoots.
+  function getSegVisualPos(seg: AnimSegment, now: number): { lon: number; lat: number } {
+    const t = Math.min(1.0, (now - seg.startTs) / seg.durationMs);
+    return {
+      lon: seg.fromLon + (seg.toLon - seg.fromLon) * t,
+      lat: seg.fromLat + (seg.toLat - seg.fromLat) * t,
+    };
+  }
+
+  // Update animation segments when new poll data arrives.
+  // Strategy: stretch lerp duration to 130% of measured poll interval so the plane
+  // never catches up to the real position. Always start from current visual position
+  // so movement is continuous forward — no snap-backs possible.
   useEffect(() => {
-    return () => {
-      if (animationFrameRef.current != null) {
-        cancelAnimationFrame(animationFrameRef.current);
+    const now = performance.now();
+    const POS_EPSILON = 0.0002;
+    const DURATION_STRETCH = 1.3;
+    for (const row of mapLive) {
+      const id = row.shipmentId;
+      const existing = segmentRef.current[id];
+      const prev = previousTargetsRef.current[id];
+
+      const wrapRef = existing ? existing.toLon : (prev?.longitude ?? row.originLongitude ?? row.currentLongitude);
+      const wrappedCurrent = nearestWrappedLongitude(row.currentLongitude, wrapRef);
+
+      if (existing) {
+        const posChanged =
+          Math.abs(wrappedCurrent - existing.toLon) > POS_EPSILON ||
+          Math.abs(row.currentLatitude - existing.toLat) > POS_EPSILON;
+
+        if (!posChanged) continue; // no tick yet, keep current segment running
+
+        const measuredMs = Math.max(400, now - existing.startTs);
+        const visualPos = getSegVisualPos(existing, now);
+
+        // Always start from visual position — never snap
+        segmentRef.current[id] = {
+          fromLon: visualPos.lon, fromLat: visualPos.lat,
+          toLon: wrappedCurrent, toLat: row.currentLatitude,
+          startTs: now, durationMs: measuredMs * DURATION_STRETCH,
+        };
+      } else {
+        const originLon = row.originLongitude ?? row.currentLongitude;
+        const originLat = row.originLatitude ?? row.currentLatitude;
+        segmentRef.current[id] = {
+          fromLon: nearestWrappedLongitude(originLon, wrappedCurrent),
+          fromLat: originLat,
+          toLon: wrappedCurrent, toLat: row.currentLatitude,
+          startTs: now, durationMs: FALLBACK_DURATION_MS,
+        };
       }
+    }
+  }, [mapLive]);
+
+  // Animation loop: pure linear interpolation per segment, no velocity prediction
+  useEffect(() => {
+    const FRAME_MIN_MS = 45;
+    let lastRenderTs = 0;
+
+    const animate = (now: number) => {
+      const liveData = liveTargetsRef.current;
+      const shipData = shipmentsForAnimRef.current;
+      const liveIndex = new globalThis.Map<number, MapLiveShipment>();
+      for (const row of liveData) liveIndex.set(row.shipmentId, row);
+
+      const next: Record<number, GeoPoint> = {};
+
+      for (const row of liveData) {
+        const seg = segmentRef.current[row.shipmentId];
+        if (!seg) {
+          next[row.shipmentId] = {
+            longitude: row.originLongitude ?? row.currentLongitude,
+            latitude: row.originLatitude ?? row.currentLatitude,
+          };
+          continue;
+        }
+
+        const pos = getSegVisualPos(seg, now);
+        next[row.shipmentId] = {
+          longitude: normalizeLongitude(pos.lon),
+          latitude: pos.lat,
+        };
+      }
+
+      for (const shipment of shipData) {
+        if (!liveIndex.has(shipment.id)) {
+          next[shipment.id] = previousTargetsRef.current[shipment.id] ?? {
+            longitude: shipment.currentLongitude,
+            latitude: shipment.currentLatitude,
+          };
+        }
+      }
+
+      previousTargetsRef.current = next;
+      if (now - lastRenderTs >= FRAME_MIN_MS) {
+        setSmoothedPositions(next);
+        lastRenderTs = now;
+      }
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+    return () => {
+      if (animationFrameRef.current != null) cancelAnimationFrame(animationFrameRef.current);
     };
   }, []);
 
   useEffect(() => {
-    const targets: Record<number, GeoPoint> = {};
-    const statusById: Record<number, ShipmentStatus> = {};
-    for (const shipment of shipments) {
-      targets[shipment.id] = {
-        longitude: shipment.currentLongitude,
-        latitude: shipment.currentLatitude,
-      };
-      statusById[shipment.id] = shipment.status;
-    }
-
-    const previous = previousTargetsRef.current;
-    const startPositions: Record<number, GeoPoint> = {};
-    for (const shipment of shipments) {
-      const prev = previous[shipment.id];
-      const target = targets[shipment.id];
-      if (!prev || shipment.status !== 'IN_ROUTE') {
-        startPositions[shipment.id] = { longitude: target.longitude, latitude: target.latitude };
-      } else {
-        const wrappedTargetLon = nearestWrappedLongitude(target.longitude, prev.longitude);
-        const lonJump = Math.abs(wrappedTargetLon - prev.longitude);
-        const latJump = Math.abs(target.latitude - prev.latitude);
-        const hasLargeJump = lonJump > 25 || latJump > 12 || approxDistanceKm(prev, target) > 900;
-        startPositions[shipment.id] = hasLargeJump
-          ? { longitude: target.longitude, latitude: target.latitude }
-          : { longitude: prev.longitude, latitude: prev.latitude };
+    const activeIds = new Set(shipments.map(s => s.id));
+    for (const key of Object.keys(lastBearingRef.current)) {
+      if (!activeIds.has(Number(key))) {
+        delete lastBearingRef.current[Number(key)];
       }
     }
-
-    previousTargetsRef.current = targets;
-    if (animationFrameRef.current != null) cancelAnimationFrame(animationFrameRef.current);
-
-    animationStartRef.current = performance.now();
-
-    const animate = (now: number) => {
-      const t = clamp01((now - animationStartRef.current) / ANIMATION_DURATION_MS);
-
-      const next: Record<number, GeoPoint> = {};
-      for (const shipment of shipments) {
-        const status = statusById[shipment.id];
-        const from = startPositions[shipment.id];
-        const to = targets[shipment.id];
-
-        if (status !== 'IN_ROUTE') {
-          next[shipment.id] = { longitude: to.longitude, latitude: to.latitude };
-          continue;
-        }
-
-        const wrappedToLon = nearestWrappedLongitude(to.longitude, from.longitude);
-        const interpolatedLon = normalizeLongitude(lerp(from.longitude, wrappedToLon, t));
-        next[shipment.id] = {
-          longitude: interpolatedLon,
-          latitude: lerp(from.latitude, to.latitude, t),
-        };
+    for (const key of Object.keys(previousTargetsRef.current)) {
+      if (!activeIds.has(Number(key))) {
+        delete previousTargetsRef.current[Number(key)];
       }
-
-      setSmoothedPositions(next);
-
-      if (t < 1) {
-        animationFrameRef.current = requestAnimationFrame(animate);
+    }
+    for (const key of Object.keys(segmentRef.current)) {
+      if (!activeIds.has(Number(key))) {
+        delete segmentRef.current[Number(key)];
       }
-    };
-
-    animationFrameRef.current = requestAnimationFrame(animate);
+    }
   }, [shipments]);
 
+  useEffect(() => {
+    if (sim?.simulatedNow) {
+      simTimeReceivedAtRef.current = Date.now();
+      simTimeBaseRef.current = sim.simulatedNow;
+      simSpeedRef.current = sim.speed ?? 1;
+    }
+  }, [sim?.simulatedNow, sim?.speed]);
+
+  const [displayedSimTime, setDisplayedSimTime] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sim?.running || sim?.paused) {
+      if (sim?.simulatedNow) {
+        const parsed = new Date(sim.simulatedNow);
+        setDisplayedSimTime(Number.isNaN(parsed.getTime()) ? sim.simulatedNow : parsed.toLocaleString());
+      } else {
+        setDisplayedSimTime(null);
+      }
+      return;
+    }
+    const tick = setInterval(() => {
+      if (!simTimeBaseRef.current) return;
+      const base = new Date(simTimeBaseRef.current).getTime();
+      if (Number.isNaN(base)) return;
+      const elapsed = Date.now() - simTimeReceivedAtRef.current;
+      const projected = new Date(base + elapsed * simSpeedRef.current);
+      setDisplayedSimTime(projected.toLocaleString());
+    }, 500);
+    return () => clearInterval(tick);
+  }, [sim?.running, sim?.paused, sim?.simulatedNow]);
+
   async function onStart(): Promise<void> {
+    setIsTransitioning(true);
     try {
-      await simulationApi.start();
-      await loadDashboard();
+      const res = await simulationApi.start();
+      setSim(res.state);
+      setShowShipmentFlights(true);
+      setShowNetworkLayer(true);
+      if (selectedShipmentId === null) {
+        const currentFiltered = filteredShipmentsRef.current;
+        const firstInRoute = currentFiltered.find((shipment) => shipment.status === 'IN_ROUTE');
+        const fallback = currentFiltered[0] ?? null;
+        const candidate = firstInRoute ?? fallback;
+        if (candidate) {
+          setSelectedShipmentId(candidate.id);
+        }
+      }
+      setError(null);
+      void Promise.all([loadCore(), loadShipments()]);
+      setTimeout(() => {
+        void loadShipments();
+      }, 1200);
     } catch {
       setError('No fue posible iniciar la simulacion.');
+    } finally {
+      setTimeout(() => setIsTransitioning(false), 500);
     }
   }
 
   async function onStop(): Promise<void> {
+    setIsTransitioning(true);
     try {
-      await simulationApi.stop();
-      await loadDashboard();
+      const res = await simulationApi.stop();
+      setSim(res.state);
+      setError(null);
+      void Promise.all([loadCore(), loadShipments()]);
     } catch {
       setError('No fue posible detener la simulacion.');
+    } finally {
+      setTimeout(() => setIsTransitioning(false), 500);
     }
   }
 
   async function onPause(): Promise<void> {
     try {
-      await simulationApi.pause();
-      await loadDashboard();
+      const res = await simulationApi.pause();
+      setSim(res.state);
+      setError(null);
+      void loadCore();
     } catch {
       setError('No fue posible pausar la simulacion.');
     }
   }
 
   async function onSetSpeed(speed: number): Promise<void> {
+    const prevSim = sim;
+    setSim((prev) => (prev ? { ...prev, speed } : prev));
     try {
-      await simulationApi.setSpeed(speed);
-      await loadDashboard();
+      const res = await simulationApi.setSpeed(speed);
+      setSim(res.state);
+      setError(null);
+      void loadCore();
     } catch {
+      setSim(prevSim);
       setError('No fue posible cambiar la velocidad de simulacion.');
     }
   }
 
+  useEffect(() => { simRunningRef.current = !!sim?.running; }, [sim?.running]);
+
   useEffect(() => {
     const initial = setTimeout(() => {
-      void loadDashboard();
+      void Promise.all([loadCore(), loadShipments(), loadStaticMap(), loadMapLive()]);
     }, 0);
-    const timer = setInterval(() => {
-      void loadDashboard();
+    const coreTimer = setInterval(() => {
+      void loadCore();
     }, POLL_INTERVAL_MS);
+    const staticTimer = setInterval(() => {
+      void loadStaticMap();
+    }, MAP_STATIC_REFRESH_MS);
+    const liveTimer = setInterval(() => {
+      void loadMapLive();
+    }, MAP_LIVE_REFRESH_MS);
     return () => {
       clearTimeout(initial);
-      clearInterval(timer);
+      clearInterval(coreTimer);
+      clearInterval(staticTimer);
+      clearInterval(liveTimer);
     };
-  }, [loadDashboard]);
+  }, [loadCore, loadStaticMap, loadMapLive]);
+
+  useEffect(() => {
+    const shipmentsTimer = setInterval(() => {
+      void loadShipments();
+    }, simRunningRef.current ? 2200 : SHIPMENTS_REFRESH_MS);
+    return () => clearInterval(shipmentsTimer);
+  }, [loadShipments]);
 
   useEffect(() => {
     if (!selectedShipmentId) return;
@@ -633,7 +805,7 @@ export default function HomePage() {
 
   const filteredShipments = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return shipments.filter((shipment) => {
+    const base = shipments.filter((shipment) => {
       if (showOnlyActive && shipment.status === 'DELIVERED') return false;
       if (statusFilter !== 'ALL' && shipment.status !== statusFilter) return false;
       if (!needle) return true;
@@ -644,57 +816,32 @@ export default function HomePage() {
         shipment.airlineName.toLowerCase().includes(needle)
       );
     });
+
+    if (statusFilter !== 'ALL') {
+      return base;
+    }
+
+    const priority = (s: ShipmentStatus): number => {
+      if (s === 'IN_ROUTE') return 0;
+      if (s === 'PENDING') return 1;
+      if (s === 'CRITICAL' || s === 'DELAYED') return 2;
+      return 3;
+    };
+    return [...base].sort((a, b) => {
+      const p = priority(a.status) - priority(b.status);
+      if (p !== 0) return p;
+      return b.id - a.id;
+    });
   }, [shipments, search, showOnlyActive, statusFilter]);
 
   const visibleShipments = useMemo(
-    () => filteredShipments.slice(0, 50),
+    () => filteredShipments.slice(0, MAX_MAP_SHIPMENTS),
     [filteredShipments]
   );
 
-  const activeShipmentIds = useMemo(() => {
-    const ids = filteredShipments
-      .filter((shipment) => shipment.status === 'IN_ROUTE')
-      .slice(0, 150)
-      .map((shipment) => shipment.id);
-    if (selectedShipmentId && !ids.includes(selectedShipmentId)) {
-      return [...ids, selectedShipmentId];
-    }
-    return ids;
-  }, [filteredShipments, selectedShipmentId]);
-
   useEffect(() => {
-    let cancelled = false;
-    if (activeShipmentIds.length === 0) {
-      setTimeout(() => {
-        if (!cancelled) {
-          setStopsByShipment({});
-        }
-      }, 0);
-      return;
-    }
-
-    void Promise.all(
-      activeShipmentIds.map(async (id) => {
-        try {
-          const detail = await shipmentsApi.getById(id);
-          return [id, detail.stops ?? []] as const;
-        } catch {
-          return [id, []] as const;
-        }
-      })
-    ).then((entries) => {
-      if (cancelled) return;
-      const next: Record<number, TravelStop[]> = {};
-      for (const [id, stops] of entries) {
-        next[id] = [...stops];
-      }
-      setStopsByShipment(next);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeShipmentIds]);
+    filteredShipmentsRef.current = filteredShipments;
+  }, [filteredShipments]);
 
   const markerGeoJson = useMemo(() => {
     return {
@@ -758,89 +905,88 @@ export default function HomePage() {
 
   const planeTrailGeoJson = useMemo(() => {
     if (!routeData || !planePosition) {
-      return {
-        type: 'FeatureCollection' as const,
-        features: [],
-      };
+      return { type: 'FeatureCollection' as const, features: [] };
     }
-
+    const planePoint: [number, number] = [planePosition.longitude, planePosition.latitude];
+    const nodes = routeData.routeNodes;
+    let bestSeg = 0;
+    let bestDist = Number.POSITIVE_INFINITY;
+    for (let i = 1; i < nodes.length; i++) {
+      const from = { longitude: nodes[i - 1][0], latitude: nodes[i - 1][1] };
+      const to = { longitude: nodes[i][0], latitude: nodes[i][1] };
+      const proj = projectPointToSegment({ longitude: planePoint[0], latitude: planePoint[1] }, from, to);
+      const d = distanceSq({ longitude: planePoint[0], latitude: planePoint[1] }, proj);
+      if (d < bestDist) { bestDist = d; bestSeg = i; }
+    }
+    const trailCoords: Array<[number, number]> = [];
+    for (let i = 0; i <= bestSeg - 1; i++) trailCoords.push(nodes[i]);
+    trailCoords.push(planePoint);
+    if (trailCoords.length < 2) return { type: 'FeatureCollection' as const, features: [] };
     return {
       type: 'FeatureCollection' as const,
-      features: [lineFeature([
-        routeData.routeNodes[0],
-        [planePosition.longitude, planePosition.latitude],
-      ], { state: 'trail' })],
+      features: [lineFeature(trailCoords, { state: 'trail' })],
     };
   }, [routeData, planePosition]);
 
-  const routeDataByShipment = useMemo(() => {
-    const index: Record<number, RouteData> = {};
-    for (const shipment of filteredShipments) {
-      if (shipment.status === 'PENDING') continue;
-      const data = routeLayers(stopsByShipment[shipment.id] ?? []);
-      if (data) {
-        index[shipment.id] = data;
-      }
-    }
-    return index;
-  }, [filteredShipments, stopsByShipment]);
-
   const flightsLive = useMemo<FlightLive[]>(() => {
-    return filteredShipments
-      .filter((shipment) => shipment.status === 'IN_ROUTE')
-      .map((shipment) => {
-        const smooth = smoothedPositions[shipment.id];
-        const current = {
-          longitude: smooth ? smooth.longitude : shipment.currentLongitude,
-          latitude: smooth ? smooth.latitude : shipment.currentLatitude,
+    const shipmentsIndex = new globalThis.Map<number, ShipmentSummary>();
+    for (const shipment of shipments) {
+      shipmentsIndex.set(shipment.id, shipment);
+    }
+
+    return mapLive
+      .slice(0, MAX_FLIGHT_ANIMATION)
+      .map((liveRow) => {
+        const shipment: ShipmentSummary = shipmentsIndex.get(liveRow.shipmentId) ?? {
+          id: liveRow.shipmentId,
+          shipmentCode: liveRow.shipmentCode,
+          status: 'IN_ROUTE' as ShipmentStatus,
+          originIcao: liveRow.originIcao,
+          destinationIcao: liveRow.destinationIcao,
+          airlineName: '',
+          originLatitude: liveRow.originLatitude,
+          originLongitude: liveRow.originLongitude,
+          destinationLatitude: liveRow.nextLatitude,
+          destinationLongitude: liveRow.nextLongitude,
+          currentLatitude: liveRow.currentLatitude,
+          currentLongitude: liveRow.currentLongitude,
+          progressPct: liveRow.progressPct,
+          overdue: false,
+          atRisk: false,
+          criticalReason: null,
+          lastVisitedNode: liveRow.originIcao,
+          remainingTime: '',
         };
-        const stops = stopsByShipment[shipment.id] ?? [];
-        const ordered = [...stops].sort((a, b) => a.stopOrder - b.stopOrder);
-
-        const legIndex = ordered.findIndex(
-          (stop) => stop.stopStatus === 'IN_TRANSIT' || stop.stopStatus === 'PENDING'
-        );
-
-        const legDestinationStop =
-          legIndex >= 0 ? ordered[legIndex] : ordered.length > 0 ? ordered[ordered.length - 1] : null;
-        const destinationPoint: GeoPoint = legDestinationStop
-          ? { longitude: legDestinationStop.airportLongitude, latitude: legDestinationStop.airportLatitude }
-          : { longitude: shipment.destinationLongitude, latitude: shipment.destinationLatitude };
-
-        const route = routeDataByShipment[shipment.id];
-        const currentWrapped = route
-          ? {
-            longitude: nearestWrappedLongitude(current.longitude, route.referenceLongitude),
-            latitude: current.latitude,
-          }
-          : current;
-        const snappedWithSegment = route
-          ? snapPointToSegmentRange(
-            currentWrapped,
-            route.routeNodes,
-            route.activeFromIdx,
-            route.activeToIdx
-          )
-          : null;
-        const snappedCurrent = snappedWithSegment ? snappedWithSegment.point : currentWrapped;
-
-        const destinationWrapped = {
-          longitude: nearestWrappedLongitude(destinationPoint.longitude, snappedCurrent.longitude),
-          latitude: destinationPoint.latitude,
+        const current: GeoPoint = {
+          longitude: liveRow.currentLongitude ?? shipment.currentLongitude,
+          latitude: liveRow.currentLatitude ?? shipment.currentLatitude,
+        };
+        const destinationWrapped: GeoPoint = {
+          longitude: nearestWrappedLongitude(liveRow.nextLongitude, current.longitude),
+          latitude: liveRow.nextLatitude,
         };
 
-        const bearing = bearingToDestination(snappedCurrent, destinationWrapped);
+        const fallbackBearing = lastBearingRef.current[shipment.id] ?? bearingToDestination(current, destinationWrapped);
+        const rawBearing = bearingToDestination(current, destinationWrapped);
+        const delta = ((((rawBearing - fallbackBearing) % 360) + 540) % 360) - 180;
+        const bearing = ((fallbackBearing + Math.max(-60, Math.min(60, delta))) + 360) % 360;
+        lastBearingRef.current[shipment.id] = bearing;
 
         return {
           shipment,
           current: {
-            longitude: normalizeLongitude(snappedCurrent.longitude),
-            latitude: snappedCurrent.latitude,
+            longitude: normalizeLongitude(current.longitude),
+            latitude: current.latitude,
+          },
+          next: {
+            longitude: normalizeLongitude(destinationWrapped.longitude),
+            latitude: destinationWrapped.latitude,
           },
           bearing,
         };
-      });
-  }, [filteredShipments, routeDataByShipment, smoothedPositions, stopsByShipment]);
+      })
+      .filter((entry): entry is FlightLive => entry !== null);
+  }, [mapLive, shipments]);
 
   const networkRouteFeatures = useMemo(() => {
     const features = networkEdges
@@ -905,14 +1051,23 @@ export default function HomePage() {
     }
   }
 
-  const allRoutes = useMemo(() => {
-    return flightsLive
-      .map(({ shipment }) => {
-        const data = routeDataByShipment[shipment.id];
-        return data ? { shipmentId: shipment.id, data } : null;
+  const flightsRouteGeoJson = useMemo(() => {
+    const features = mapLive
+      .map((row) => {
+        const coords: Array<[number, number]> = [];
+        if (row.originLongitude != null && row.originLatitude != null) {
+          coords.push([row.originLongitude, row.originLatitude]);
+        }
+        coords.push([row.currentLongitude, row.currentLatitude]);
+        coords.push([row.nextLongitude, row.nextLatitude]);
+        return lineFeature(coords, { id: row.shipmentId });
       })
-      .filter((entry): entry is { shipmentId: number; data: RouteData } => entry !== null);
-  }, [flightsLive, routeDataByShipment]);
+      .filter((feature) => feature.geometry.coordinates.length >= 2);
+    return {
+      type: 'FeatureCollection' as const,
+      features,
+    };
+  }, [mapLive]);
 
   const selectedFlightLive = useMemo(
     () => (showShipmentFlights
@@ -926,12 +1081,13 @@ export default function HomePage() {
   const normalCount = systemStatus?.normalAirports ?? 0;
   const nodesAvailability = overview?.availableNodesPct ?? 0;
   const unresolvedAlerts = overview?.unresolvedAlerts ?? 0;
-  const simNowText = (() => {
-    if (!sim?.simulatedNow) return null;
-    const parsed = new Date(sim.simulatedNow);
-    return Number.isNaN(parsed.getTime()) ? sim.simulatedNow : parsed.toLocaleString();
+  const simNowText = displayedSimTime;
+  const scenarioLabel = (() => {
+    if (!sim?.scenario) return 'Sin escenario';
+    if (sim.scenario === 'PERIOD_SIMULATION') return 'Por periodo';
+    if (sim.scenario === 'COLLAPSE_TEST') return 'Prueba de colapso';
+    return 'Dia a dia';
   })();
-
   return (
     <div className="app-page">
       <header className="page-head dashboard-head">
@@ -941,11 +1097,11 @@ export default function HomePage() {
         </div>
 
         <div className="dashboard-head-controls">
-          <button className="btn btn-primary" onClick={onStart} disabled={Boolean(sim?.running && !sim?.paused)}>
-            {sim?.running && !sim?.paused ? 'En ejecucion' : 'Iniciar'}
+          <button className="btn btn-primary" onClick={onStart} disabled={isTransitioning || Boolean(sim?.running && !sim?.paused)}>
+            {isTransitioning ? 'Procesando...' : sim?.running && !sim?.paused ? 'En ejecucion' : 'Iniciar'}
           </button>
-          <button className="btn btn-danger" onClick={onStop} disabled={!sim?.running && !sim?.paused}>Detener</button>
-          <button className="btn btn-neutral" onClick={onPause} disabled={!sim?.running}>Pausar</button>
+          <button className="btn btn-danger" onClick={onStop} disabled={isTransitioning || (!sim?.running && !sim?.paused)}>Detener</button>
+          <button className="btn btn-neutral" onClick={onPause} disabled={isTransitioning || !sim?.running}>Pausar</button>
           {[1, 5, 10, 20].map((speed) => (
             <button
               key={speed}
@@ -955,10 +1111,8 @@ export default function HomePage() {
               {speed}x
             </button>
           ))}
-          <span className="chip is-active" title="Algoritmo operativo por defecto y parametros ganadores">
-            ACO-P1 activo
-          </span>
           {simNowText ? <span className="chip">SimTime {simNowText}</span> : null}
+          <span className="chip is-active">Escenario {scenarioLabel}</span>
         </div>
       </header>
 
@@ -1046,7 +1200,7 @@ export default function HomePage() {
 
             {!loading && filteredShipments.length > visibleShipments.length ? (
               <div style={{ padding: 12 }}>
-                <p className="state-panel-copy">Mostrando 50 de {filteredShipments.length}. Usa filtros para acotar.</p>
+                <p className="state-panel-copy">Mostrando {MAX_MAP_SHIPMENTS} de {filteredShipments.length}. Usa filtros para acotar.</p>
               </div>
             ) : null}
           </div>
@@ -1075,6 +1229,12 @@ export default function HomePage() {
             <button className={`chip${showOnlyActive ? ' is-active' : ''}`} onClick={() => setShowOnlyActive((value) => !value)}>
               Entregados {showOnlyActive ? 'OFF' : 'ON'}
             </button>
+            <span className="chip dashboard-live-pill" title="Vuelos en ruta actualmente visibles en el mapa">
+              Vuelos live {mapLive.length}
+            </span>
+            <span className="chip" title="Hora local de la ultima actualizacion del feed live">
+              Actualizado {lastLiveRefresh}
+            </span>
           </div>
 
           <div className="surface-panel dashboard-map-wrap">
@@ -1150,47 +1310,35 @@ export default function HomePage() {
                 </Marker>
               ))}
 
-              {allRoutes.flatMap(({ shipmentId, data }): ReactElement[] => {
-                const selected = shipmentId === selectedShipmentId;
-                const elements: ReactElement[] = [
-                  <Source key={`done-source-${shipmentId}`} id={`route-done-${shipmentId}`} type="geojson" data={data.doneGeoJson}>
-                    <Layer
-                      id={`route-done-line-${shipmentId}`}
-                      type="line"
-                      paint={{
-                        'line-color': selected ? '#62f0b7' : '#43d29d',
-                        'line-width': selected ? 3.5 : 2.4,
-                        'line-opacity': selected ? 0.95 : 0.55,
-                      }}
-                    />
-                  </Source>,
-                  <Source key={`pending-source-${shipmentId}`} id={`route-pending-${shipmentId}`} type="geojson" data={data.pendingGeoJson}>
-                    <Layer
-                      id={`route-pending-line-${shipmentId}`}
-                      type="line"
-                      paint={{
-                        'line-color': selected ? '#8ea7ff' : '#5f82ff',
-                        'line-width': selected ? 2.6 : 1.8,
-                        'line-dasharray': [2, 2],
-                        'line-opacity': selected ? 0.95 : 0.5,
-                      }}
-                    />
-                  </Source>,
-                ];
+              {showShipmentFlights && flightsRouteGeoJson.features.length > 0 ? (
+                <Source id="flights-live-routes" type="geojson" data={flightsRouteGeoJson}>
+                  <Layer
+                    id="flights-live-routes-line"
+                    type="line"
+                    paint={{
+                      'line-color': '#8eaaff',
+                      'line-width': 1.4,
+                      'line-opacity': 0.5,
+                      'line-dasharray': [3, 2],
+                    }}
+                  />
+                </Source>
+              ) : null}
 
-                if (selected) {
-                  for (let index = 0; index < data.routeNodes.length; index++) {
-                    const point = data.routeNodes[index];
-                    elements.push(
-                      <Marker key={`route-node-${shipmentId}-${index}`} longitude={point[0]} latitude={point[1]} anchor="center">
-                        <span className={`route-node-marker${index === 0 ? ' is-origin' : index === data.routeNodes.length - 1 ? ' is-destination' : ''}`} />
-                      </Marker>
-                    );
-                  }
-                }
-
-                return elements;
-              })}
+              {routeData && routeData.pendingGeoJson.features.length > 0 ? (
+                <Source id="pending-route" type="geojson" data={routeData.pendingGeoJson}>
+                  <Layer
+                    id="pending-route-line"
+                    type="line"
+                    paint={{
+                      'line-color': '#8899bb',
+                      'line-width': 1.8,
+                      'line-opacity': 0.45,
+                      'line-dasharray': [4, 3],
+                    }}
+                  />
+                </Source>
+              ) : null}
 
               {planeTrailGeoJson.features.length > 0 ? (
                 <Source id="plane-trail" type="geojson" data={planeTrailGeoJson}>
@@ -1198,35 +1346,53 @@ export default function HomePage() {
                     id="plane-trail-line"
                     type="line"
                     paint={{
-                      'line-color': '#9ab3ff',
-                      'line-width': 2,
-                      'line-opacity': 0.6,
+                      'line-color': '#4a9eff',
+                      'line-width': 2.5,
+                      'line-opacity': 0.75,
                     }}
                   />
                 </Source>
               ) : null}
 
-              {showShipmentFlights ? flightsLive.map(({ shipment, current, bearing }): ReactElement => (
-                <Marker
-                  key={`flight-${shipment.id}`}
-                  longitude={current.longitude}
-                  latitude={current.latitude}
-                  anchor="center"
-                  style={{ zIndex: selectedShipmentId === shipment.id ? 8 : 6 }}
-                  onClick={(event) => {
-                    event.originalEvent.stopPropagation();
-                    focusShipment(shipment.id);
-                  }}
-                >
-                  <button
-                    className={`flight-radar-marker${selectedShipmentId === shipment.id ? ' is-selected' : ''}`}
-                    style={{ borderColor: markerColor(shipment) }}
-                    title={`${shipment.shipmentCode} · ${statusLabel(shipment.status)}`}
+              {routeData && routeData.doneGeoJson.features.length > 0 ? (
+                <Source id="done-route" type="geojson" data={routeData.doneGeoJson}>
+                  <Layer
+                    id="done-route-line"
+                    type="line"
+                    paint={{
+                      'line-color': '#36d399',
+                      'line-width': 2.5,
+                      'line-opacity': 0.7,
+                    }}
+                  />
+                </Source>
+              ) : null}
+
+              {showShipmentFlights ? flightsLive.map(({ shipment, current, bearing }): ReactElement => {
+                const smooth = smoothedPositions[shipment.id];
+                const pos = smooth ?? current;
+                return (
+                  <Marker
+                    key={`flight-${shipment.id}`}
+                    longitude={pos.longitude}
+                    latitude={pos.latitude}
+                    anchor="center"
+                    style={{ zIndex: selectedShipmentId === shipment.id ? 8 : 6 }}
+                    onClick={(event) => {
+                      event.originalEvent.stopPropagation();
+                      focusShipment(shipment.id);
+                    }}
                   >
-                    <span style={{ transform: `rotate(${bearing}deg)` }}>✈</span>
-                  </button>
-                </Marker>
-              )) : null}
+                    <button
+                      className={`flight-radar-marker${selectedShipmentId === shipment.id ? ' is-selected' : ''}`}
+                      style={{ borderColor: markerColor(shipment) }}
+                      title={`${shipment.shipmentCode} · ${statusLabel(shipment.status)}`}
+                    >
+                      <span style={{ transform: `rotate(${bearing + PLANE_ICON_ROTATION_OFFSET_DEG}deg)` }}>✈</span>
+                    </button>
+                  </Marker>
+                );
+              }) : null}
 
               <Source id="shipment-points" type="geojson" data={markerGeoJson}>
                 <Layer
@@ -1240,6 +1406,7 @@ export default function HomePage() {
                   }}
                 />
               </Source>
+
 
               {selectedNodePopup ? (
                 <Popup

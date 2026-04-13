@@ -7,9 +7,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -124,4 +126,13 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
             """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     List<Flight> findByAirport(@Param("airport") Airport airport);
+
+    /** Earliest scheduled departure of a loaded flight. */
+    @Query("SELECT MIN(f.scheduledDeparture) FROM Flight f WHERE f.status = 'SCHEDULED' AND f.currentLoad > 0")
+    LocalDateTime findMinScheduledDeparture();
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = "UPDATE flight SET status = 'SCHEDULED', current_load = 0 WHERE status <> 'SCHEDULED' OR current_load <> 0", nativeQuery = true)
+    int resetOperationalStateFast();
 }

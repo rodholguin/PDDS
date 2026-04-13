@@ -18,7 +18,6 @@ import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
 import com.tasfb2b.service.AlgorithmProfileService;
-import com.tasfb2b.service.algorithm.OptimizationResult;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -26,6 +25,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -109,6 +110,7 @@ public class SimulationController {
         }
         configRepository.save(config);
         runtimeService.markStarted();
+        simulationEngineService.warmStartTick();
 
         return ResponseEntity.ok(Map.of(
                 "message", "Simulacion iniciada",
@@ -118,11 +120,23 @@ public class SimulationController {
 
     @PostMapping("/stop")
     @Operation(summary = "Detener simulación y reiniciar estado operativo")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> stop() {
-        runtimeService.resetSimulation();
+        runtimeService.resetToInitialStateKeepingDemand();
 
         return ResponseEntity.ok(Map.of(
-                "message", "Simulacion detenida y reiniciada",
+                "message", "Simulacion detenida y estado reiniciado",
+                "state", runtimeService.getState()
+        ));
+    }
+
+    @PostMapping("/reset-to-initial")
+    @Operation(summary = "Reiniciar simulacion a estado inicial manteniendo pedidos")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public ResponseEntity<?> resetToInitial() {
+        runtimeService.resetToInitialStateKeepingDemand();
+        return ResponseEntity.ok(Map.of(
+                "message", "Estado inicial restaurado",
                 "state", runtimeService.getState()
         ));
     }
@@ -202,19 +216,13 @@ public class SimulationController {
     @GetMapping("/results")
     @Operation(summary = "Resultados comparativos de algoritmos + KPIs simulación")
     public ResponseEntity<SimulationResultsDto> getResults() {
-        var active = shipmentRepository.findActiveShipments();
-        Map<String, OptimizationResult> algorithms = routePlannerService.runBothAlgorithms(active);
-        String winner = routePlannerService.benchmarkWinner(active);
-        return ResponseEntity.ok(new SimulationResultsDto(algorithms, runtimeService.computeKpis(), winner));
+        return ResponseEntity.ok(new SimulationResultsDto(Map.of(), runtimeService.computeKpis(), "INTERNAL_GA"));
     }
 
     @GetMapping("/results/export")
     @Operation(summary = "Exportar resultados de simulación en CSV o PDF")
     public ResponseEntity<byte[]> exportResults(@RequestParam(defaultValue = "csv") String format) {
-        var active = shipmentRepository.findActiveShipments();
-        Map<String, OptimizationResult> algorithms = routePlannerService.runBothAlgorithms(active);
-        String winner = routePlannerService.benchmarkWinner(active);
-        SimulationResultsDto results = new SimulationResultsDto(algorithms, runtimeService.computeKpis(), winner);
+        SimulationResultsDto results = new SimulationResultsDto(Map.of(), runtimeService.computeKpis(), "INTERNAL_GA");
 
         String normalized = format == null ? "csv" : format.trim().toLowerCase();
         byte[] content;

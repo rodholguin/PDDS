@@ -123,10 +123,13 @@ public class ShipmentOrchestratorService {
     private String activeAlgorithmName() {
         return simulationConfigRepository.findAll().stream()
                 .findFirst()
-                .map(config -> config.getPrimaryAlgorithm().name().equals("ANT_COLONY")
-                        ? "Ant Colony Optimization"
-                        : "Genetic Algorithm")
-                .orElse("Ant Colony Optimization");
+                .map(config -> {
+                    String primary = config.getPrimaryAlgorithm().name();
+                    if ("ANT_COLONY".equals(primary)) return "Ant Colony Optimization";
+                    if ("SIMULATED_ANNEALING".equals(primary)) return "Simulated Annealing";
+                    return "Genetic Algorithm";
+                })
+                .orElse("Genetic Algorithm");
     }
 
 }

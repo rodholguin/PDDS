@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -36,7 +35,7 @@ public class AlgorithmRaceService {
 
         List<String> notes = new ArrayList<>();
         notes.add("Score primario: completedPct, desempate por avgTransitHours y flightUtilizationPct.");
-        notes.add("Muestra tomada de envios persistidos en base para la ventana indicada.");
+        notes.add("Comparativa activa entre GA, ACO y SA sobre envios persistidos en base.");
         notes.add("Para benchmark reproducible se recomienda generar lote synthetic con semilla fija.");
 
         return new AlgorithmRaceReportDto(

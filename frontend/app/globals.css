@@ -427,6 +427,26 @@ a {
 .dashboard-map-toolbar {
   display: flex;
   gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dashboard-live-pill {
+  border-color: rgba(67, 210, 157, 0.55);
+  background: linear-gradient(180deg, rgba(46, 117, 88, 0.5) 0%, rgba(34, 89, 67, 0.42) 100%);
+  color: #d9ffe8;
+}
+
+.flight-radar-marker {
+  will-change: transform;
+}
+
+.dashboard-shipment-item:focus-visible,
+.chip:focus-visible,
+.btn:focus-visible,
+.flight-radar-marker:focus-visible {
+  outline: 2px solid rgba(122, 153, 255, 0.85);
+  outline-offset: 2px;
 }
 
 .dashboard-map-wrap {
@@ -957,6 +977,13 @@ a {
   background: #24283b;
   color: var(--color-dim);
   font-size: var(--text-sm);
+  cursor: pointer;
+  transition: 140ms ease;
+}
+
+.chip:hover {
+  filter: brightness(1.07);
+  border-color: rgba(122, 153, 255, 0.5);
 }
 
 .chip.is-active {

@@ -10,11 +10,16 @@ import com.tasfb2b.model.FlightStatus;
 import com.tasfb2b.model.ImportStatus;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentStatus;
+import com.tasfb2b.model.TravelStop;
+import com.tasfb2b.dto.EnviosDatasetImportRequestDto;
+import com.tasfb2b.dto.EnviosDatasetImportResultDto;
 import com.tasfb2b.repository.AirportRepository;
 import com.tasfb2b.repository.DataImportLogRepository;
 import com.tasfb2b.repository.FlightRepository;
+import com.tasfb2b.repository.GlobalSequenceRepository;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
+import com.tasfb2b.repository.TravelStopRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.Cell;
@@ -30,6 +35,7 @@ import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -47,16 +53,23 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.TreeMap;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
 @Transactional
 public class DataImportService {
+
+    private static final int FULL_DATASET_ROUTE_PREPLAN_LIMIT = 0;
+    private static final int FULL_DATASET_BATCH_SIZE = 1000;
+    private static final long FULL_DATASET_SEQUENCE_BLOCK_SIZE = 5000L;
+    private static final DateTimeFormatter CODE_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Pattern AIRPORT_LINE_PATTERN = Pattern.compile(
@@ -73,14 +86,20 @@ public class DataImportService {
     private static final Pattern FLIGHT_LINE_PATTERN = Pattern.compile(
             "^\\s*([A-Z]{4})-([A-Z]{4})-([0-9]{1,2}:[0-9]{2})-([0-9]{1,2}:[0-9]{2})-(\\d{4})\\s*$"
     );
+    private static final Pattern ENVIOS_FILE_PATTERN = Pattern.compile("^_envios_([A-Z]{4})_\\.txt$");
+    private static final Pattern ENVIOS_LINE_PATTERN = Pattern.compile(
+            "^(\\d+)-(\\d{8})-(\\d{2})-(\\d{2})-([A-Z]{4})-(\\d{3})-(\\d{7})$"
+    );
 
     private final ShipmentRepository shipmentRepository;
     private final AirportRepository airportRepository;
     private final FlightRepository flightRepository;
+    private final TravelStopRepository travelStopRepository;
     private final DataImportLogRepository importLogRepository;
     private final RoutePlannerService routePlannerService;
     private final SimulationConfigRepository simulationConfigRepository;
     private final ShipmentCodeService shipmentCodeService;
+    private final ShipmentCodeRangeService shipmentCodeRangeService;
 
     public record DatasetImportSummary(DataImportLog airports, DataImportLog flights) {}
 
@@ -123,6 +142,11 @@ public class DataImportService {
         // Snapshot reusable network for this batch to avoid repeated heavy queries per row.
         List<Airport> airportsSnapshot = airportRepository.findAll();
         List<Flight> flightsSnapshot = flightRepository.findFlightsWithAvailableCapacity();
+        LocalDateTime flightWindowBase = flightsSnapshot.stream()
+                .map(flight -> flight.getScheduledDeparture())
+                .filter(java.util.Objects::nonNull)
+                .min(LocalDateTime::compareTo)
+                .orElse(null);
         HashMap<String, Airport> airportByIcao = new HashMap<>();
         for (Airport airport : airportsSnapshot) {
             airportByIcao.put(airport.getIcaoCode().toUpperCase(Locale.ROOT), airport);
@@ -199,6 +223,229 @@ public class DataImportService {
         }
 
         return saveLog(file.getOriginalFilename(), rows.size(), success, errors, errDetail);
+    }
+
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public EnviosDatasetImportResultDto importShipmentsFromEnviosDataset(EnviosDatasetImportRequestDto request) {
+        int seed = request == null || request.seed() == null ? 7 : request.seed();
+        boolean fullDataset = request != null && Boolean.TRUE.equals(request.fullDataset());
+        int maxAirports = request == null || request.maxAirports() == null ? (fullDataset ? 60 : 12) : request.maxAirports();
+        int maxPerAirport = request == null || request.maxPerAirport() == null ? (fullDataset ? 50000 : 400) : request.maxPerAirport();
+        String algorithm = (request == null || request.algorithmName() == null || request.algorithmName().isBlank())
+                ? activeAlgorithmName()
+                : request.algorithmName().trim();
+
+        Path enviosDir = resolveDefaultPath("datos/envios", "../datos/envios", "/app/datos/envios");
+        if (!Files.isDirectory(enviosDir)) {
+            throw new IllegalStateException("No se encontro directorio de envios: " + enviosDir);
+        }
+
+        List<Path> files;
+        try {
+            files = Files.list(enviosDir)
+                    .filter(Files::isRegularFile)
+                    .filter(path -> ENVIOS_FILE_PATTERN.matcher(path.getFileName().toString()).matches())
+                    .sorted()
+                    .toList();
+        } catch (IOException e) {
+            throw new IllegalStateException("No se pudieron listar archivos de envios", e);
+        }
+
+        List<Path> selectedFiles = fullDataset
+                ? files
+                : selectEnviosFiles(files, request == null ? null : request.includeOrigins(), seed, maxAirports);
+
+        List<Airport> airportsSnapshot = airportRepository.findAll();
+        List<Flight> flightsSnapshot = flightRepository.findFlightsWithAvailableCapacity();
+        LocalDateTime flightWindowBase = flightsSnapshot.stream()
+                .map(flight -> flight.getScheduledDeparture())
+                .filter(java.util.Objects::nonNull)
+                .min(LocalDateTime::compareTo)
+                .orElse(null);
+        HashMap<String, Airport> airportByIcao = new HashMap<>();
+        for (Airport airport : airportsSnapshot) {
+            airportByIcao.put(airport.getIcaoCode().toUpperCase(Locale.ROOT), airport);
+        }
+
+        Set<Flight> touchedFlights = new HashSet<>();
+        List<Shipment> fullDatasetBuffer = new ArrayList<>();
+        long fullDatasetNextSequence = 0L;
+        long fullDatasetSequenceEnd = -1L;
+        int requestedRows = 0;
+        int importedRows = 0;
+        int failedRows = 0;
+        int processedFiles = 0;
+        Map<String, Integer> failureByCause = new TreeMap<>();
+
+        java.util.function.Consumer<String> failureCounter = cause ->
+                failureByCause.merge(cause, 1, Integer::sum);
+
+        for (Path file : selectedFiles) {
+            Matcher nameMatcher = ENVIOS_FILE_PATTERN.matcher(file.getFileName().toString());
+            if (!nameMatcher.matches()) continue;
+            processedFiles++;
+            String originIcao = nameMatcher.group(1).toUpperCase(Locale.ROOT);
+            Airport origin = airportByIcao.get(originIcao);
+            if (origin == null) {
+                failureCounter.accept("ORIGIN_NOT_FOUND");
+                continue;
+            }
+
+            List<String> lines;
+            try {
+                lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+            } catch (IOException ex) {
+                failedRows += maxPerAirport;
+                failureCounter.accept("FILE_READ_ERROR");
+                continue;
+            }
+
+            int processedInFile = 0;
+            for (String raw : lines) {
+                if (processedInFile >= maxPerAirport) break;
+                String line = sanitizeLine(raw);
+                if (line.isBlank()) continue;
+
+                requestedRows++;
+                Matcher lineMatcher = ENVIOS_LINE_PATTERN.matcher(line);
+                if (!lineMatcher.matches()) {
+                    failedRows++;
+                    failureCounter.accept("PARSE_INVALID_FORMAT");
+                    processedInFile++;
+                    continue;
+                }
+
+                try {
+                    String yyyymmdd = lineMatcher.group(2);
+                    String hh = lineMatcher.group(3);
+                    String mm = lineMatcher.group(4);
+                    String destIcao = lineMatcher.group(5).toUpperCase(Locale.ROOT);
+                    int luggageCount = Integer.parseInt(lineMatcher.group(6));
+                    String clientId = lineMatcher.group(7);
+
+                    Airport destination = airportByIcao.get(destIcao);
+                    if (destination == null || destination.getId().equals(origin.getId())) {
+                        failedRows++;
+                        failureCounter.accept("DESTINATION_INVALID");
+                        processedInFile++;
+                        continue;
+                    }
+
+                    LocalDateTime registrationDate = LocalDateTime.parse(
+                            yyyymmdd + hh + mm,
+                            DateTimeFormatter.ofPattern("yyyyMMddHHmm")
+                    );
+
+                    if (flightWindowBase != null) {
+                        registrationDate = registrationDate
+                                .withYear(flightWindowBase.getYear())
+                                .withMonth(flightWindowBase.getMonthValue())
+                                .withDayOfMonth(flightWindowBase.getDayOfMonth());
+                    }
+
+                    Shipment shipment = Shipment.builder()
+                            .shipmentCode(fullDataset
+                                    ? null
+                                    : shipmentCodeService.nextCode(registrationDate))
+                            .airlineName("DATASET-" + clientId)
+                            .originAirport(origin)
+                            .destinationAirport(destination)
+                            .luggageCount(luggageCount)
+                            .registrationDate(registrationDate)
+                            .status(ShipmentStatus.PENDING)
+                            .progressPercentage(0.0)
+                            .build();
+
+                    if (!fullDataset || importedRows < FULL_DATASET_ROUTE_PREPLAN_LIMIT) {
+                        shipmentRepository.save(shipment);
+                        List<TravelStop> plannedStops = routePlannerService.planShipment(
+                                shipment,
+                                algorithm,
+                                flightsSnapshot,
+                                airportsSnapshot,
+                                false
+                        );
+
+                        if (plannedStops.isEmpty() || shipment.getStatus() == ShipmentStatus.CRITICAL) {
+                            failedRows++;
+                            failureCounter.accept("NO_FEASIBLE_ROUTE");
+                            processedInFile++;
+                            continue;
+                        }
+
+                        for (TravelStop stop : plannedStops) {
+                            if (stop.getFlight() != null) {
+                                touchedFlights.add(stop.getFlight());
+                            }
+                        }
+                    } else {
+                        if (fullDatasetNextSequence > fullDatasetSequenceEnd) {
+                            ShipmentCodeRangeService.SequenceRange range = shipmentCodeRangeService.allocateRange(FULL_DATASET_SEQUENCE_BLOCK_SIZE);
+                            fullDatasetNextSequence = range.startInclusive();
+                            fullDatasetSequenceEnd = range.endInclusive();
+                        }
+                        shipment.setShipmentCode(generateBufferedCode(fullDatasetNextSequence, registrationDate));
+                        fullDatasetNextSequence++;
+                        fullDatasetBuffer.add(shipment);
+                        if (fullDatasetBuffer.size() >= FULL_DATASET_BATCH_SIZE) {
+                            shipmentRepository.saveAll(fullDatasetBuffer);
+                            shipmentRepository.flush();
+                            fullDatasetBuffer.clear();
+                        }
+                    }
+
+                    importedRows++;
+                    processedInFile++;
+                } catch (Exception ex) {
+                    failedRows++;
+                    failureCounter.accept("PROCESSING_EXCEPTION");
+                    processedInFile++;
+                }
+            }
+        }
+
+        if (!fullDatasetBuffer.isEmpty()) {
+            shipmentRepository.saveAll(fullDatasetBuffer);
+            shipmentRepository.flush();
+            fullDatasetBuffer.clear();
+        }
+
+        if (requestedRows != importedRows + failedRows) {
+            failureByCause.merge("ACCOUNTING_MISMATCH", Math.max(0, requestedRows - (importedRows + failedRows)), Integer::sum);
+        }
+
+        if (!touchedFlights.isEmpty()) {
+            flightRepository.saveAll(touchedFlights);
+        }
+        travelStopRepository.flush();
+
+        StringBuilder details = new StringBuilder();
+        details.append("processedFiles=").append(processedFiles)
+                .append("/").append(selectedFiles.size())
+                .append(", requestedRows=").append(requestedRows)
+                .append(", importedRows=").append(importedRows)
+                .append(", failedRows=").append(failedRows)
+                .append("\n");
+        failureByCause.forEach((key, value) -> details.append(key).append('=').append(value).append('\n'));
+        saveLog("envios-dataset" + (fullDataset ? "-full" : "-sample"), requestedRows, importedRows, failedRows, details);
+
+        return new EnviosDatasetImportResultDto(
+                files.size(),
+                selectedFiles.size(),
+                processedFiles,
+                files.size(),
+                requestedRows,
+                importedRows,
+                failedRows,
+                failureByCause,
+                selectedFiles.stream()
+                        .map(path -> {
+                            Matcher matcher = ENVIOS_FILE_PATTERN.matcher(path.getFileName().toString());
+                            return matcher.matches() ? matcher.group(1).toUpperCase(Locale.ROOT) : path.getFileName().toString();
+                        })
+                        .toList(),
+                algorithm
+        );
     }
 
     public DataImportLog importAirports(MultipartFile file) {
@@ -699,12 +946,46 @@ public class DataImportService {
         return hour * 60 + minute;
     }
 
+    private List<Path> selectEnviosFiles(List<Path> all,
+                                         List<String> includeOrigins,
+                                         int seed,
+                                         int maxAirports) {
+        if (all == null || all.isEmpty()) {
+            return List.of();
+        }
+
+        if (includeOrigins != null && !includeOrigins.isEmpty()) {
+            Set<String> selected = includeOrigins.stream()
+                    .filter(code -> code != null && !code.isBlank())
+                    .map(code -> code.trim().toUpperCase(Locale.ROOT))
+                    .collect(java.util.stream.Collectors.toSet());
+            return all.stream()
+                    .filter(path -> {
+                        Matcher matcher = ENVIOS_FILE_PATTERN.matcher(path.getFileName().toString());
+                        return matcher.matches() && selected.contains(matcher.group(1).toUpperCase(Locale.ROOT));
+                    })
+                    .limit(maxAirports)
+                    .toList();
+        }
+
+        List<Path> shuffled = new ArrayList<>(all);
+        java.util.Collections.shuffle(shuffled, new java.util.Random(seed));
+        return shuffled.stream().limit(maxAirports).toList();
+    }
+
     private String activeAlgorithmName() {
         var config = simulationConfigRepository.findTopByOrderByIdAsc();
         if (config == null) return "Genetic Algorithm";
-        return config.getPrimaryAlgorithm().name().equals("ANT_COLONY")
-                ? "Ant Colony Optimization"
-                : "Genetic Algorithm";
+        return switch (config.getPrimaryAlgorithm()) {
+            case SIMULATED_ANNEALING -> "Simulated Annealing";
+            case ANT_COLONY -> "Ant Colony Optimization";
+            case GENETIC -> "Genetic Algorithm";
+        };
+    }
+
+    private String generateBufferedCode(long sequenceValue, LocalDateTime registrationDate) {
+        LocalDateTime effectiveDate = registrationDate == null ? LocalDateTime.now() : registrationDate;
+        return String.format("%09d-%s", Math.max(1L, sequenceValue), effectiveDate.format(CODE_DATE_FMT));
     }
 
     private DataImportLog saveLog(String fileName, int total, int success, int errors, StringBuilder errDetail) {

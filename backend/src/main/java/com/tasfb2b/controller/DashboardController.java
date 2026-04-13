@@ -3,6 +3,7 @@ package com.tasfb2b.controller;
 import com.tasfb2b.dto.DashboardKpisDto;
 import com.tasfb2b.dto.DashboardOverviewDto;
 import com.tasfb2b.dto.NodeDetailDto;
+import com.tasfb2b.dto.MapLiveShipmentDto;
 import com.tasfb2b.dto.RouteNetworkEdgeDto;
 import com.tasfb2b.dto.ShipmentSearchResultDto;
 import com.tasfb2b.dto.ShipmentSummaryDto;
@@ -24,12 +25,14 @@ import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.CollapseMonitorService;
+import com.tasfb2b.service.DashboardShipmentCacheService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.SimulationRuntimeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -62,14 +65,16 @@ public class DashboardController {
     private final OperationalAlertRepository operationalAlertRepository;
     private final ShipmentAuditLogRepository shipmentAuditLogRepository;
     private final SimulationRuntimeService simulationRuntimeService;
+    private final DashboardShipmentCacheService dashboardShipmentCacheService;
 
     @GetMapping("/kpis")
     @Operation(summary = "KPIs principales para la cabecera del dashboard")
     public ResponseEntity<DashboardKpisDto> getKpis() {
         int[] thresholds = getThresholds();
         long totalShipments = shipmentRepository.count();
-        long activeShipments = shipmentRepository.findActiveShipments().size();
-        long criticalShipments = shipmentRepository.findCriticalShipments().size();
+        long activeShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
+        long inRouteShipments = shipmentRepository.countByStatus(ShipmentStatus.IN_ROUTE);
+        long criticalShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
         long delivered = shipmentRepository.countDeliveredTotal();
 
         double sysLoad = collapseMonitorService.computeSystemLoad();
@@ -88,6 +93,7 @@ public class DashboardController {
         return ResponseEntity.ok(new DashboardKpisDto(
                 totalShipments,
                 activeShipments,
+                inRouteShipments,
                 criticalShipments,
                 delivered,
                 sysLoad,
@@ -163,9 +169,9 @@ public class DashboardController {
                 com.tasfb2b.model.OperationalAlertStatus.PENDING,
                 com.tasfb2b.model.OperationalAlertStatus.IN_REVIEW
         ));
-        long overdue = shipmentRepository.findOverdueShipments(now).size();
-        long atRisk = shipmentRepository.findAtRiskShipments(now).size();
-        long stalled = shipmentRepository.findShipmentsWithoutMovement(now.minusHours(6)).size();
+        long overdue = shipmentRepository.countOverdueShipments(now);
+        long atRisk = shipmentRepository.countAtRiskShipments(now);
+        long stalled = shipmentRepository.countShipmentsWithoutMovement(now.minusHours(6));
 
         long intra = shipmentRepository.countActiveByRouteType(false);
         long inter = shipmentRepository.countActiveByRouteType(true);
@@ -177,19 +183,8 @@ public class DashboardController {
         long availableNodes = airports.stream().filter(airport -> airport.getOccupancyPct() < 90.0).count();
         double availableNodesPct = airports.isEmpty() ? 0.0 : (availableNodes * 100.0) / airports.size();
 
-        List<Shipment> deliveredPeriod = shipmentRepository.findAll().stream()
-                .filter(shipment -> shipment.getStatus() == ShipmentStatus.DELIVERED)
-                .filter(shipment -> shipment.getDeliveredAt() != null && shipment.getRegistrationDate() != null)
-                .filter(shipment -> !shipment.getDeliveredAt().isBefore(todayStart) && shipment.getDeliveredAt().isBefore(tomorrow))
-                .toList();
-        double avgDeliveryHours = deliveredPeriod.stream()
-                .mapToDouble(shipment -> Duration.between(shipment.getRegistrationDate(), shipment.getDeliveredAt()).toHours())
-                .average()
-                .orElse(0.0);
-        double avgCommittedHours = deliveredPeriod.stream()
-                .mapToDouble(shipment -> Duration.between(shipment.getRegistrationDate(), shipment.getDeadline()).toHours())
-                .average()
-                .orElse(0.0);
+        double avgDeliveryHours = shipmentRepository.avgDeliveryHoursBetween(todayStart, tomorrow);
+        double avgCommittedHours = shipmentRepository.avgCommittedHoursBetween(todayStart, tomorrow);
         double avgDeliveryDeltaHours = avgDeliveryHours - avgCommittedHours;
 
         long replanningsToday = shipmentAuditLogRepository.countByEventTypeAndPeriod(
@@ -228,21 +223,79 @@ public class DashboardController {
             @RequestParam(required = false) String airline,
             @RequestParam(required = false) String origin,
             @RequestParam(required = false) String destination,
-            @RequestParam(required = false) ShipmentStatus status
+            @RequestParam(required = false) ShipmentStatus status,
+            @RequestParam(required = false, defaultValue = "700") Integer limit
     ) {
         LocalDateTime now = effectiveNow();
-        List<Shipment> shipments = shipmentRepository.searchShipments(
-                normalizeUpper(airline),
-                normalizeUpper(origin),
-                normalizeUpper(destination),
-                status
+        int safeLimit = Math.max(50, Math.min(2500, limit == null ? 700 : limit));
+        List<DashboardShipmentCacheService.ShipmentSnapshotRow> rows = dashboardShipmentCacheService.getRows(
+                status == null ? null : status.name(),
+                safeLimit
         );
 
-        List<ShipmentSummaryDto> response = shipments.stream()
-                .map(shipment -> toSummaryDto(shipment, now))
+        List<ShipmentSummaryDto> response = rows.stream()
+                .filter(row -> airline == null || airline.isBlank() || row.airlineName().equalsIgnoreCase(airline))
+                .filter(row -> origin == null || origin.isBlank() || row.originIcao().equalsIgnoreCase(origin))
+                .filter(row -> destination == null || destination.isBlank() || row.destinationIcao().equalsIgnoreCase(destination))
+                .map(row -> toSummaryDtoFast(row, now))
                 .toList();
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/map-live")
+    @Operation(summary = "Feed liviano para aviones en ruta del mapa")
+    public ResponseEntity<List<MapLiveShipmentDto>> mapLive(
+            @RequestParam(required = false, defaultValue = "450") Integer limit
+    ) {
+        int safeLimit = Math.max(50, Math.min(1200, limit == null ? 450 : limit));
+        LocalDateTime now = effectiveNow();
+
+        List<Shipment> inRoute = shipmentRepository.findByStatus(ShipmentStatus.IN_ROUTE).stream()
+                .sorted(Comparator.comparing(Shipment::getRegistrationDate))
+                .limit(safeLimit)
+                .toList();
+
+        if (inRoute.isEmpty()) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        Map<Long, List<TravelStop>> stopsIndex = travelStopRepository
+                .findByStopStatusInAndShipmentStatusInOrderByShipmentIdAscStopOrderAsc(
+                        List.of(StopStatus.PENDING, StopStatus.IN_TRANSIT, StopStatus.COMPLETED),
+                        List.of(ShipmentStatus.IN_ROUTE)
+                )
+                .stream()
+                .collect(java.util.stream.Collectors.groupingBy(ts -> ts.getShipment().getId()));
+
+        List<MapLiveShipmentDto> rows = new ArrayList<>();
+        for (Shipment shipment : inRoute) {
+            List<TravelStop> stops = stopsIndex.getOrDefault(shipment.getId(), List.of());
+            Position current = computeCurrentPosition(shipment, stops, now);
+
+            Optional<TravelStop> nextStop = stops.stream()
+                    .filter(stop -> stop.getStopStatus() == StopStatus.IN_TRANSIT || stop.getStopStatus() == StopStatus.PENDING)
+                    .findFirst();
+
+            double nextLat = nextStop.map(stop -> stop.getAirport().getLatitude()).orElse(shipment.getDestinationAirport().getLatitude());
+            double nextLon = nextStop.map(stop -> stop.getAirport().getLongitude()).orElse(shipment.getDestinationAirport().getLongitude());
+
+            rows.add(new MapLiveShipmentDto(
+                    shipment.getId(),
+                    shipment.getShipmentCode(),
+                    shipment.getOriginAirport().getIcaoCode(),
+                    shipment.getDestinationAirport().getIcaoCode(),
+                    current.latitude(),
+                    current.longitude(),
+                    nextLat,
+                    nextLon,
+                    shipment.getProgressPercentage() == null ? 0.0 : shipment.getProgressPercentage(),
+                    shipment.getOriginAirport().getLatitude(),
+                    shipment.getOriginAirport().getLongitude()
+            ));
+        }
+
+        return ResponseEntity.ok(rows);
     }
 
     @GetMapping("/shipments/search")
@@ -408,6 +461,48 @@ public class DashboardController {
                 isAtRisk(shipment, now),
                 shipment.isOverdue(),
                 computeCriticalReason(shipment)
+        );
+    }
+
+    private ShipmentSummaryDto toSummaryDtoFast(DashboardShipmentCacheService.ShipmentSnapshotRow shipment, LocalDateTime now) {
+        Position current;
+        if (shipment.status() == ShipmentStatus.DELIVERED) {
+            current = new Position(
+                    shipment.destinationLatitude(),
+                    shipment.destinationLongitude(),
+                    shipment.destinationIcao()
+            );
+        } else {
+            current = new Position(
+                    shipment.originLatitude(),
+                    shipment.originLongitude(),
+                    shipment.originIcao()
+            );
+        }
+
+        String remaining = computeRemainingTime(shipment.deadline(), now);
+        boolean overdue = shipment.deadline() != null && now.isAfter(shipment.deadline()) && shipment.status() != ShipmentStatus.DELIVERED;
+        boolean atRisk = overdue || shipment.status() == ShipmentStatus.CRITICAL || shipment.status() == ShipmentStatus.DELAYED;
+
+        return new ShipmentSummaryDto(
+                shipment.id(),
+                shipment.shipmentCode(),
+                shipment.airlineName(),
+                shipment.originIcao(),
+                shipment.originLatitude(),
+                shipment.originLongitude(),
+                shipment.destinationIcao(),
+                shipment.destinationLatitude(),
+                shipment.destinationLongitude(),
+                shipment.status(),
+                shipment.originIcao(),
+                current.latitude(),
+                current.longitude(),
+                remaining,
+                shipment.progressPercentage() == null ? 0.0 : shipment.progressPercentage(),
+                atRisk,
+                overdue,
+                overdue ? "Deadline vencido" : null
         );
     }
 

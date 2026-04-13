@@ -18,7 +18,9 @@ import com.tasfb2b.repository.ShipmentAuditLogRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.repository.TravelStopRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -87,6 +89,12 @@ public class SimulationRuntimeService {
     public void markStarted() {
         runtime.put(KEY_PAUSED, Boolean.FALSE);
         runtime.putIfAbsent(KEY_SPEED, defaultSpeed.get());
+        if (!runtime.containsKey(KEY_SIM_TIME)) {
+            LocalDateTime initial = shipmentRepository.findMinRegistrationDate();
+            if (initial != null) {
+                runtime.put(KEY_SIM_TIME, initial);
+            }
+        }
         runtime.put(KEY_LAST_TICK, LocalDateTime.now());
     }
 
@@ -98,6 +106,14 @@ public class SimulationRuntimeService {
     public void markStopped() {
         runtime.put(KEY_PAUSED, Boolean.FALSE);
         runtime.put(KEY_LAST_TICK, LocalDateTime.now());
+    }
+
+    @Transactional
+    public void stopSimulationOnly() {
+        SimulationConfig config = getConfig();
+        config.setIsRunning(false);
+        configRepository.save(config);
+        markStopped();
     }
 
     public void clearPausedFlag() {
@@ -127,22 +143,59 @@ public class SimulationRuntimeService {
         }
         airportRepository.saveAll(airports);
 
-        travelStopRepository.deleteAllInBatch();
-        shipmentAuditLogRepository.deleteAllInBatch();
-        operationalAlertRepository.deleteAllInBatch();
-        shipmentRepository.deleteAllInBatch();
+        clearOperationalDataWithRetry();
+    }
+
+    @Transactional
+    public void resetToInitialStateKeepingDemand() {
+        stopAndResetRuntimeFast();
+
+        int pending = (int) shipmentRepository.countByStatus(ShipmentStatus.PENDING);
+        long total = shipmentRepository.count();
+        if (total > 0 && pending == total && travelStopRepository.count() == 0
+                && shipmentAuditLogRepository.count() == 0 && operationalAlertRepository.count() == 0) {
+            return;
+        }
+
+        flightRepository.resetOperationalStateFast();
+        airportRepository.resetStorageLoadFast();
+
+        travelStopRepository.truncateFast();
+        shipmentAuditLogRepository.truncateFast();
+        operationalAlertRepository.truncateFast();
+        shipmentRepository.resetAllToInitialState();
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void stopAndResetRuntimeFast() {
+        resetRuntimeState();
+    }
+
+    private void clearOperationalDataWithRetry() {
+        final int maxAttempts = 4;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                travelStopRepository.deleteAllInBatch();
+                shipmentAuditLogRepository.deleteAllInBatch();
+                operationalAlertRepository.deleteAllInBatch();
+                shipmentRepository.deleteAllInBatch();
+                return;
+            } catch (DataIntegrityViolationException ex) {
+                if (attempt == maxAttempts) {
+                    throw ex;
+                }
+                shipmentAuditLogRepository.deleteAllInBatch();
+                travelStopRepository.deleteAllInBatch();
+            }
+        }
     }
 
     private void resetRuntimeState() {
         SimulationConfig config = getConfig();
         config.setIsRunning(false);
         config.setStartedAt(null);
-        if (config.getPrimaryAlgorithm() == null) {
-            config.setPrimaryAlgorithm(com.tasfb2b.model.AlgorithmType.ANT_COLONY);
-        }
-        if (config.getSecondaryAlgorithm() == null) {
-            config.setSecondaryAlgorithm(com.tasfb2b.model.AlgorithmType.GENETIC);
-        }
+        config.setPrimaryAlgorithm(com.tasfb2b.model.AlgorithmType.GENETIC);
+        config.setSecondaryAlgorithm(com.tasfb2b.model.AlgorithmType.ANT_COLONY);
         configRepository.save(config);
         algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
         markStopped();
@@ -212,19 +265,17 @@ public class SimulationRuntimeService {
     public SimulationKpisDto computeKpis() {
         long delivered = shipmentRepository.countDeliveredTotal();
         long deliveredOnTime = shipmentRepository.countDeliveredOnTimeTotal();
-        long active = shipmentRepository.findActiveShipments().size();
-        long critical = shipmentRepository.findCriticalShipments().size();
-        long delayed = shipmentRepository.findByStatus(ShipmentStatus.DELAYED).size();
+        long active = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
+        long critical = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
+        long delayed = shipmentRepository.countByStatus(ShipmentStatus.DELAYED);
 
         double deliveredPct = delivered == 0 ? 0.0 : (deliveredOnTime * 100.0) / delivered;
-        double avgFlightLoad = flightRepository.findAll().stream()
-                .mapToDouble(Flight::getLoadPct)
-                .average()
-                .orElse(0.0);
-        double avgNodeLoad = airportRepository.findAll().stream()
-                .mapToDouble(a -> a.getOccupancyPct())
-                .average()
-                .orElse(0.0);
+        double avgFlightLoad = flightRepository.count() == 0
+                ? 0.0
+                : flightRepository.findAll().stream().mapToDouble(Flight::getLoadPct).average().orElse(0.0);
+        double avgNodeLoad = airportRepository.count() == 0
+                ? 0.0
+                : airportRepository.findAll().stream().mapToDouble(Airport::getOccupancyPct).average().orElse(0.0);
 
         return new SimulationKpisDto(
                 deliveredPct,

@@ -2,31 +2,30 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { reportsApi } from '@/lib/api/reportsApi';
-import type { AlgorithmRaceReport, SlaBreakdownRow } from '@/lib/types';
+import type { SlaBreakdownRow } from '@/lib/types';
 
 export default function ReportsPage() {
   const [from, setFrom] = useState(() => new Date(Date.now() - 29 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [rows, setRows] = useState<SlaBreakdownRow[]>([]);
-  const [race, setRace] = useState<AlgorithmRaceReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (): Promise<void> => {
+    setLoading(true);
     try {
       const report = await reportsApi.slaCompliance({ from, to });
       setRows(report.rows ?? []);
-      const raceReport = await reportsApi.algorithmRace({ from, to, scenario: 'DEFINITIVE' });
-      setRace(raceReport);
       setError(null);
     } catch {
       setRows([]);
-      setRace(null);
       setError('No se pudo cargar el reporte desde backend.');
+    } finally {
+      setLoading(false);
     }
   }, [from, to]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
 
@@ -37,6 +36,8 @@ export default function ReportsPage() {
       destination: rows.filter((r) => r.dimension === 'DESTINATION'),
     };
   }, [rows]);
+
+  const hasData = rows.length > 0;
 
   return (
     <div className="app-page">
@@ -61,62 +62,21 @@ export default function ReportsPage() {
           </div>
         ) : null}
 
-        <section className="report-kpis">
-          <article className="surface-panel kpi-card">
-            <p>Envios Completados</p>
-            <strong>1,247</strong>
-            <small style={{ color: '#7ce9bc' }}>+12.4% vs anterior</small>
-          </article>
-          <article className="surface-panel kpi-card">
-            <p>Tiempo Promedio</p>
-            <strong>14.2h</strong>
-            <small style={{ color: '#7ce9bc' }}>-8.1% vs anterior</small>
-          </article>
-          <article className="surface-panel kpi-card">
-            <p>Tasa Replanificacion</p>
-            <strong>18.3%</strong>
-            <small style={{ color: '#ff9ea6' }}>+2.1% vs anterior</small>
-          </article>
-          <article className="surface-panel kpi-card">
-            <p>Costo por Envio</p>
-            <strong>$128.50</strong>
-            <small style={{ color: '#7ce9bc' }}>-5.3% vs anterior</small>
-          </article>
-          <article className="surface-panel kpi-card">
-            <p>Ganador Benchmark</p>
-            <strong>{race?.winner ?? '-'}</strong>
-            <small style={{ color: '#9aa3be' }}>{race?.scenario ?? 'N/A'}</small>
-          </article>
-        </section>
+        {loading ? (
+          <div className="state-panel">
+            <p className="state-panel-title">Cargando reportes SLA</p>
+            <p className="state-panel-copy">Calculando cumplimiento por ruta, cliente y nodo destino...</p>
+          </div>
+        ) : null}
 
-        {race ? (
-          <section className="surface-panel" style={{ padding: 16 }}>
-            <p className="report-card-title">Carrera de Algoritmos (Definitiva)</p>
-            <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
-              {race.metrics.map((metric) => (
-                <div key={metric.algorithmName} style={{ display: 'grid', gridTemplateColumns: '200px 1fr 120px 120px', gap: 10, alignItems: 'center' }}>
-                  <span style={{ fontSize: 13 }}>{metric.algorithmName}</span>
-                  <div className="progress-track" style={{ width: '100%' }}>
-                    <div className="progress-fill" style={{ width: `${Math.max(0, Math.min(100, metric.completedPct))}%`, background: metric.algorithmName === race.winner ? '#43d29d' : '#5f82ff' }} />
-                  </div>
-                  <span style={{ fontSize: 12, color: '#9ca3bf' }}>CollapseEvents {metric.collapseEvents}</span>
-                  <span className="status-badge status-normal">Score {metric.completedPct.toFixed(1)}%</span>
-                </div>
-              ))}
-            </div>
-          </section>
+        {!loading && !error && !hasData ? (
+          <div className="state-panel">
+            <p className="state-panel-title">Sin datos para el rango seleccionado</p>
+            <p className="state-panel-copy">Ejecuta la simulacion o amplia el rango de fechas para ver resultados SLA.</p>
+          </div>
         ) : null}
 
         <section className="report-grid">
-          <article className="surface-panel" style={{ padding: 16 }}>
-            <p className="report-card-title">Envios por Dia</p>
-            <div style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'end', height: 180 }}>
-              {[52, 68, 44, 77, 60, 72, 58, 79, 66, 70, 62, 74].map((height, index) => (
-                <div key={index} style={{ flex: 1, borderRadius: 6, height: `${height}%`, background: index % 3 === 0 ? '#5f82ff' : index % 2 === 0 ? '#f0c13a' : '#ff5a64' }} />
-              ))}
-            </div>
-          </article>
-
           <article className="surface-panel" style={{ padding: 16 }}>
             <p className="report-card-title">SLA por Tipo de Ruta</p>
             <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
@@ -130,6 +90,9 @@ export default function ReportsPage() {
                   <span className="status-badge status-normal">{row.onTime}/{row.total}</span>
                 </div>
               ))}
+              {!loading && byDimension.routeType.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#8f98b6', margin: 0 }}>Aun no hay datos por tipo de ruta.</p>
+              ) : null}
             </div>
           </article>
 
@@ -147,6 +110,9 @@ export default function ReportsPage() {
                   </div>
                 </div>
               ))}
+              {!loading && byDimension.client.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#8f98b6', margin: 0 }}>Aun no hay datos por cliente.</p>
+              ) : null}
             </div>
           </article>
 
@@ -162,6 +128,9 @@ export default function ReportsPage() {
                   </div>
                 </div>
               ))}
+              {!loading && byDimension.destination.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#8f98b6', margin: 0 }}>Aun no hay datos por nodo destino.</p>
+              ) : null}
             </div>
           </article>
         </section>

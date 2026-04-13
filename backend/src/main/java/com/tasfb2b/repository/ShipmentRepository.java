@@ -3,9 +3,11 @@ package com.tasfb2b.repository;
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentStatus;
+import com.tasfb2b.repository.projection.ShipmentSummaryRow;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -166,6 +168,22 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             Pageable pageable
     );
 
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE', 'CRITICAL', 'DELAYED')
+            ORDER BY
+              CASE
+                WHEN s.status = 'IN_ROUTE' THEN 0
+                WHEN s.status = 'PENDING' THEN 1
+                WHEN s.status = 'CRITICAL' THEN 2
+                WHEN s.status = 'DELAYED' THEN 2
+                ELSE 3
+              END,
+              s.registrationDate DESC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> findActiveForDashboard(Pageable pageable);
+
     /**
      * Envíos sin movimiento en un umbral de horas: todos sus stops siguen PENDING
      * y el registro es anterior al umbral.
@@ -201,4 +219,177 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     List<Shipment> findCriticalShipments();
+
+    long countByStatus(ShipmentStatus status);
+
+    long countByStatusIn(List<ShipmentStatus> statuses);
+
+    @Query(value = """
+            SELECT s.*
+            FROM shipment s
+            WHERE s.status = 'PENDING'
+              AND s.registration_date <= :horizon
+              AND NOT EXISTS (
+                    SELECT 1 FROM travel_stop ts
+                    WHERE ts.shipment_id = s.id
+              )
+            ORDER BY s.registration_date ASC
+            LIMIT :batchSize
+            """, nativeQuery = true)
+    List<Shipment> findPendingWithoutRouteForPlanning(@Param("horizon") LocalDateTime horizon,
+                                                      @Param("batchSize") int batchSize);
+
+    @Query("SELECT MIN(s.registrationDate) FROM Shipment s")
+    LocalDateTime findMinRegistrationDate();
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE Shipment s
+            SET s.status = 'DELAYED'
+            WHERE s.status IN ('PENDING', 'IN_ROUTE')
+              AND s.deadline IS NOT NULL
+              AND s.deadline < :now
+              AND EXISTS (
+                    SELECT ts FROM TravelStop ts
+                    WHERE ts.shipment = s
+              )
+            """)
+    int markActiveAsDelayedBefore(@Param("now") LocalDateTime now);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE Shipment s
+            SET s.status = 'PENDING',
+                s.progressPercentage = 0.0,
+                s.deliveredAt = null
+            WHERE s.status <> 'PENDING'
+               OR s.progressPercentage <> 0.0
+               OR s.deliveredAt IS NOT NULL
+            """)
+    int resetAllToInitialState();
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.deadline < :now
+              AND s.status <> 'DELIVERED'
+            """)
+    long countOverdueShipments(@Param("now") LocalDateTime now);
+
+    @Query("""
+            SELECT COUNT(DISTINCT s) FROM Shipment s
+            LEFT JOIN TravelStop ts ON ts.shipment = s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE', 'DELAYED', 'CRITICAL')
+              AND (
+                    (ts.scheduledArrival IS NOT NULL AND ts.scheduledArrival > s.deadline)
+                 OR (s.deadline < :now AND s.status <> 'DELIVERED')
+              )
+            """)
+    long countAtRiskShipments(@Param("now") LocalDateTime now);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE')
+              AND s.registrationDate < :threshold
+              AND NOT EXISTS (
+                    SELECT ts FROM TravelStop ts
+                    WHERE ts.shipment = s
+                      AND ts.stopStatus IN ('IN_TRANSIT', 'COMPLETED')
+              )
+            """)
+    long countShipmentsWithoutMovement(@Param("threshold") LocalDateTime threshold);
+
+    @Query(value = """
+            SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (s.delivered_at - s.registration_date)) / 3600.0), 0)
+            FROM shipment s
+            WHERE s.status = 'DELIVERED'
+              AND s.delivered_at >= :from
+              AND s.delivered_at < :to
+            """, nativeQuery = true)
+    double avgDeliveryHoursBetween(@Param("from") LocalDateTime from,
+                                   @Param("to") LocalDateTime to);
+
+    @Query(value = """
+            SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (s.deadline - s.registration_date)) / 3600.0), 0)
+            FROM shipment s
+            WHERE s.status = 'DELIVERED'
+              AND s.delivered_at >= :from
+              AND s.delivered_at < :to
+            """, nativeQuery = true)
+    double avgCommittedHoursBetween(@Param("from") LocalDateTime from,
+                                    @Param("to") LocalDateTime to);
+
+    @Query(value = """
+            SELECT
+              CASE WHEN s.is_inter_continental THEN 'INTER' ELSE 'INTRA' END AS grp,
+              COUNT(*) AS total,
+              SUM(CASE WHEN s.delivered_at IS NOT NULL AND s.deadline IS NOT NULL AND s.delivered_at <= s.deadline THEN 1 ELSE 0 END) AS on_time
+            FROM shipment s
+            WHERE s.status = 'DELIVERED'
+              AND s.registration_date >= :from
+              AND s.registration_date < :to
+            GROUP BY CASE WHEN s.is_inter_continental THEN 'INTER' ELSE 'INTRA' END
+            """, nativeQuery = true)
+    List<Object[]> slaByRouteType(@Param("from") LocalDateTime from,
+                                  @Param("to") LocalDateTime to);
+
+    @Query(value = """
+            SELECT
+              COALESCE(NULLIF(TRIM(s.airline_name), ''), 'SIN_CLIENTE') AS grp,
+              COUNT(*) AS total,
+              SUM(CASE WHEN s.delivered_at IS NOT NULL AND s.deadline IS NOT NULL AND s.delivered_at <= s.deadline THEN 1 ELSE 0 END) AS on_time
+            FROM shipment s
+            WHERE s.status = 'DELIVERED'
+              AND s.registration_date >= :from
+              AND s.registration_date < :to
+            GROUP BY COALESCE(NULLIF(TRIM(s.airline_name), ''), 'SIN_CLIENTE')
+            """, nativeQuery = true)
+    List<Object[]> slaByClient(@Param("from") LocalDateTime from,
+                               @Param("to") LocalDateTime to);
+
+    @Query(value = """
+            SELECT
+              COALESCE(a.icao_code, 'SIN_DESTINO') AS grp,
+              COUNT(*) AS total,
+              SUM(CASE WHEN s.delivered_at IS NOT NULL AND s.deadline IS NOT NULL AND s.delivered_at <= s.deadline THEN 1 ELSE 0 END) AS on_time
+            FROM shipment s
+            LEFT JOIN airport a ON a.id = s.destination_airport_id
+            WHERE s.status = 'DELIVERED'
+              AND s.registration_date >= :from
+              AND s.registration_date < :to
+            GROUP BY COALESCE(a.icao_code, 'SIN_DESTINO')
+            """, nativeQuery = true)
+    List<Object[]> slaByDestination(@Param("from") LocalDateTime from,
+                                    @Param("to") LocalDateTime to);
+
+    @Query(value = """
+            SELECT
+                s.id AS id,
+                s.shipment_code AS shipmentCode,
+                s.airline_name AS airlineName,
+                ao.icao_code AS originIcao,
+                ao.latitude AS originLatitude,
+                ao.longitude AS originLongitude,
+                ad.icao_code AS destinationIcao,
+                ad.latitude AS destinationLatitude,
+                ad.longitude AS destinationLongitude,
+                s.status AS status,
+                s.progress_percentage AS progressPercentage,
+                s.deadline AS deadline
+            FROM shipment s
+            JOIN airport ao ON ao.id = s.origin_airport_id
+            JOIN airport ad ON ad.id = s.destination_airport_id
+            WHERE (:status IS NULL AND s.status IN ('PENDING', 'IN_ROUTE', 'CRITICAL', 'DELAYED') OR s.status = CAST(:status AS varchar))
+            ORDER BY
+                CASE
+                    WHEN s.status = 'IN_ROUTE' THEN 0
+                    WHEN s.status = 'PENDING' THEN 1
+                    WHEN s.status = 'CRITICAL' THEN 2
+                    WHEN s.status = 'DELAYED' THEN 2
+                    ELSE 3
+                END,
+                s.registration_date DESC
+            LIMIT :limitRows
+            """, nativeQuery = true)
+    List<ShipmentSummaryRow> fetchDashboardSummaryRows(@Param("status") String status,
+                                                       @Param("limitRows") int limitRows);
 }

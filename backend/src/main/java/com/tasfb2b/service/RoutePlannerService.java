@@ -19,6 +19,7 @@ import com.tasfb2b.service.algorithm.AntColonyOptimization;
 import com.tasfb2b.service.algorithm.GeneticAlgorithm;
 import com.tasfb2b.service.algorithm.OptimizationResult;
 import com.tasfb2b.service.algorithm.RouteOptimizer;
+import com.tasfb2b.service.algorithm.SimulatedAnnealingOptimization;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +41,7 @@ public class RoutePlannerService {
 
     private final GeneticAlgorithm geneticAlgorithm;
     private final AntColonyOptimization antColonyOptimization;
+    private final SimulatedAnnealingOptimization simulatedAnnealingOptimization;
 
     private final AirportRepository airportRepository;
     private final FlightRepository flightRepository;
@@ -182,6 +184,10 @@ public class RoutePlannerService {
                 antColonyOptimization.getAlgorithmName(),
                 antColonyOptimization.evaluatePerformance(shipments, from, to)
         );
+        results.put(
+                simulatedAnnealingOptimization.getAlgorithmName(),
+                simulatedAnnealingOptimization.evaluatePerformance(shipments, from, to)
+        );
         return results;
     }
 
@@ -234,11 +240,11 @@ public class RoutePlannerService {
                 .count();
 
         double criticalFraction = (double) criticalCount / airports.size();
-        List<Shipment> activeShipments = shipmentRepository.findActiveShipments();
-        List<Shipment> problematicShipments = shipmentRepository.findCriticalShipments();
-        double problematicFraction = activeShipments.isEmpty()
+        long activeShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
+        long problematicShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
+        double problematicFraction = activeShipments == 0
                 ? 0.0
-                : (double) problematicShipments.size() / (activeShipments.size() + problematicShipments.size());
+                : (double) problematicShipments / (activeShipments + problematicShipments);
 
         double risk = (0.6 * avgOccupancy) + (0.3 * criticalFraction) + (0.1 * problematicFraction);
         return Math.min(1.0, risk);
@@ -275,13 +281,21 @@ public class RoutePlannerService {
         if (algorithmName != null && antColonyOptimization.getAlgorithmName().equalsIgnoreCase(algorithmName)) {
             return antColonyOptimization;
         }
+        if (algorithmName != null && simulatedAnnealingOptimization.getAlgorithmName().equalsIgnoreCase(algorithmName)) {
+            return simulatedAnnealingOptimization;
+        }
+        if (algorithmName != null && "SA".equalsIgnoreCase(algorithmName.trim())) {
+            return simulatedAnnealingOptimization;
+        }
         return geneticAlgorithm;
     }
 
     private String getActiveAlgorithmName() {
-        return getConfig().getPrimaryAlgorithm() == AlgorithmType.ANT_COLONY
-                ? antColonyOptimization.getAlgorithmName()
-                : geneticAlgorithm.getAlgorithmName();
+        return switch (getConfig().getPrimaryAlgorithm()) {
+            case ANT_COLONY -> antColonyOptimization.getAlgorithmName();
+            case SIMULATED_ANNEALING -> simulatedAnnealingOptimization.getAlgorithmName();
+            case GENETIC -> geneticAlgorithm.getAlgorithmName();
+        };
     }
 
     private SimulationConfig getConfig() {

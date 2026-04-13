@@ -1,12 +1,16 @@
 package com.tasfb2b.controller;
 
 import com.tasfb2b.dto.DemandGenerationRequestDto;
+import com.tasfb2b.dto.DatasetStatusDto;
+import com.tasfb2b.dto.EnviosDatasetImportRequestDto;
+import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.DataImportLog;
 import com.tasfb2b.repository.DataImportLogRepository;
 import com.tasfb2b.service.BenchmarkTuningService;
 import com.tasfb2b.service.BenchmarkJobService;
 import com.tasfb2b.service.DataImportService;
 import com.tasfb2b.service.DemandGenerationService;
+import com.tasfb2b.service.EnviosImportJobService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -33,6 +37,8 @@ public class DataImportController {
     private final BenchmarkTuningService benchmarkTuningService;
     private final BenchmarkJobService benchmarkJobService;
     private final DemandGenerationService demandGenerationService;
+    private final EnviosImportJobService enviosImportJobService;
+    private final com.tasfb2b.repository.ShipmentRepository shipmentRepository;
 
     // ── Upload endpoints ──────────────────────────────────────────────────────
 
@@ -86,6 +92,19 @@ public class DataImportController {
     @Operation(summary = "Historial de importaciones")
     public ResponseEntity<List<DataImportLog>> getLogs() {
         return ResponseEntity.ok(importLogRepository.findTop10ByOrderByImportedAtDesc());
+    }
+
+    @GetMapping("/dataset-status")
+    @Operation(summary = "Estado agregado del dataset de envios")
+    public ResponseEntity<DatasetStatusDto> datasetStatus() {
+        return ResponseEntity.ok(new DatasetStatusDto(
+                shipmentRepository.count(),
+                shipmentRepository.countByStatus(ShipmentStatus.PENDING),
+                shipmentRepository.countByStatus(ShipmentStatus.IN_ROUTE),
+                shipmentRepository.countByStatus(ShipmentStatus.DELIVERED),
+                shipmentRepository.countByStatus(ShipmentStatus.DELAYED),
+                shipmentRepository.countByStatus(ShipmentStatus.CRITICAL)
+        ));
     }
 
     @PostMapping("/dataset/default")
@@ -179,5 +198,56 @@ public class DataImportController {
                 "message", "Demanda generada",
                 "result", result
         ));
+    }
+
+    @PostMapping("/shipments/dataset")
+    @Operation(summary = "Importar envios desde carpeta /datos/envios con muestreo reproducible")
+    public ResponseEntity<?> importShipmentsDataset(@RequestBody(required = false) EnviosDatasetImportRequestDto request) {
+        var result = importService.importShipmentsFromEnviosDataset(request);
+        return ResponseEntity.ok(java.util.Map.of(
+                "message", "Dataset de envios importado",
+                "result", result
+        ));
+    }
+
+    @PostMapping("/shipments/dataset/full")
+    @Operation(summary = "Importar todos los envios oficiales desde /datos/envios")
+    public ResponseEntity<?> importFullShipmentsDataset() {
+        var result = importService.importShipmentsFromEnviosDataset(
+                new EnviosDatasetImportRequestDto(7, 60, 50000, null, true, null)
+        );
+        return ResponseEntity.ok(java.util.Map.of(
+                "message", "Dataset completo de envios importado",
+                "result", result
+        ));
+    }
+
+    @PostMapping("/shipments/dataset/full/start")
+    @Operation(summary = "Iniciar importacion completa de envios en modo asíncrono")
+    public ResponseEntity<?> startFullShipmentsDatasetImport() {
+        String jobId = enviosImportJobService.startFullImport();
+        return ResponseEntity.accepted().body(java.util.Map.of(
+                "message", "Importacion full de envios iniciada",
+                "jobId", jobId
+        ));
+    }
+
+    @GetMapping("/shipments/dataset/full/status/{jobId}")
+    @Operation(summary = "Consultar estado de importacion completa de envios")
+    public ResponseEntity<?> fullShipmentsDatasetImportStatus(@PathVariable String jobId) {
+        return ResponseEntity.ok(enviosImportJobService.get(jobId));
+    }
+
+    @GetMapping("/shipments/dataset/full/status")
+    @Operation(summary = "Consultar ultimo estado de importacion completa de envios")
+    public ResponseEntity<?> latestFullShipmentsDatasetImportStatus() {
+        var latest = enviosImportJobService.latest();
+        if (latest == null) {
+            return ResponseEntity.ok(java.util.Map.of(
+                    "status", "IDLE",
+                    "message", "No hay importacion full ejecutada"
+            ));
+        }
+        return ResponseEntity.ok(latest);
     }
 }

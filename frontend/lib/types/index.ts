@@ -3,7 +3,7 @@ export type AirportStatus = 'NORMAL' | 'ALERTA' | 'CRITICO';
 export type FlightStatus = 'SCHEDULED' | 'IN_FLIGHT' | 'COMPLETED' | 'CANCELLED';
 export type ShipmentStatus = 'PENDING' | 'IN_ROUTE' | 'DELIVERED' | 'DELAYED' | 'CRITICAL';
 export type StopStatus = 'PENDING' | 'IN_TRANSIT' | 'COMPLETED';
-export type AlgorithmType = 'GENETIC' | 'ANT_COLONY';
+export type AlgorithmType = 'GENETIC' | 'ANT_COLONY' | 'SIMULATED_ANNEALING';
 export type SimScenario = 'DAY_TO_DAY' | 'PERIOD_SIMULATION' | 'COLLAPSE_TEST';
 export type ImportStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
 
@@ -211,29 +211,6 @@ export interface SimulationResults {
   benchmarkWinner: string;
 }
 
-export interface BenchmarkMetrics {
-  algorithmName: string;
-  sampleSize: number;
-  completedPct: number;
-  avgTransitHours: number;
-  p95TransitHours: number;
-  costPerLuggage: number;
-  flightUtilizationPct: number;
-  saturatedAirports: number;
-  totalReplanning: number;
-  collapseEvents: number;
-}
-
-export interface AlgorithmRaceReport {
-  winner: string;
-  scenario: string;
-  from: string | null;
-  to: string | null;
-  generatedAtEpochMillis: number;
-  metrics: BenchmarkMetrics[];
-  notes: string[];
-}
-
 export interface DataImportLog {
   id: number;
   fileName: string;
@@ -280,6 +257,28 @@ export interface BenchmarkJobState {
   } | null;
 }
 
+export interface EnviosImportResult {
+  processedAirports: number;
+  selectedAirports: number;
+  processedFiles: number;
+  totalFiles: number;
+  requestedRows: number;
+  importedRows: number;
+  failedRows: number;
+  failureByCause: Record<string, number>;
+  selectedOriginIcaos: string[];
+  algorithmUsed: string;
+}
+
+export interface EnviosImportJobState {
+  jobId: string;
+  status: 'RUNNING' | 'DONE' | 'FAILED' | 'IDLE';
+  message: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  result: EnviosImportResult | null;
+}
+
 export interface DemandGenerationResult {
   scenario: string;
   requested: number;
@@ -290,9 +289,19 @@ export interface DemandGenerationResult {
   finishedAt: string;
 }
 
+export interface DatasetStatus {
+  totalShipments: number;
+  pendingShipments: number;
+  inRouteShipments: number;
+  deliveredShipments: number;
+  delayedShipments: number;
+  criticalShipments: number;
+}
+
 export interface DashboardKpis {
   totalShipments: number;
   activeShipments: number;
+  inRouteShipments: number;
   criticalShipments: number;
   deliveredShipments: number;
   systemLoadPct: number;
@@ -358,6 +367,20 @@ export interface ShipmentSummary {
   atRisk: boolean;
   overdue: boolean;
   criticalReason?: string | null;
+}
+
+export interface MapLiveShipment {
+  shipmentId: number;
+  shipmentCode: string;
+  originIcao: string;
+  destinationIcao: string;
+  currentLatitude: number;
+  currentLongitude: number;
+  nextLatitude: number;
+  nextLongitude: number;
+  progressPct: number;
+  originLatitude: number;
+  originLongitude: number;
 }
 
 export interface ShipmentSearchResult {

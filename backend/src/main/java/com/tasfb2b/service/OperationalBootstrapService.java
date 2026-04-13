@@ -54,8 +54,8 @@ public class OperationalBootstrapService {
         if (config.getIntraNodeCapacity() == null) config.setIntraNodeCapacity(700);
         if (config.getInterNodeCapacity() == null) config.setInterNodeCapacity(800);
         if (config.getIsRunning() == null) config.setIsRunning(false);
-        config.setPrimaryAlgorithm(AlgorithmType.ANT_COLONY);
-        config.setSecondaryAlgorithm(AlgorithmType.GENETIC);
+        config.setPrimaryAlgorithm(AlgorithmType.GENETIC);
+        config.setSecondaryAlgorithm(AlgorithmType.ANT_COLONY);
         simulationConfigRepository.save(config);
 
         algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
@@ -128,7 +128,11 @@ public class OperationalBootstrapService {
                     destination.getIcaoCode(),
                     luggage,
                     LocalDateTime.now().minusMinutes(ThreadLocalRandom.current().nextInt(2, 40)),
-                    i % 2 == 0 ? "Genetic Algorithm" : "Ant Colony Optimization"
+                    switch (i % 3) {
+                        case 0 -> "Genetic Algorithm";
+                        case 1 -> "Ant Colony Optimization";
+                        default -> "Simulated Annealing";
+                    }
             );
             try {
                 shipmentOrchestratorService.createAndPlan(dto);

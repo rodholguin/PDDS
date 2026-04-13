@@ -7,6 +7,7 @@ import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentAuditType;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.SimulationConfig;
+import com.tasfb2b.model.SimulationScenario;
 import com.tasfb2b.model.StopStatus;
 import com.tasfb2b.model.TravelStop;
 import com.tasfb2b.repository.AirportRepository;
@@ -28,7 +29,10 @@ import java.util.List;
 @Slf4j
 public class SimulationEngineService {
 
-    private static final int BASE_SIM_MINUTES_PER_TICK = 2;
+    private static final int BASE_SIM_MINUTES_PER_TICK = 1;
+    private static final int ROUTE_PLANNING_BATCH_DAY_TO_DAY = 120;
+    private static final int ROUTE_PLANNING_BATCH_PERIOD = 220;
+    private static final int ROUTE_PLANNING_BATCH_COLLAPSE = 320;
 
     private final SimulationConfigRepository simulationConfigRepository;
     private final FlightRepository flightRepository;
@@ -37,8 +41,9 @@ public class SimulationEngineService {
     private final AirportRepository airportRepository;
     private final ShipmentAuditService shipmentAuditService;
     private final SimulationRuntimeService runtimeService;
+    private final RoutePlannerService routePlannerService;
 
-    @Scheduled(fixedDelay = 2_000)
+    @Scheduled(fixedRate = 1_000)
     @Transactional
     public void tick() {
         SimulationConfig config = getConfig();
@@ -46,18 +51,69 @@ public class SimulationEngineService {
             return;
         }
 
+        executeTick(config);
+    }
+
+    @Transactional
+    public void warmStartTick() {
+        SimulationConfig config = getConfig();
+        if (!Boolean.TRUE.equals(config.getIsRunning()) || runtimeService.isPaused()) {
+            return;
+        }
+
+        executeTick(config);
+    }
+
+    private void executeTick(SimulationConfig config) {
+        
         LocalDateTime now = LocalDateTime.now();
         int speed = Math.max(1, runtimeService.currentSpeed());
         LocalDateTime simulatedNow = runtimeService.currentSimulationTime().orElseGet(() -> resolveInitialSimulationTime(now));
-        int minutesAdvance = Math.min(40, BASE_SIM_MINUTES_PER_TICK * speed);
+        int minutesAdvance = Math.min(20, BASE_SIM_MINUTES_PER_TICK * speed);
         LocalDateTime horizon = simulatedNow.plusMinutes(minutesAdvance);
         runtimeService.setSimulationTime(horizon);
 
+        planPendingShipments(config, horizon);
         activateFlights(horizon);
         closeFlightsAndAdvanceStops(horizon);
         markOverdueShipments(horizon);
 
         runtimeService.markTick(horizon);
+    }
+
+    private void planPendingShipments(SimulationConfig config, LocalDateTime horizon) {
+        int batchSize = planningBatchForScenario(config == null ? null : config.getScenario());
+        List<Shipment> pending = shipmentRepository.findPendingWithoutRouteForPlanning(horizon, batchSize);
+        if (pending.isEmpty()) {
+            return;
+        }
+
+        var availableFlights = flightRepository.findFlightsWithAvailableCapacity();
+        var airports = airportRepository.findAll();
+
+        for (Shipment shipment : pending) {
+            try {
+                routePlannerService.planShipment(
+                        shipment,
+                        "Genetic Algorithm",
+                        availableFlights,
+                        airports,
+                        true
+                );
+            } catch (Exception ex) {
+                log.debug("No se pudo planificar envio {} en tick: {}", shipment.getId(), ex.getMessage());
+            }
+        }
+    }
+
+    private int planningBatchForScenario(SimulationScenario scenario) {
+        if (scenario == SimulationScenario.PERIOD_SIMULATION) {
+            return ROUTE_PLANNING_BATCH_PERIOD;
+        }
+        if (scenario == SimulationScenario.COLLAPSE_TEST) {
+            return ROUTE_PLANNING_BATCH_COLLAPSE;
+        }
+        return ROUTE_PLANNING_BATCH_DAY_TO_DAY;
     }
 
     private void activateFlights(LocalDateTime horizon) {
@@ -145,15 +201,7 @@ public class SimulationEngineService {
     }
 
     private void markOverdueShipments(LocalDateTime now) {
-        List<Shipment> active = shipmentRepository.findActiveShipments();
-        for (Shipment shipment : active) {
-            if (shipment.getDeadline() != null && shipment.getDeadline().isBefore(now)) {
-                shipment.setStatus(ShipmentStatus.DELAYED);
-                shipmentRepository.save(shipment);
-                audit(shipment, ShipmentAuditType.DELAYED,
-                        "Envio supero su deadline operativo", shipment.getDestinationAirport(), null);
-            }
-        }
+        shipmentRepository.markActiveAsDelayedBefore(now);
     }
 
     private void audit(Shipment shipment,
@@ -172,10 +220,11 @@ public class SimulationEngineService {
     }
 
     private LocalDateTime resolveInitialSimulationTime(LocalDateTime fallbackNow) {
-        return shipmentRepository.findAll().stream()
-                .map(Shipment::getRegistrationDate)
-                .filter(java.util.Objects::nonNull)
-                .min(LocalDateTime::compareTo)
-                .orElse(fallbackNow);
+        LocalDateTime minDeparture = flightRepository.findMinScheduledDeparture();
+        if (minDeparture != null) {
+            return minDeparture.minusMinutes(5);
+        }
+        LocalDateTime min = shipmentRepository.findMinRegistrationDate();
+        return min == null ? fallbackNow : min;
     }
 }

@@ -1,5 +1,4 @@
 import type {
-  AlgorithmRaceReport,
   CollapseRisk,
   SimScenario,
   SimulationResults,
@@ -45,6 +44,10 @@ export const simulationApi = {
 
   stop: () => api<{ message: string; state: SimulationState }>('/api/simulation/stop', { method: 'POST' }),
 
+  resetDemand: () => api<{ message: string; state: SimulationState }>('/api/simulation/reset-demand', { method: 'POST' }),
+
+  resetToInitial: () => api<{ message: string; state: SimulationState }>('/api/simulation/reset-to-initial', { method: 'POST' }),
+
   pause: () => api<{ message: string; state: SimulationState }>('/api/simulation/pause', { method: 'POST' }),
 
   setSpeed: (speed: number) =>
@@ -65,15 +68,6 @@ export const simulationApi = {
   getCollapseRisk: () => api<CollapseRisk>('/api/simulation/collapse-risk'),
 
   getResults: () => api<SimulationResults>('/api/simulation/results'),
-
-  getRaceReport: (query?: { from?: string; to?: string; scenario?: string }) => {
-    const params = new URLSearchParams();
-    if (query?.from) params.set('from', query.from);
-    if (query?.to) params.set('to', query.to);
-    if (query?.scenario) params.set('scenario', query.scenario);
-    const suffix = params.toString();
-    return api<AlgorithmRaceReport>(`/api/simulation/race-report${suffix ? `?${suffix}` : ''}`);
-  },
 
   seedStatistical: (avg: number, variance: number) =>
     api<{ message: string; avg: number; variance: number; created: number; state: SimulationState }>(

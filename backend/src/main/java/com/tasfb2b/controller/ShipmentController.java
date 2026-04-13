@@ -268,6 +268,7 @@ public class ShipmentController {
         if (message == null) return "N/A";
         if (message.contains("Ant Colony")) return "Ant Colony Optimization";
         if (message.contains("Genetic")) return "Genetic Algorithm";
+        if (message.contains("Simulated Annealing")) return "Simulated Annealing";
         return "N/A";
     }
 }

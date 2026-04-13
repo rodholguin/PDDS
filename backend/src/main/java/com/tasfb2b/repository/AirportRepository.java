@@ -3,7 +3,10 @@ package com.tasfb2b.repository;
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Continent;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -19,4 +22,9 @@ public interface AirportRepository extends JpaRepository<Airport, Long> {
 
     /** Aeropuertos con carga actual por encima de un porcentaje dado. */
     List<Airport> findByCurrentStorageLoadGreaterThanEqual(Integer minLoad);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = "UPDATE airport SET current_storage_load = 0 WHERE current_storage_load <> 0", nativeQuery = true)
+    int resetStorageLoadFast();
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BenchmarkJobState, DataImportLog, DatasetImportResult, ImportStatus } from '@/lib/types';
+import type { DataImportLog, EnviosImportJobState, EnviosImportResult, ImportStatus } from '@/lib/types';
 import { importApi, type ImportType } from '@/lib/api/importApi';
 import { simulationApi } from '@/lib/api/simulationApi';
 
@@ -102,21 +102,24 @@ export default function ImportPage() {
   });
   const [logs, setLogs] = useState<DataImportLog[]>([]);
   const [dlLoading, setDlLoading] = useState<ImportType | null>(null);
-  const [datasetLoading, setDatasetLoading] = useState(false);
-  const [datasetResult, setDatasetResult] = useState<DatasetImportResult | null>(null);
-  const [datasetError, setDatasetError] = useState<string | null>(null);
-  const [benchmarkLoading, setBenchmarkLoading] = useState(false);
-  const [benchmarkJob, setBenchmarkJob] = useState<BenchmarkJobState | null>(null);
-  const [benchmarkError, setBenchmarkError] = useState<string | null>(null);
-  const [demandLoading, setDemandLoading] = useState(false);
-  const [demandError, setDemandError] = useState<string | null>(null);
-  const [demandResult, setDemandResult] = useState<{
+  const [quickDemandLoading, setQuickDemandLoading] = useState(false);
+  const [quickDemandError, setQuickDemandError] = useState<string | null>(null);
+  const [quickDemandResult, setQuickDemandResult] = useState<{
     scenario: string;
     requested: number;
     created: number;
     failed: number;
     seed: number;
   } | null>(null);
+  const [fullEnviosLoading, setFullEnviosLoading] = useState(false);
+  const [fullEnviosError, setFullEnviosError] = useState<string | null>(null);
+  const [fullEnviosResult, setFullEnviosResult] = useState<EnviosImportResult | null>(null);
+  const [fullEnviosJob, setFullEnviosJob] = useState<EnviosImportJobState | null>(null);
+  const [shipmentsLoaded, setShipmentsLoaded] = useState<number | null>(null);
+  const [refreshingCounts, setRefreshingCounts] = useState(false);
+  const [resetDemandLoading, setResetDemandLoading] = useState(false);
+  const [resetDemandError, setResetDemandError] = useState<string | null>(null);
+  const [resetDemandMessage, setResetDemandMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load import history
@@ -124,7 +127,45 @@ export default function ImportPage() {
     try { setLogs(await importApi.getLogs()); } catch { /* silently ignore */ }
   }, []);
 
-  useEffect(() => { loadLogs(); }, [loadLogs]);
+  const loadDatasetStatus = useCallback(async () => {
+    setRefreshingCounts(true);
+    try {
+      const status = await importApi.getDatasetStatus();
+      setShipmentsLoaded(status.totalShipments ?? 0);
+    } catch {
+      setShipmentsLoaded(null);
+    } finally {
+      setRefreshingCounts(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLogs();
+    void loadDatasetStatus();
+  }, [loadLogs, loadDatasetStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateLatestEnviosJob() {
+      try {
+        const latest = await importApi.getLatestEnviosDatasetFullJobStatus();
+        if (cancelled || latest.status === 'IDLE') return;
+        const state = latest as EnviosImportJobState;
+        setFullEnviosJob(state);
+        if (state.status === 'DONE' && state.result) {
+          setFullEnviosResult(state.result);
+        }
+      } catch {
+        // ignore silently
+      }
+    }
+
+    void hydrateLatestEnviosJob();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Tab state helpers ───────────────────────────────────────────────────
 
@@ -168,12 +209,12 @@ export default function ImportPage() {
     setTab(activeTab, { loading: true, error: null, result: null });
     try {
       if (activeTab === 'shipments') {
-        await simulationApi.stop();
-        await simulationApi.setSpeed(1);
+        await prepareSimulationForImport();
       }
       const log = await importApi.importFile(file, activeTab);
       setTab(activeTab, { loading: false, result: log, file: null });
-      loadLogs();
+      await loadLogs();
+      await loadDatasetStatus();
     } catch (err) {
       setTab(activeTab, {
         loading: false,
@@ -191,73 +232,94 @@ export default function ImportPage() {
     finally { setDlLoading(null); }
   }
 
-  async function handleImportDefaultDataset() {
-    setDatasetLoading(true);
-    setDatasetError(null);
+  async function handleLoadQuickDemand() {
+    setQuickDemandLoading(true);
+    setQuickDemandError(null);
     try {
-      const result = await importApi.importDefaultDataset();
-      setDatasetResult(result);
-      await loadLogs();
-    } catch (err) {
-      setDatasetResult(null);
-      setDatasetError(err instanceof Error ? err.message : 'No se pudo importar el dataset real.');
-    } finally {
-      setDatasetLoading(false);
-    }
-  }
-
-  async function handleDownloadScenarioDemand() {
-    try {
-      await simulationApi.stop();
-      await simulationApi.setSpeed(1);
-      await importApi.downloadScenarioDemandTemplate();
-    } catch {
-      setBenchmarkError('No se pudo descargar la demanda de escenarios.');
-    }
-  }
-
-  async function handleGenerateDemand() {
-    setDemandLoading(true);
-    setDemandError(null);
-    try {
+      await prepareSimulationForImport();
+      await importApi.importDefaultDataset();
       const response = await importApi.generateDemand({
-        scenario: 'PEAK',
-        size: 4000,
+        scenario: 'NORMAL',
+        size: 6,
         seed: 7,
         startHour: 1,
       });
-      setDemandResult(response.result);
+      setQuickDemandResult(response.result);
+      await loadDatasetStatus();
     } catch (err) {
-      setDemandError(err instanceof Error ? err.message : 'No se pudo generar demanda masiva.');
-      setDemandResult(null);
+      setQuickDemandError(err instanceof Error ? err.message : 'No se pudo cargar demanda rápida.');
+      setQuickDemandResult(null);
     } finally {
-      setDemandLoading(false);
+      setQuickDemandLoading(false);
     }
   }
 
-  async function handleStartBenchmark() {
-    setBenchmarkLoading(true);
-    setBenchmarkError(null);
+  async function handleLoadAllOfficialEnvios() {
+    setFullEnviosLoading(true);
+    setFullEnviosError(null);
     try {
-      const started = await importApi.startBenchmarkJob();
-      let attempts = 0;
-      let current: BenchmarkJobState | null = null;
-      while (attempts < 120) {
+      await prepareSimulationForImport();
+      await importApi.importDefaultDataset();
+      const started = await importApi.startEnviosDatasetFullJob();
+
+      let current: EnviosImportJobState | null = null;
+      for (let attempts = 0; attempts < 900; attempts++) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
-        current = await importApi.getBenchmarkJobStatus(started.jobId);
-        setBenchmarkJob(current);
+        current = await importApi.getEnviosDatasetFullJobStatus(started.jobId);
+        setFullEnviosJob(current);
         if (current.status === 'DONE' || current.status === 'FAILED') {
           break;
         }
-        attempts++;
       }
+
       if (!current || (current.status !== 'DONE' && current.status !== 'FAILED')) {
-        setBenchmarkError('Benchmark sigue ejecutandose. Recarga para consultar estado.');
+        setFullEnviosError('La importacion sigue en progreso. Puedes revisar el estado nuevamente en esta pantalla.');
+      } else if (current.status === 'FAILED') {
+        setFullEnviosError(current.message || 'No se pudo importar el dataset oficial completo.');
+      } else {
+        setFullEnviosResult(current.result);
       }
+
+      await loadLogs();
+      await loadDatasetStatus();
     } catch (err) {
-      setBenchmarkError(err instanceof Error ? err.message : 'No se pudo ejecutar benchmark.');
+      setFullEnviosResult(null);
+      setFullEnviosError(err instanceof Error ? err.message : 'No se pudo importar el dataset oficial completo.');
     } finally {
-      setBenchmarkLoading(false);
+      setFullEnviosLoading(false);
+    }
+  }
+
+  async function handleResetDemand() {
+    const confirmed = window.confirm('Esta accion reiniciara la simulacion y pondra todos los pedidos en estado inicial PENDING. Deseas continuar?');
+    if (!confirmed) return;
+
+    setResetDemandLoading(true);
+    setResetDemandError(null);
+    setResetDemandMessage(null);
+    try {
+      await prepareSimulationForImport();
+      const res = await simulationApi.resetToInitial();
+      setResetDemandMessage(res.message || 'Demanda operativa reiniciada.');
+      setFullEnviosResult(null);
+      setFullEnviosJob(null);
+      await loadDatasetStatus();
+    } catch (err) {
+      setResetDemandError(err instanceof Error ? err.message : 'No se pudo reiniciar la demanda.');
+    } finally {
+      setResetDemandLoading(false);
+    }
+  }
+
+  async function prepareSimulationForImport() {
+    try {
+      const state = await simulationApi.getState();
+      if (state.running && !state.paused) {
+        await simulationApi.pause();
+      }
+      await simulationApi.setSpeed(1);
+    } catch {
+      // Keep import flow running even if simulation control fails.
     }
   }
 
@@ -268,10 +330,50 @@ export default function ImportPage() {
 
       {/* Page header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold" style={{ color: '#f0f0f8' }}>Importar Datos</h1>
+        <h1 className="text-2xl font-bold" style={{ color: '#f0f0f8' }}>Datos y Reinicio</h1>
         <p className="text-sm mt-1" style={{ color: '#8484a0' }}>
-          Carga masiva de envíos, aeropuertos y vuelos desde archivos CSV o Excel
+          Gestiona recarga de datasets y reinicio de demanda. No es obligatorio para simular si ya hay envios cargados.
         </p>
+      </div>
+
+      <div className="rounded-xl mb-6 p-4" style={{ background: '#182130', border: '1px solid #2d3f5f' }}>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: '#d9e7ff' }}>Estado actual del dataset</p>
+            <p className="text-xs mt-1" style={{ color: '#9aa3be' }}>
+              {shipmentsLoaded == null
+                ? 'No se pudo leer el estado actual.'
+                : `Envios detectados: ${shipmentsLoaded.toLocaleString('es-PE')}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => void loadDatasetStatus()}
+              disabled={refreshingCounts}
+              className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
+              style={{ background: '#2f3b5c', color: '#fff', opacity: refreshingCounts ? 0.7 : 1 }}
+            >
+              {refreshingCounts ? 'Actualizando...' : 'Actualizar estado'}
+            </button>
+            <button
+              onClick={handleResetDemand}
+              disabled={resetDemandLoading}
+              className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
+              style={{ background: '#603a3a', color: '#fff', opacity: resetDemandLoading ? 0.7 : 1 }}
+            >
+              {resetDemandLoading ? 'Reiniciando...' : 'Reiniciar a estado inicial'}
+            </button>
+          </div>
+        </div>
+        <p className="text-[11px] mt-2" style={{ color: '#93a1c3' }}>
+          Este reinicio conserva pedidos y vuelve todos a estado inicial PENDING. Para ejecutar escenarios, ve directo a Simulacion y Panel.
+        </p>
+        {resetDemandError && (
+          <p className="text-[11px] mt-2" style={{ color: '#ef4444' }}>⚠ {resetDemandError}</p>
+        )}
+        {resetDemandMessage && !resetDemandError && (
+          <p className="text-[11px] mt-2" style={{ color: '#8dd3a8' }}>✓ {resetDemandMessage}</p>
+        )}
       </div>
 
       {/* ── Notice ── */}
@@ -286,140 +388,85 @@ export default function ImportPage() {
       </div>
 
       <div className="rounded-xl mb-6 p-5" style={{ background: '#1c1c24', border: '1px solid #2d2d40' }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: '#f0f0f8' }}>Carga inicial con dataset real</p>
-            <p className="text-xs mt-1" style={{ color: '#8484a0' }}>
-              Importa aeropuertos y planes de vuelo desde `/datos` en un solo paso.
-            </p>
-          </div>
-          <button
-            onClick={handleImportDefaultDataset}
-            disabled={datasetLoading}
-            className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
-            style={{ background: '#6685ff', color: '#fff', opacity: datasetLoading ? 0.7 : 1 }}
-          >
-            {datasetLoading ? 'Importando...' : 'Importar dataset /datos'}
-          </button>
+        <div>
+          <p className="text-sm font-semibold" style={{ color: '#f0f0f8' }}>Carga inicial para simulacion</p>
+          <p className="text-xs mt-1" style={{ color: '#8484a0' }}>
+            Herramientas de recarga para pruebas. No necesitas usarlas si ya existe demanda en BD.
+          </p>
         </div>
 
         <div className="mt-4 flex items-center gap-2 flex-wrap">
           <button
-            onClick={handleGenerateDemand}
-            disabled={demandLoading}
+            onClick={handleLoadQuickDemand}
+            disabled={quickDemandLoading}
             className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
-            style={{ background: '#2f3b5c', color: '#fff', opacity: demandLoading ? 0.7 : 1 }}
+            style={{ background: '#2f3b5c', color: '#fff', opacity: quickDemandLoading ? 0.7 : 1 }}
           >
-            {demandLoading ? 'Generando demanda...' : 'Generar demanda masiva (4000, PEAK, seed 7)'}
+            {quickDemandLoading ? 'Cargando demanda rapida...' : 'Cargar demanda rapida (6 envios)'}
           </button>
-          {demandResult && (
+          {quickDemandResult && (
             <p className="text-xs" style={{ color: '#9aa3be' }}>
-              Escenario {demandResult.scenario}: {demandResult.created}/{demandResult.requested} creados (fallidos {demandResult.failed})
+              Escenario {quickDemandResult.scenario}: {quickDemandResult.created}/{quickDemandResult.requested} creados (fallidos {quickDemandResult.failed})
             </p>
           )}
         </div>
-        {demandError && (
-          <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
-            <p className="text-xs">⚠ {demandError}</p>
-          </div>
-        )}
 
-        {datasetError && (
-          <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
-            <p className="text-xs">⚠ {datasetError}</p>
-          </div>
-        )}
-
-        {datasetResult && (
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            <div className="rounded-lg p-3" style={{ background: '#232330', border: '1px solid #2d2d40' }}>
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold" style={{ color: '#f0f0f8' }}>Aeropuertos</p>
-                {statusBadge(datasetResult.airports.status)}
-              </div>
-              <p className="text-xs mt-2" style={{ color: '#8484a0' }}>
-                {datasetResult.airports.successRows}/{datasetResult.airports.totalRows} filas exitosas
-              </p>
-            </div>
-            <div className="rounded-lg p-3" style={{ background: '#232330', border: '1px solid #2d2d40' }}>
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold" style={{ color: '#f0f0f8' }}>Vuelos</p>
-                {statusBadge(datasetResult.flights.status)}
-              </div>
-              <p className="text-xs mt-2" style={{ color: '#8484a0' }}>
-                {datasetResult.flights.successRows}/{datasetResult.flights.totalRows} filas exitosas
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-xl mb-6 p-5" style={{ background: '#1c1c24', border: '1px solid #2d2d40' }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: '#f0f0f8' }}>Benchmark y tuning asíncrono</p>
-            <p className="text-xs mt-1" style={{ color: '#8484a0' }}>
-              Descarga demanda de escenarios y ejecuta benchmark sin bloquear la interfaz.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleDownloadScenarioDemand}
-              className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
-              style={{ background: '#2f3b5c', color: '#fff' }}
-            >
-              Descargar demanda
-            </button>
-            <button
-              onClick={handleStartBenchmark}
-              disabled={benchmarkLoading}
-              className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
-              style={{ background: '#6685ff', color: '#fff', opacity: benchmarkLoading ? 0.7 : 1 }}
-            >
-              {benchmarkLoading ? 'Ejecutando...' : 'Ejecutar benchmark'}
-            </button>
-          </div>
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleLoadAllOfficialEnvios}
+            disabled={fullEnviosLoading}
+            className="text-sm font-semibold px-4 py-2 rounded-lg cursor-pointer transition-colors"
+            style={{ background: '#355f44', color: '#fff', opacity: fullEnviosLoading ? 0.7 : 1 }}
+          >
+            {fullEnviosLoading ? 'Importando envios oficiales...' : 'Cargar TODOS los envios oficiales'}
+          </button>
+          <p className="text-xs" style={{ color: '#9aa3be' }}>
+            Usa este boton para simular sobre la carpeta completa `datos/envios`.
+          </p>
         </div>
 
-        {benchmarkError && (
+        {quickDemandError && (
           <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
-            <p className="text-xs">⚠ {benchmarkError}</p>
+            <p className="text-xs">⚠ {quickDemandError}</p>
           </div>
         )}
 
-        {benchmarkJob && (
-          <div className="mt-3 rounded-lg p-3" style={{ background: '#232330', border: '1px solid #2d2d40' }}>
-            <p className="text-xs font-semibold" style={{ color: '#f0f0f8' }}>
-              Estado: {benchmarkJob.status} · {benchmarkJob.message}
+        {fullEnviosError && (
+          <div className="mt-3 px-3 py-2 rounded-lg" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
+            <p className="text-xs">⚠ {fullEnviosError}</p>
+          </div>
+        )}
+
+        {fullEnviosResult && (
+          <div className="mt-3 rounded-lg p-3" style={{ background: '#1f2b24', border: '1px solid #355f44' }}>
+            <p className="text-xs" style={{ color: '#cfe8d5' }}>
+              Dataset oficial cargado: {fullEnviosResult.importedRows}/{fullEnviosResult.requestedRows} importados ·
+              fallidos {fullEnviosResult.failedRows} · archivos {fullEnviosResult.processedFiles}/{fullEnviosResult.totalFiles}
             </p>
-            {benchmarkJob.result && (
-              <>
-                <p className="text-xs mt-2" style={{ color: '#8484a0' }}>
-                  Winner global: {benchmarkJob.result.winner} · muestra {benchmarkJob.result.sampleSize} · envíos {benchmarkJob.result.createdShipments}/{benchmarkJob.result.generatedRows}
+            <p className="text-[11px] mt-2" style={{ color: '#b8d8c0' }}>
+              Consistencia: leidos {fullEnviosResult.requestedRows} = importados {fullEnviosResult.importedRows} + fallidos {fullEnviosResult.failedRows}
+            </p>
+            {Object.keys(fullEnviosResult.failureByCause ?? {}).length > 0 && (
+              <div className="mt-2">
+                <p className="text-[11px]" style={{ color: '#b8d8c0' }}>Fallos por causa:</p>
+                <p className="text-[11px]" style={{ color: '#9dc7a8' }}>
+                  {Object.entries(fullEnviosResult.failureByCause)
+                    .map(([cause, value]) => `${cause}: ${value}`)
+                    .join(' · ')}
                 </p>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  {benchmarkJob.result.scenarios.map((scenario) => (
-                    <div key={scenario.scenario} className="rounded p-2" style={{ background: '#1b1e2d', border: '1px solid #2d2d40' }}>
-                      <p className="text-[11px] font-semibold" style={{ color: '#f0f0f8' }}>{scenario.scenario}</p>
-                      <p className="text-[11px]" style={{ color: '#9aa3be' }}>
-                        winner {scenario.winner} · envíos {scenario.createdShipments}/{scenario.sampleSize}
-                      </p>
-                      <p className="text-[11px]" style={{ color: '#9aa3be' }}>
-                        cancelados {scenario.cancelledFlights} · replans {scenario.replannings}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-                {benchmarkJob.result.confidence && (
-                  <p className="text-[11px] mt-2" style={{ color: '#9aa3be' }}>
-                    IC95 score ganador [{benchmarkJob.result.confidence.ci95Low.toFixed(2)}, {benchmarkJob.result.confidence.ci95High.toFixed(2)}] ·
-                    delta vs runner-up {benchmarkJob.result.confidence.deltaVsRunnerUp.toFixed(2)}
-                  </p>
-                )}
-              </>
+              </div>
             )}
           </div>
         )}
+
+        {fullEnviosJob && fullEnviosJob.status === 'RUNNING' && (
+          <div className="mt-3 rounded-lg p-3" style={{ background: '#22314a', border: '1px solid #36527a' }}>
+            <p className="text-xs" style={{ color: '#c7d6f0' }}>
+              Importacion en progreso: {fullEnviosJob.message}
+            </p>
+          </div>
+        )}
+
       </div>
 
       {/* ── Import section ── */}

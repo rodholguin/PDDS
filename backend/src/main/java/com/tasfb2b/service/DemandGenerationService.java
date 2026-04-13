@@ -5,6 +5,7 @@ import com.tasfb2b.dto.DemandGenerationResultDto;
 import com.tasfb2b.dto.ShipmentCreateDto;
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Continent;
+import com.tasfb2b.model.Flight;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,9 +13,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -25,6 +30,7 @@ public class DemandGenerationService {
     );
 
     private final com.tasfb2b.repository.AirportRepository airportRepository;
+    private final com.tasfb2b.repository.FlightRepository flightRepository;
     private final ShipmentOrchestratorService shipmentOrchestratorService;
 
     @Transactional
@@ -46,14 +52,20 @@ public class DemandGenerationService {
         List<Airport> asia = airports.stream().filter(a -> a.getContinent() == Continent.ASIA).toList();
         List<Airport> all = new ArrayList<>(airports);
 
+        Map<String, List<Airport>> directConnections = buildDirectConnections(airports);
+        Set<String> originsWithOutbound = new HashSet<>(directConnections.keySet());
+
         Random random = new Random(seed);
         LocalDateTime cursor = LocalDate.now().atStartOfDay().plusHours(startHour);
 
         int created = 0;
         int failed = 0;
         for (int i = 0; i < requested; i++) {
-            Airport origin = pickOriginByScenario(scenario, random, america, europe, asia, all);
-            Airport destination = pickDestinationByScenario(scenario, random, origin, america, europe, asia, all);
+            Airport origin = pickOriginByScenario(scenario, random, america, europe, asia, all, originsWithOutbound);
+            Airport destination = pickConnectedDestination(origin, random, directConnections);
+            if (destination == null) {
+                destination = pickDestinationByScenario(scenario, random, origin, america, europe, asia, all);
+            }
             if (origin == null || destination == null || origin.getId().equals(destination.getId())) {
                 failed++;
                 continue;
@@ -62,7 +74,7 @@ public class DemandGenerationService {
             int luggage = sampleLuggageByScenario(scenario, random);
             String airline = AIRLINES.get(Math.floorMod(i + seed, AIRLINES.size()));
             String algorithm = forcedAlgorithm == null || forcedAlgorithm.isBlank()
-                    ? ((i + seed) % 2 == 0 ? "Genetic Algorithm" : "Ant Colony Optimization")
+                    ? "Genetic Algorithm"
                     : forcedAlgorithm;
 
             try {
@@ -106,7 +118,23 @@ public class DemandGenerationService {
                                          List<Airport> america,
                                          List<Airport> europe,
                                          List<Airport> asia,
-                                         List<Airport> all) {
+                                         List<Airport> all,
+                                         Set<String> originsWithOutbound) {
+        List<Airport> safeAmerica = america.stream().filter(a -> originsWithOutbound.contains(a.getIcaoCode())).toList();
+        List<Airport> safeEurope = europe.stream().filter(a -> originsWithOutbound.contains(a.getIcaoCode())).toList();
+        List<Airport> safeAsia = asia.stream().filter(a -> originsWithOutbound.contains(a.getIcaoCode())).toList();
+        List<Airport> safeAll = all.stream().filter(a -> originsWithOutbound.contains(a.getIcaoCode())).toList();
+
+        if (!safeAll.isEmpty()) {
+            return switch (scenario) {
+                case "COLLAPSE" -> pickFromWeighted(random, List.of(safeAmerica, safeEurope, safeAsia), List.of(50, 25, 25), safeAll);
+                case "PEAK" -> pickFromWeighted(random, List.of(safeAmerica, safeEurope, safeAsia), List.of(40, 30, 30), safeAll);
+                case "DISRUPTION" -> pickFromWeighted(random, List.of(safeAmerica, safeEurope, safeAsia), List.of(35, 45, 20), safeAll);
+                case "RECOVERY" -> pickFromWeighted(random, List.of(safeAmerica, safeEurope, safeAsia), List.of(34, 33, 33), safeAll);
+                default -> safeAll.get(random.nextInt(safeAll.size()));
+            };
+        }
+
         return switch (scenario) {
             case "COLLAPSE" -> pickFromWeighted(random, List.of(america, europe, asia), List.of(50, 25, 25), all);
             case "PEAK" -> pickFromWeighted(random, List.of(america, europe, asia), List.of(40, 30, 30), all);
@@ -144,6 +172,41 @@ public class DemandGenerationService {
         }
 
         return all.stream().filter(a -> !a.getId().equals(origin.getId())).findFirst().orElse(null);
+    }
+
+    private Airport pickConnectedDestination(Airport origin,
+                                             Random random,
+                                             Map<String, List<Airport>> directConnections) {
+        if (origin == null) {
+            return null;
+        }
+        List<Airport> options = directConnections.get(origin.getIcaoCode());
+        if (options == null || options.isEmpty()) {
+            return null;
+        }
+        return options.get(random.nextInt(options.size()));
+    }
+
+    private Map<String, List<Airport>> buildDirectConnections(List<Airport> airports) {
+        Map<Long, Airport> airportById = new HashMap<>();
+        for (Airport airport : airports) {
+            airportById.put(airport.getId(), airport);
+        }
+
+        Map<String, List<Airport>> byOrigin = new HashMap<>();
+        List<Flight> flights = flightRepository.findAll();
+        for (Flight flight : flights) {
+            if (flight.getOriginAirport() == null || flight.getDestinationAirport() == null) {
+                continue;
+            }
+            Airport origin = airportById.get(flight.getOriginAirport().getId());
+            Airport destination = airportById.get(flight.getDestinationAirport().getId());
+            if (origin == null || destination == null || origin.getId().equals(destination.getId())) {
+                continue;
+            }
+            byOrigin.computeIfAbsent(origin.getIcaoCode(), ignored -> new ArrayList<>()).add(destination);
+        }
+        return byOrigin;
     }
 
     private Airport pickFromWeighted(Random random,
