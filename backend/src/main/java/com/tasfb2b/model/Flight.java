@@ -98,12 +98,12 @@ public class Flight {
 
     @Transient
     public int getAvailableCapacity() {
-        return (maxCapacity == null ? 0 : maxCapacity) - currentLoad;
+        return Math.max(0, (maxCapacity == null ? 0 : maxCapacity) - currentLoad);
     }
 
     @Transient
     public double getLoadPct() {
         if (maxCapacity == null || maxCapacity == 0) return 0.0;
-        return (double) currentLoad / maxCapacity * 100.0;
+        return Math.min(100.0, ((double) currentLoad / maxCapacity) * 100.0);
     }
 }

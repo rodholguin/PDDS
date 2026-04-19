@@ -3,14 +3,18 @@ package com.tasfb2b.controller;
 import com.tasfb2b.dto.DemandGenerationRequestDto;
 import com.tasfb2b.dto.DatasetStatusDto;
 import com.tasfb2b.dto.EnviosDatasetImportRequestDto;
+import com.tasfb2b.dto.FutureDemandGenerationRequestDto;
+import com.tasfb2b.dto.FutureDemandGenerationResultDto;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.DataImportLog;
+import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.repository.DataImportLogRepository;
 import com.tasfb2b.service.BenchmarkTuningService;
 import com.tasfb2b.service.BenchmarkJobService;
 import com.tasfb2b.service.DataImportService;
 import com.tasfb2b.service.DemandGenerationService;
 import com.tasfb2b.service.EnviosImportJobService;
+import com.tasfb2b.service.FutureDemandProjectionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -39,6 +43,8 @@ public class DataImportController {
     private final DemandGenerationService demandGenerationService;
     private final EnviosImportJobService enviosImportJobService;
     private final com.tasfb2b.repository.ShipmentRepository shipmentRepository;
+    private final FutureDemandProjectionService futureDemandProjectionService;
+    private final com.tasfb2b.repository.SimulationConfigRepository simulationConfigRepository;
 
     // ── Upload endpoints ──────────────────────────────────────────────────────
 
@@ -48,6 +54,7 @@ public class DataImportController {
                              "luggage_count, registration_date")
     public ResponseEntity<DataImportLog> importShipments(
             @RequestParam("file") MultipartFile file) {
+        markProjectedDemandAsStale();
         DataImportLog result = importService.importShipments(file);
         return ResponseEntity.ok(result);
     }
@@ -97,13 +104,20 @@ public class DataImportController {
     @GetMapping("/dataset-status")
     @Operation(summary = "Estado agregado del dataset de envios")
     public ResponseEntity<DatasetStatusDto> datasetStatus() {
+        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
         return ResponseEntity.ok(new DatasetStatusDto(
                 shipmentRepository.count(),
                 shipmentRepository.countByStatus(ShipmentStatus.PENDING),
                 shipmentRepository.countByStatus(ShipmentStatus.IN_ROUTE),
                 shipmentRepository.countByStatus(ShipmentStatus.DELIVERED),
                 shipmentRepository.countByStatus(ShipmentStatus.DELAYED),
-                shipmentRepository.countByStatus(ShipmentStatus.CRITICAL)
+                shipmentRepository.countByStatus(ShipmentStatus.CRITICAL),
+                config != null && Boolean.TRUE.equals(config.getProjectedDemandReady()),
+                config == null ? null : config.getProjectedHistoricalFrom(),
+                config == null ? null : config.getProjectedHistoricalTo(),
+                config == null ? null : config.getProjectedFrom(),
+                config == null ? null : config.getProjectedTo(),
+                config == null ? null : config.getProjectedGeneratedAt()
         ));
     }
 
@@ -144,6 +158,7 @@ public class DataImportController {
     @PostMapping("/benchmark/run")
     @Operation(summary = "Ejecutar benchmark y tuning con escenarios de demanda")
     public ResponseEntity<?> runBenchmarkAndTune() {
+        markProjectedDemandAsStale();
         var rows = benchmarkTuningService.buildDefaultScenarioRows();
         int created = benchmarkTuningService.generateDemandFromScenarioRows(rows);
         var summary = benchmarkTuningService.runBenchmarkAndTune();
@@ -193,6 +208,7 @@ public class DataImportController {
     @PostMapping("/demand/generate")
     @Operation(summary = "Generar demanda masiva por escenario")
     public ResponseEntity<?> generateDemand(@Valid @RequestBody DemandGenerationRequestDto request) {
+        markProjectedDemandAsStale();
         var result = demandGenerationService.generate(request);
         return ResponseEntity.ok(java.util.Map.of(
                 "message", "Demanda generada",
@@ -200,9 +216,30 @@ public class DataImportController {
         ));
     }
 
+    @PostMapping("/demand/project-future")
+    @Operation(summary = "Generar demanda futura (24 meses) basada en historica")
+    public ResponseEntity<FutureDemandGenerationResultDto> projectFutureDemand(
+            @Valid @RequestBody FutureDemandGenerationRequestDto request
+    ) {
+        return ResponseEntity.ok(futureDemandProjectionService.generate(request));
+    }
+
+    @PostMapping("/demand/repair-coverage")
+    @Operation(summary = "Reparar huecos diarios de demanda proyectada")
+    public ResponseEntity<?> repairProjectedCoverage(@Valid @RequestBody FutureDemandGenerationRequestDto request) {
+        int inserted = futureDemandProjectionService.repairProjectedDailyCoverage(request.projectionStart(), request.projectionEnd());
+        return ResponseEntity.ok(java.util.Map.of(
+                "message", "Cobertura diaria reparada",
+                "insertedDays", inserted,
+                "from", request.projectionStart(),
+                "to", request.projectionEnd()
+        ));
+    }
+
     @PostMapping("/shipments/dataset")
     @Operation(summary = "Importar envios desde carpeta /datos/envios con muestreo reproducible")
     public ResponseEntity<?> importShipmentsDataset(@RequestBody(required = false) EnviosDatasetImportRequestDto request) {
+        markProjectedDemandAsStale();
         var result = importService.importShipmentsFromEnviosDataset(request);
         return ResponseEntity.ok(java.util.Map.of(
                 "message", "Dataset de envios importado",
@@ -213,6 +250,7 @@ public class DataImportController {
     @PostMapping("/shipments/dataset/full")
     @Operation(summary = "Importar todos los envios oficiales desde /datos/envios")
     public ResponseEntity<?> importFullShipmentsDataset() {
+        markProjectedDemandAsStale();
         var result = importService.importShipmentsFromEnviosDataset(
                 new EnviosDatasetImportRequestDto(7, 60, 50000, null, true, null)
         );
@@ -225,6 +263,7 @@ public class DataImportController {
     @PostMapping("/shipments/dataset/full/start")
     @Operation(summary = "Iniciar importacion completa de envios en modo asíncrono")
     public ResponseEntity<?> startFullShipmentsDatasetImport() {
+        markProjectedDemandAsStale();
         String jobId = enviosImportJobService.startFullImport();
         return ResponseEntity.accepted().body(java.util.Map.of(
                 "message", "Importacion full de envios iniciada",
@@ -249,5 +288,19 @@ public class DataImportController {
             ));
         }
         return ResponseEntity.ok(latest);
+    }
+
+    private void markProjectedDemandAsStale() {
+        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        if (config == null) {
+            config = SimulationConfig.builder().build();
+        }
+        config.setProjectedDemandReady(false);
+        config.setProjectedHistoricalFrom(null);
+        config.setProjectedHistoricalTo(null);
+        config.setProjectedFrom(null);
+        config.setProjectedTo(null);
+        config.setProjectedGeneratedAt(null);
+        simulationConfigRepository.save(config);
     }
 }

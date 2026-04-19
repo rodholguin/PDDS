@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -29,18 +30,21 @@ public class OperationalBootstrapService {
     private final SimulationConfigRepository simulationConfigRepository;
     private final DataImportService dataImportService;
     private final AlgorithmProfileService algorithmProfileService;
+    private final FutureDemandProjectionService futureDemandProjectionService;
 
     @EventListener(ApplicationReadyEvent.class)
     @Transactional
     public void bootstrap() {
         ensureSimulationConfig();
         ensureRealDatasetLoaded();
+        ensureFutureDemandProjectedAsync();
     }
 
     private void ensureSimulationConfig() {
-        SimulationConfig config = simulationConfigRepository.findAll().stream()
-                .findFirst()
-                .orElseGet(() -> simulationConfigRepository.save(SimulationConfig.builder().build()));
+        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        if (config == null) {
+            config = simulationConfigRepository.save(SimulationConfig.builder().build());
+        }
 
         if (config.getScenario() == null) config.setScenario(SimulationScenario.DAY_TO_DAY);
         if (config.getSimulationDays() == null) config.setSimulationDays(5);
@@ -55,7 +59,7 @@ public class OperationalBootstrapService {
         if (config.getInterNodeCapacity() == null) config.setInterNodeCapacity(800);
         if (config.getIsRunning() == null) config.setIsRunning(false);
         config.setPrimaryAlgorithm(AlgorithmType.GENETIC);
-        config.setSecondaryAlgorithm(AlgorithmType.ANT_COLONY);
+        config.setSecondaryAlgorithm(AlgorithmType.GENETIC);
         simulationConfigRepository.save(config);
 
         algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
@@ -82,6 +86,25 @@ public class OperationalBootstrapService {
             );
         } catch (Exception ex) {
             log.error("No se pudo importar dataset real al iniciar: {}", ex.getMessage());
+        }
+    }
+
+    @Async
+    void ensureFutureDemandProjectedAsync() {
+        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        if (config == null) {
+            config = simulationConfigRepository.save(SimulationConfig.builder().build());
+        }
+        if (Boolean.TRUE.equals(config.getProjectedDemandReady())
+                && config.getProjectedTo() != null
+                && !config.getProjectedTo().isBefore(java.time.LocalDate.of(2030, 12, 31))) {
+            return;
+        }
+        try {
+            futureDemandProjectionService.ensureCoverageUntil(java.time.LocalDate.of(2030, 12, 31));
+            log.info("Demanda futura proyectada y almacenada automaticamente al iniciar");
+        } catch (Exception ex) {
+            log.error("No se pudo proyectar demanda futura al iniciar: {}", ex.getMessage());
         }
     }
 

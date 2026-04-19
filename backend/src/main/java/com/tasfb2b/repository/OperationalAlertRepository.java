@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface OperationalAlertRepository extends JpaRepository<OperationalAlert, Long> {
@@ -16,6 +17,12 @@ public interface OperationalAlertRepository extends JpaRepository<OperationalAle
     List<OperationalAlert> findByStatusInOrderByIdDesc(List<OperationalAlertStatus> statuses);
 
     long countByStatusIn(List<OperationalAlertStatus> statuses);
+
+    Optional<OperationalAlert> findFirstByShipmentIdAndTypeAndStatusInOrderByIdDesc(Long shipmentId,
+                                                                                     String type,
+                                                                                     List<OperationalAlertStatus> statuses);
+
+    boolean existsByIdIsNotNull();
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional

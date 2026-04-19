@@ -7,21 +7,25 @@ import com.tasfb2b.dto.SimulationEventDto;
 import com.tasfb2b.dto.SimulationResultsDto;
 import com.tasfb2b.dto.SimulationSpeedDto;
 import com.tasfb2b.dto.SimulationStateDto;
+import com.tasfb2b.model.AlgorithmType;
 import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.AlgorithmRaceService;
+import com.tasfb2b.service.FutureDemandProjectionService;
 import com.tasfb2b.service.OperationalBootstrapService;
+import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import com.tasfb2b.service.AlgorithmProfileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -42,9 +46,10 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/simulation")
-@RequiredArgsConstructor
 @Tag(name = "Simulación", description = "Control del escenario de simulación y métricas de colapso")
 public class SimulationController {
+
+    private static final Logger log = LoggerFactory.getLogger(SimulationController.class);
 
     private final SimulationConfigRepository configRepository;
     private final RoutePlannerService routePlannerService;
@@ -56,6 +61,36 @@ public class SimulationController {
     private final SimulationExportService simulationExportService;
     private final SimulationEngineService simulationEngineService;
     private final AlgorithmProfileService algorithmProfileService;
+    private final FlightScheduleService flightScheduleService;
+    private final FutureDemandProjectionService futureDemandProjectionService;
+
+    public SimulationController(
+            SimulationConfigRepository configRepository,
+            RoutePlannerService routePlannerService,
+            CollapseMonitorService collapseMonitorService,
+            ShipmentRepository shipmentRepository,
+            SimulationRuntimeService runtimeService,
+            AlgorithmRaceService algorithmRaceService,
+            OperationalBootstrapService operationalBootstrapService,
+            SimulationExportService simulationExportService,
+            SimulationEngineService simulationEngineService,
+            AlgorithmProfileService algorithmProfileService,
+            FlightScheduleService flightScheduleService,
+            FutureDemandProjectionService futureDemandProjectionService
+    ) {
+        this.configRepository = configRepository;
+        this.routePlannerService = routePlannerService;
+        this.collapseMonitorService = collapseMonitorService;
+        this.shipmentRepository = shipmentRepository;
+        this.runtimeService = runtimeService;
+        this.algorithmRaceService = algorithmRaceService;
+        this.operationalBootstrapService = operationalBootstrapService;
+        this.simulationExportService = simulationExportService;
+        this.simulationEngineService = simulationEngineService;
+        this.algorithmProfileService = algorithmProfileService;
+        this.flightScheduleService = flightScheduleService;
+        this.futureDemandProjectionService = futureDemandProjectionService;
+    }
 
     @GetMapping("/state")
     @Operation(summary = "Obtener estado actual de la simulación")
@@ -85,8 +120,16 @@ public class SimulationController {
         if (dto.interNodeCapacity() != null) config.setInterNodeCapacity(dto.interNodeCapacity());
         if (dto.normalThresholdPct() != null) config.setNormalThresholdPct(dto.normalThresholdPct());
         if (dto.warningThresholdPct() != null) config.setWarningThresholdPct(dto.warningThresholdPct());
-        if (dto.primaryAlgorithm() != null) config.setPrimaryAlgorithm(dto.primaryAlgorithm());
-        if (dto.secondaryAlgorithm() != null) config.setSecondaryAlgorithm(dto.secondaryAlgorithm());
+        if (dto.scenarioStartDate() != null) {
+            LocalDateTime scenarioStart = dto.scenarioStartDate().atStartOfDay();
+            config.setRequestedScenarioStartAt(scenarioStart);
+            config.setScenarioStartAt(scenarioStart);
+            config.setEffectiveScenarioStartAt(scenarioStart);
+            config.setDateAdjusted(false);
+            config.setDateAdjustmentReason(null);
+        }
+        config.setPrimaryAlgorithm(AlgorithmType.GENETIC);
+        config.setSecondaryAlgorithm(AlgorithmType.GENETIC);
 
         configRepository.save(config);
         algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
@@ -97,6 +140,18 @@ public class SimulationController {
     @Operation(summary = "Iniciar simulación")
     public ResponseEntity<?> start() {
         SimulationConfig config = getConfig();
+        if (!Boolean.TRUE.equals(config.getProjectedDemandReady())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Genera demanda futura antes de iniciar la simulacion"
+            ));
+        }
+        if (Boolean.TRUE.equals(config.getIsRunning()) && runtimeService.isPaused()) {
+            runtimeService.markResumed();
+            return ResponseEntity.ok(Map.of(
+                    "message", "Simulacion reanudada",
+                    "state", runtimeService.getState()
+            ));
+        }
         if (Boolean.TRUE.equals(config.getIsRunning()) && !runtimeService.isPaused()) {
             return ResponseEntity.ok(Map.of(
                     "message", "La simulacion ya estaba en curso",
@@ -104,16 +159,71 @@ public class SimulationController {
             ));
         }
 
-        config.setIsRunning(true);
+        // Issue 7.2: resolve scenario/date mutations BEFORE flipping isRunning so that concurrent
+        // ticks never observe running=true with stale scenarioStartAt/effectiveScenarioStartAt.
         if (config.getStartedAt() == null) {
             config.setStartedAt(LocalDateTime.now());
         }
+        LocalDateTime minDemand = shipmentRepository.findMinRegistrationDate();
+        LocalDateTime maxDemand = shipmentRepository.findMaxRegistrationDate();
+        LocalDateTime desiredStart = config.getScenarioStartAt();
+        config.setRequestedScenarioStartAt(desiredStart);
+
+        // Default to projected demand start when no explicit start date is set
+        if (desiredStart == null
+                && Boolean.TRUE.equals(config.getProjectedDemandReady())
+                && config.getProjectedFrom() != null) {
+            desiredStart = config.getProjectedFrom().atStartOfDay();
+            config.setScenarioStartAt(desiredStart);
+            config.setEffectiveScenarioStartAt(desiredStart);
+            config.setDateAdjusted(false);
+            config.setDateAdjustmentReason("Fecha no enviada; se usa inicio de demanda proyectada");
+            log.info("scenarioStartAt defaulted to projectedFrom: {}", desiredStart);
+        }
+
+        boolean dateAdjusted = false;
+        String adjustmentReason = null;
+        if (minDemand != null) {
+            if (desiredStart == null || desiredStart.isBefore(minDemand)
+                    || (maxDemand != null && desiredStart.isAfter(maxDemand))) {
+                // Prefer projected demand start over earliest historical date
+                LocalDateTime fallback = (config.getProjectedFrom() != null)
+                        ? config.getProjectedFrom().atStartOfDay()
+                        : minDemand;
+                log.warn("scenarioStartAt ajustado: solicitado={}, rango=[{}, {}], usando={}",
+                        desiredStart, minDemand, maxDemand, fallback);
+                desiredStart = fallback;
+                config.setScenarioStartAt(desiredStart);
+                dateAdjusted = true;
+                adjustmentReason = "Fecha ajustada al rango de demanda disponible";
+            }
+        }
+        config.setEffectiveScenarioStartAt(desiredStart);
+        config.setDateAdjusted(dateAdjusted);
+        config.setDateAdjustmentReason(adjustmentReason);
+        if (desiredStart != null) {
+            runtimeService.setSimulationTime(desiredStart);
+            flightScheduleService.ensureFlightsForSimulationWindow(desiredStart);
+        }
+
+        // Flip isRunning last — after all scenario/date fields are finalized in memory —
+        // so the single save below atomically publishes a consistent state to the DB.
+        config.setIsRunning(true);
         configRepository.save(config);
+
+        log.info("Simulacion iniciada — escenario={}, secondsPerTick={}, scenarioStartAt={}, effectiveStartAt={}, dateAdjusted={}",
+                config.getScenario(),
+                runtimeService.simulationSecondsPerTick(config),
+                config.getScenarioStartAt(),
+                desiredStart,
+                dateAdjusted);
+
         runtimeService.markStarted();
-        simulationEngineService.warmStartTick();
 
         return ResponseEntity.ok(Map.of(
-                "message", "Simulacion iniciada",
+                "message", dateAdjusted
+                        ? "Simulacion iniciada (fecha ajustada al rango de demanda: " + desiredStart + ")"
+                        : "Simulacion iniciada",
                 "state", runtimeService.getState()
         ));
     }
@@ -122,7 +232,9 @@ public class SimulationController {
     @Operation(summary = "Detener simulación y reiniciar estado operativo")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> stop() {
-        runtimeService.resetToInitialStateKeepingDemand();
+        runtimeService.prepareStop();
+        awaitTickDrain();
+        runtimeService.resetOperationalData();
 
         return ResponseEntity.ok(Map.of(
                 "message", "Simulacion detenida y estado reiniciado",
@@ -134,7 +246,9 @@ public class SimulationController {
     @Operation(summary = "Reiniciar simulacion a estado inicial manteniendo pedidos")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> resetToInitial() {
-        runtimeService.resetToInitialStateKeepingDemand();
+        runtimeService.prepareStop();
+        awaitTickDrain();
+        runtimeService.resetOperationalData();
         return ResponseEntity.ok(Map.of(
                 "message", "Estado inicial restaurado",
                 "state", runtimeService.getState()
@@ -158,11 +272,38 @@ public class SimulationController {
         if (!Boolean.TRUE.equals(config.getIsRunning())) {
             return ResponseEntity.badRequest().body(Map.of("error", "No hay simulacion en ejecucion"));
         }
+        if (runtimeService.isPaused()) {
+            return ResponseEntity.ok(Map.of(
+                    "message", "La simulacion ya estaba pausada",
+                    "state", runtimeService.getState()
+            ));
+        }
 
         configRepository.save(config);
         runtimeService.markPaused();
         return ResponseEntity.ok(Map.of(
                 "message", "Simulacion pausada",
+                "state", runtimeService.getState()
+        ));
+    }
+
+    @PostMapping("/resume")
+    @Operation(summary = "Reanudar simulación pausada")
+    public ResponseEntity<?> resume() {
+        SimulationConfig config = getConfig();
+        if (!Boolean.TRUE.equals(config.getIsRunning())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No hay simulacion iniciada"));
+        }
+        if (!runtimeService.isPaused()) {
+            return ResponseEntity.ok(Map.of(
+                    "message", "La simulacion ya estaba corriendo",
+                    "state", runtimeService.getState()
+            ));
+        }
+
+        runtimeService.markResumed();
+        return ResponseEntity.ok(Map.of(
+                "message", "Simulacion reanudada",
                 "state", runtimeService.getState()
         ));
     }
@@ -197,10 +338,11 @@ public class SimulationController {
     @GetMapping("/collapse-risk")
     @Operation(summary = "Riesgo de colapso del sistema")
     public ResponseEntity<CollapseRiskDto> getCollapseRisk() {
+        var snapshot = collapseMonitorService.snapshot();
         double risk = routePlannerService.getCollapseRisk();
-        double sysLoad = collapseMonitorService.computeSystemLoad();
-        double hours = collapseMonitorService.estimateTimeToCollapse();
-        var bottlenecks = collapseMonitorService.getBottleneckAirports()
+        double sysLoad = snapshot.avgLoadPct();
+        double hours = snapshot.hoursToCollapse();
+        var bottlenecks = snapshot.bottlenecks()
                 .stream()
                 .map(airport -> airport.getIcaoCode())
                 .toList();
@@ -306,5 +448,17 @@ public class SimulationController {
         return config != null
                 ? config
                 : configRepository.save(SimulationConfig.builder().build());
+    }
+
+    private void awaitTickDrain() {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (simulationEngineService.isTickInProgress() && System.nanoTime() < deadline) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.tasfb2b.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.tasfb2b.dto.SimulationTimeModeDto;
 import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
@@ -8,6 +9,7 @@ import com.tasfb2b.service.AlgorithmProfileService;
 import com.tasfb2b.service.AlgorithmRaceService;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.OperationalBootstrapService;
+import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationExportService;
@@ -18,6 +20,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doNothing;
@@ -45,6 +48,8 @@ class SimulationControllerSpeedTest {
     @MockBean private SimulationExportService simulationExportService;
     @MockBean private SimulationEngineService simulationEngineService;
     @MockBean private AlgorithmProfileService algorithmProfileService;
+    @MockBean private FlightScheduleService flightScheduleService;
+    @MockBean private PlatformTransactionManager transactionManager;
 
     @Test
     void setSpeedEndpointAcceptsFastSpeed() throws Exception {
@@ -63,13 +68,27 @@ class SimulationControllerSpeedTest {
                 800,
                 70,
                 90,
+                null,
+                null,
+                null,
+                false,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
                 com.tasfb2b.model.AlgorithmType.ANT_COLONY,
                 com.tasfb2b.model.AlgorithmType.GENETIC,
                 false,
                 false,
                 20,
-                0,
-                0,
+                SimulationTimeModeDto.REAL_TIME,
+                1L,
+                1L,
+                0L,
+                0L,
                 null,
                 null,
                 null,

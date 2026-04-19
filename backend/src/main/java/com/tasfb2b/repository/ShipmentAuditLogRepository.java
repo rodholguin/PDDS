@@ -21,6 +21,8 @@ public interface ShipmentAuditLogRepository extends JpaRepository<ShipmentAuditL
 
     Optional<ShipmentAuditLog> findTopByShipmentOrderByEventAtDesc(Shipment shipment);
 
+    boolean existsByIdIsNotNull();
+
     @Query("""
             SELECT COUNT(l) FROM ShipmentAuditLog l
             WHERE l.eventType = :eventType

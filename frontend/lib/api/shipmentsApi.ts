@@ -1,4 +1,4 @@
-import type { Shipment, ShipmentDetail, ShipmentFeasibility, ShipmentPlanningEvent, ShipmentStatus } from '@/lib/types';
+import type { Shipment, ShipmentDetail, ShipmentFeasibility, ShipmentPlanningEvent, ShipmentStatus, ShipmentUpcoming } from '@/lib/types';
 import { api } from './client';
 
 export interface ShipmentCreate {
@@ -7,7 +7,7 @@ export interface ShipmentCreate {
   destinationIcao: string;
   luggageCount: number;
   registrationDate?: string;
-  algorithmName?: 'Genetic Algorithm' | 'Ant Colony Optimization';
+  algorithmName?: 'Genetic Algorithm' | 'Ant Colony Optimization' | 'Simulated Annealing';
 }
 
 export interface ShipmentQuery {
@@ -16,6 +16,20 @@ export interface ShipmentQuery {
   origin?: string;
   destination?: string;
   code?: string;
+  date?: string;
+  fromDate?: boolean;
+  currentOnly?: boolean;
+  page?: number;
+  size?: number;
+  sort?: string;
+}
+
+export interface ShipmentUpcomingQuery {
+  status?: ShipmentStatus;
+  origin?: string;
+  destination?: string;
+  code?: string;
+  date?: string;
   page?: number;
   size?: number;
 }
@@ -38,8 +52,24 @@ export const shipmentsApi = {
     if (query.origin) params.set('origin', query.origin);
     if (query.destination) params.set('destination', query.destination);
     if (query.code) params.set('code', query.code);
+    if (query.date) params.set('date', query.date);
+    if (query.fromDate) params.set('fromDate', 'true');
+    if (query.currentOnly) params.set('currentOnly', 'true');
+    if (query.sort) params.set('sort', query.sort);
 
     return api<Page<Shipment>>(`/api/shipments?${params.toString()}`);
+  },
+
+  upcoming: (query: ShipmentUpcomingQuery = {}) => {
+    const params = new URLSearchParams();
+    params.set('page', String(query.page ?? 0));
+    params.set('size', String(query.size ?? 20));
+    if (query.status) params.set('status', query.status);
+    if (query.origin) params.set('origin', query.origin);
+    if (query.destination) params.set('destination', query.destination);
+    if (query.code) params.set('code', query.code);
+    if (query.date) params.set('date', query.date);
+    return api<Page<ShipmentUpcoming>>(`/api/shipments/upcoming?${params.toString()}`);
   },
 
   getById: (id: number) => api<ShipmentDetail>(`/api/shipments/${id}`),

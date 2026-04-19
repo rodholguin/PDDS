@@ -5,6 +5,7 @@ package com.tasfb2b.dto;
  */
 public record DashboardOverviewDto(
         long totalActiveFlights,
+        long nextScheduledFlights,
         long shipmentsInRoute,
         long totalShipmentsToday,
         long inTransitToday,

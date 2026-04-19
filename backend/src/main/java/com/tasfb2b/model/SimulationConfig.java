@@ -3,6 +3,7 @@ package com.tasfb2b.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -102,4 +103,45 @@ public class SimulationConfig {
     /** Momento en que se inició la última simulación. */
     @Column(name = "started_at")
     private LocalDateTime startedAt;
+
+    @Column(name = "scenario_start_at")
+    private LocalDateTime scenarioStartAt;
+
+    @Column(name = "requested_scenario_start_at")
+    private LocalDateTime requestedScenarioStartAt;
+
+    @Column(name = "effective_scenario_start_at")
+    private LocalDateTime effectiveScenarioStartAt;
+
+    @Column(name = "date_adjusted", nullable = false)
+    @Builder.Default
+    private Boolean dateAdjusted = false;
+
+    @Column(name = "date_adjustment_reason", length = 255)
+    private String dateAdjustmentReason;
+
+    @Column(name = "projected_demand_ready")
+    @Builder.Default
+    private Boolean projectedDemandReady = false;
+
+    @Column(name = "projected_historical_from")
+    private LocalDate projectedHistoricalFrom;
+
+    @Column(name = "projected_historical_to")
+    private LocalDate projectedHistoricalTo;
+
+    @Column(name = "projected_from")
+    private LocalDate projectedFrom;
+
+    @Column(name = "projected_to")
+    private LocalDate projectedTo;
+
+    @Column(name = "projected_generated_at")
+    private LocalDateTime projectedGeneratedAt;
+
+    @Column(name = "runtime_simulated_now")
+    private LocalDateTime runtimeSimulatedNow;
+
+    @Column(name = "runtime_last_tick_at")
+    private LocalDateTime runtimeLastTickAt;
 }

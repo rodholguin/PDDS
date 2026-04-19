@@ -4,23 +4,31 @@ import com.tasfb2b.model.*;
 import com.tasfb2b.repository.FlightRepository;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.TravelStopRepository;
+import com.tasfb2b.service.FlightScheduleService;
+import com.tasfb2b.service.OperationalAlertService;
 import com.tasfb2b.service.RoutePlannerService;
+import com.tasfb2b.service.SimulationRuntimeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.persistence.criteria.Predicate;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.Comparator;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/flights")
-@RequiredArgsConstructor
 @Slf4j
 @Tag(name = "Vuelos", description = "Consulta y gestión de vuelos")
 public class FlightController {
@@ -29,6 +37,27 @@ public class FlightController {
     private final TravelStopRepository travelStopRepository;
     private final ShipmentRepository   shipmentRepository;
     private final RoutePlannerService  routePlannerService;
+    private final FlightScheduleService flightScheduleService;
+    private final SimulationRuntimeService simulationRuntimeService;
+    private final OperationalAlertService operationalAlertService;
+
+    public FlightController(
+            FlightRepository flightRepository,
+            TravelStopRepository travelStopRepository,
+            ShipmentRepository shipmentRepository,
+            RoutePlannerService routePlannerService,
+            FlightScheduleService flightScheduleService,
+            SimulationRuntimeService simulationRuntimeService,
+            OperationalAlertService operationalAlertService
+    ) {
+        this.flightRepository = flightRepository;
+        this.travelStopRepository = travelStopRepository;
+        this.shipmentRepository = shipmentRepository;
+        this.routePlannerService = routePlannerService;
+        this.flightScheduleService = flightScheduleService;
+        this.simulationRuntimeService = simulationRuntimeService;
+        this.operationalAlertService = operationalAlertService;
+    }
 
     // ── Listados ──────────────────────────────────────────────────────────────
 
@@ -43,7 +72,11 @@ public class FlightController {
         } else {
             LocalDateTime dayStart = date.atStartOfDay();
             LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
-            flights = flightRepository.findByStatusAndDate(status, dayStart, dayEnd);
+            flights = (status == null ? flightRepository.findAll() : flightRepository.findByStatus(status)).stream()
+                    .filter(f -> f.getScheduledDeparture() != null)
+                    .filter(f -> !f.getScheduledDeparture().isBefore(dayStart))
+                    .filter(f -> f.getScheduledDeparture().isBefore(dayEnd))
+                    .toList();
         }
         return ResponseEntity.ok(flights);
     }
@@ -63,49 +96,65 @@ public class FlightController {
     ) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(200, size));
-        List<Flight> base;
-        if (date == null) {
-            base = status == null ? flightRepository.findAll() : flightRepository.findByStatus(status);
-        } else {
-            LocalDateTime dayStart = date.atStartOfDay();
-            LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
-            base = flightRepository.findByStatusAndDate(status, dayStart, dayEnd);
+        LocalDateTime dayStart = null;
+        LocalDateTime dayEnd = null;
+        if (date != null) {
+            dayStart = date.atStartOfDay();
+            dayEnd = date.plusDays(1).atStartOfDay();
         }
 
-        String codeFilter = normalizeContains(code);
-        String originFilter = normalizeExact(origin);
-        String destinationFilter = normalizeExact(destination);
-
-        Comparator<Flight> comparator = switch (sort) {
-            case "flightCode" -> Comparator.comparing(Flight::getFlightCode, String.CASE_INSENSITIVE_ORDER);
-            case "scheduledArrival" -> Comparator.comparing(Flight::getScheduledArrival, Comparator.nullsLast(LocalDateTime::compareTo));
-            default -> Comparator.comparing(Flight::getScheduledDeparture, Comparator.nullsLast(LocalDateTime::compareTo));
+        Sort sortSpec = switch (sort) {
+            case "flightCode" -> Sort.by(Sort.Direction.fromString(direction), "flightCode");
+            case "scheduledArrival" -> Sort.by(Sort.Direction.fromString(direction), "scheduledArrival");
+            default -> Sort.by(Sort.Direction.fromString(direction), "scheduledDeparture");
         };
-        if ("desc".equalsIgnoreCase(direction)) {
-            comparator = comparator.reversed();
-        }
 
-        List<Flight> filtered = base.stream()
-                .filter(f -> codeFilter == null || f.getFlightCode().toLowerCase().contains(codeFilter))
-                .filter(f -> originFilter == null || originFilter.equalsIgnoreCase(f.getOriginAirport().getIcaoCode()))
-                .filter(f -> destinationFilter == null || destinationFilter.equalsIgnoreCase(f.getDestinationAirport().getIcaoCode()))
-                .sorted(comparator)
-                .toList();
+        Pageable pageable = PageRequest.of(safePage, safeSize, sortSpec);
+        String normalizedCode = normalizeContains(code);
+        String normalizedOrigin = normalizeExact(origin);
+        String normalizedDestination = normalizeExact(destination);
+        LocalDateTime filterDayStart = dayStart;
+        LocalDateTime filterDayEnd = dayEnd;
 
-        long totalElements = filtered.size();
-        int totalPages = totalElements == 0 ? 0 : (int) Math.ceil(totalElements / (double) safeSize);
-        int fromIndex = Math.min(filtered.size(), safePage * safeSize);
-        int toIndex = Math.min(filtered.size(), fromIndex + safeSize);
-        List<Flight> pageContent = filtered.subList(fromIndex, toIndex);
+        Specification<Flight> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            if (status != null) {
+                predicates.add(cb.equal(root.get("status"), status));
+            }
+            if (normalizedCode != null) {
+                predicates.add(cb.like(cb.lower(root.get("flightCode")), normalizedCode));
+            }
+            if (normalizedOrigin != null) {
+                predicates.add(cb.equal(root.get("originAirport").get("icaoCode"), normalizedOrigin));
+            }
+            if (normalizedDestination != null) {
+                predicates.add(cb.equal(root.get("destinationAirport").get("icaoCode"), normalizedDestination));
+            }
+            if (filterDayStart != null) {
+                predicates.add(cb.greaterThanOrEqualTo(root.get("scheduledDeparture"), filterDayStart));
+            }
+            if (filterDayEnd != null) {
+                predicates.add(cb.lessThan(root.get("scheduledDeparture"), filterDayEnd));
+            }
+            if (status == FlightStatus.IN_FLIGHT) {
+                LocalDateTime now = simulationRuntimeService.effectiveNow();
+                predicates.add(cb.lessThanOrEqualTo(root.get("scheduledDeparture"), now));
+                predicates.add(cb.greaterThan(root.get("scheduledArrival"), now));
+                predicates.add(cb.greaterThan(root.get("currentLoad"), 0));
+            }
+            return cb.and(predicates.toArray(Predicate[]::new));
+        };
+
+        Page<Flight> result = flightRepository.findAll(spec, pageable);
 
         return ResponseEntity.ok(Map.of(
-                "content", pageContent,
-                "page", safePage,
-                "size", safeSize,
-                "totalElements", totalElements,
-                "totalPages", totalPages,
-                "hasNext", safePage + 1 < totalPages,
-                "hasPrevious", safePage > 0
+                "content", result.getContent(),
+                "page", result.getNumber(),
+                "size", result.getSize(),
+                "totalElements", result.getTotalElements(),
+                "totalPages", result.getTotalPages(),
+                "hasNext", result.hasNext(),
+                "hasPrevious", result.hasPrevious()
         ));
     }
 
@@ -144,9 +193,8 @@ public class FlightController {
                 .orElseThrow(() -> new IllegalArgumentException("Vuelo no encontrado: " + id));
 
         // Envíos cuya ruta incluye este vuelo (a través de TravelStop)
-        List<Map<String, Object>> assignedShipments = travelStopRepository.findAll().stream()
-                .filter(ts -> ts.getFlight() != null
-                           && ts.getFlight().getId().equals(id))
+        List<Map<String, Object>> assignedShipments = travelStopRepository.findByFlight(flight).stream()
+                .filter(ts -> ts.getShipment() != null)
                 .map(ts -> {
                     Shipment s = ts.getShipment();
                     return Map.<String, Object>of(
@@ -160,8 +208,23 @@ public class FlightController {
                 })
                 .toList();
 
+        Map<String, Object> flightDto = Map.ofEntries(
+                Map.entry("id", flight.getId()),
+                Map.entry("flightCode", flight.getFlightCode()),
+                Map.entry("originIcao", flight.getOriginAirport().getIcaoCode()),
+                Map.entry("destinationIcao", flight.getDestinationAirport().getIcaoCode()),
+                Map.entry("status", flight.getStatus()),
+                Map.entry("scheduledDeparture", flight.getScheduledDeparture()),
+                Map.entry("scheduledArrival", flight.getScheduledArrival()),
+                Map.entry("maxCapacity", flight.getMaxCapacity()),
+                Map.entry("currentLoad", flight.getCurrentLoad()),
+                Map.entry("availableCapacity", flight.getAvailableCapacity()),
+                Map.entry("loadPct", flight.getLoadPct()),
+                Map.entry("routeType", Boolean.TRUE.equals(flight.getIsInterContinental()) ? "INTER" : "INTRA")
+        );
+
         return ResponseEntity.ok(Map.of(
-                "flight",           flight,
+                "flight",           flightDto,
                 "assignedShipments", assignedShipments,
                 "loadPct",          flight.getLoadPct(),
                 "availableCapacity", flight.getAvailableCapacity()
@@ -202,6 +265,7 @@ public class FlightController {
         for (TravelStop stop : affectedStops) {
             try {
                 routePlannerService.replanShipment(stop.getShipment().getId());
+                operationalAlertService.ensureShipmentAlert(stop.getShipment(), "FLIGHT_CANCELLED", "Vuelo cancelado: " + flight.getFlightCode());
                 replanned++;
             } catch (Exception e) {
                 failed++;
@@ -222,7 +286,7 @@ public class FlightController {
     private String normalizeContains(String value) {
         if (value == null) return null;
         String trimmed = value.trim();
-        return trimmed.isBlank() ? null : trimmed.toLowerCase();
+        return trimmed.isBlank() ? null : "%" + trimmed.toLowerCase() + "%";
     }
 
     private String normalizeExact(String value) {

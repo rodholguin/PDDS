@@ -1,5 +1,6 @@
 package com.tasfb2b.controller;
 
+import com.tasfb2b.dto.SimulationTimeModeDto;
 import com.tasfb2b.model.AlgorithmType;
 import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.model.SimulationScenario;
@@ -7,6 +8,7 @@ import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.service.AlgorithmRaceService;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.OperationalBootstrapService;
+import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.AlgorithmProfileService;
 import com.tasfb2b.service.SimulationEngineService;
@@ -18,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
@@ -51,6 +54,10 @@ class SimulationControllerSeedStatisticalTest {
     private SimulationEngineService simulationEngineService;
     @MockBean
     private AlgorithmProfileService algorithmProfileService;
+    @MockBean
+    private FlightScheduleService flightScheduleService;
+    @MockBean
+    private PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void setup() {
@@ -80,13 +87,27 @@ class SimulationControllerSeedStatisticalTest {
                 800,
                 70,
                 90,
+                null,
+                null,
+                null,
+                false,
+                null,
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
                 AlgorithmType.GENETIC,
                 AlgorithmType.ANT_COLONY,
                 false,
                 false,
                 1,
-                0,
-                0,
+                SimulationTimeModeDto.REAL_TIME,
+                1L,
+                1L,
+                0L,
+                0L,
                 null,
                 null,
                 null,

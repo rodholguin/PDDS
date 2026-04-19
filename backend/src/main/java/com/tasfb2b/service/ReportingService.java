@@ -20,13 +20,17 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ReportingService {
 
     private final ShipmentRepository shipmentRepository;
+    private final SimulationRuntimeService simulationRuntimeService;
     private final Map<String, CachedSlaReport> slaCache = new ConcurrentHashMap<>();
     private static final long SLA_CACHE_TTL_MS = 45_000L;
 
     @Transactional(readOnly = true)
     public SlaReportDto slaReport(LocalDate from, LocalDate to) {
-        LocalDate fromDate = from == null ? LocalDate.now().minusDays(30) : from;
-        LocalDate toDate = to == null ? LocalDate.now() : to;
+        LocalDate referenceDate = simulationRuntimeService.currentSimulationTime()
+                .map(LocalDateTime::toLocalDate)
+                .orElse(LocalDate.now());
+        LocalDate fromDate = from == null ? referenceDate.minusDays(30) : from;
+        LocalDate toDate = to == null ? referenceDate : to;
         String cacheKey = fromDate + "|" + toDate;
         CachedSlaReport cached = slaCache.get(cacheKey);
         long nowMillis = System.currentTimeMillis();

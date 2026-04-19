@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -39,6 +40,9 @@ class SimulationEngineDepartureFlowTest {
     @Mock private AirportRepository airportRepository;
     @Mock private ShipmentAuditService shipmentAuditService;
     @Mock private SimulationRuntimeService runtimeService;
+    @Mock private RoutePlannerService routePlannerService;
+    @Mock private FlightScheduleService flightScheduleService;
+    @Mock private TransactionTemplate transactionTemplate;
 
     @InjectMocks
     private SimulationEngineService simulationEngineService;
@@ -50,54 +54,75 @@ class SimulationEngineDepartureFlowTest {
 
     @BeforeEach
     void setUp() {
-        Airport origin = Airport.builder().id(1L).icaoCode("SKBO").continent(Continent.AMERICA).build();
-        Airport destination = Airport.builder().id(2L).icaoCode("SEQM").continent(Continent.AMERICA).build();
+        org.mockito.Mockito.doAnswer(invocation -> {
+            java.util.function.Consumer<org.springframework.transaction.TransactionStatus> consumer = invocation.getArgument(0);
+            consumer.accept(null);
+            return null;
+        }).when(transactionTemplate).executeWithoutResult(any());
 
-        shipment = Shipment.builder()
-                .id(1L)
-                .shipmentCode("000000001-20250102")
-                .originAirport(origin)
-                .destinationAirport(destination)
-                .luggageCount(15)
-                .status(ShipmentStatus.PENDING)
-                .registrationDate(LocalDateTime.now().minusMinutes(2))
-                .build();
+        Airport origin = new Airport();
+        origin.setId(1L);
+        origin.setIcaoCode("SKBO");
+        origin.setContinent(Continent.AMERICA);
+        origin.setCity("Bogota");
+        origin.setCountry("Colombia");
+        origin.setLatitude(4.7016);
+        origin.setLongitude(-74.1469);
+        origin.setMaxStorageCapacity(800);
+        origin.setCurrentStorageLoad(0);
 
-        flight = Flight.builder()
-                .id(100L)
-                .flightCode("FL100")
-                .originAirport(origin)
-                .destinationAirport(destination)
-                .scheduledDeparture(LocalDateTime.now().minusMinutes(1))
-                .scheduledArrival(LocalDateTime.now().plusHours(1))
-                .maxCapacity(100)
-                .currentLoad(20)
-                .status(FlightStatus.SCHEDULED)
-                .build();
+        Airport destination = new Airport();
+        destination.setId(2L);
+        destination.setIcaoCode("SEQM");
+        destination.setContinent(Continent.AMERICA);
+        destination.setCity("Quito");
+        destination.setCountry("Ecuador");
+        destination.setLatitude(-0.1292);
+        destination.setLongitude(-78.3575);
+        destination.setMaxStorageCapacity(800);
+        destination.setCurrentStorageLoad(0);
 
-        originStop = TravelStop.builder()
-                .shipment(shipment)
-                .airport(origin)
-                .flight(null)
-                .stopOrder(0)
-                .stopStatus(StopStatus.PENDING)
-                .build();
+        shipment = new Shipment();
+        shipment.setId(1L);
+        shipment.setShipmentCode("000000001-20250102");
+        shipment.setOriginAirport(origin);
+        shipment.setDestinationAirport(destination);
+        shipment.setLuggageCount(15);
+        shipment.setStatus(ShipmentStatus.PENDING);
+        shipment.setRegistrationDate(LocalDateTime.now().minusMinutes(2));
 
-        destinationStop = TravelStop.builder()
-                .shipment(shipment)
-                .airport(destination)
-                .flight(flight)
-                .stopOrder(1)
-                .stopStatus(StopStatus.PENDING)
-                .build();
+        flight = new Flight();
+        flight.setId(100L);
+        flight.setFlightCode("FL100");
+        flight.setOriginAirport(origin);
+        flight.setDestinationAirport(destination);
+        flight.setScheduledDeparture(LocalDateTime.now().minusMinutes(1));
+        flight.setScheduledArrival(LocalDateTime.now().plusHours(1));
+        flight.setMaxCapacity(100);
+        flight.setCurrentLoad(20);
+        flight.setStatus(FlightStatus.SCHEDULED);
+
+        originStop = new TravelStop();
+        originStop.setShipment(shipment);
+        originStop.setAirport(origin);
+        originStop.setFlight(null);
+        originStop.setStopOrder(0);
+        originStop.setStopStatus(StopStatus.PENDING);
+
+        destinationStop = new TravelStop();
+        destinationStop.setShipment(shipment);
+        destinationStop.setAirport(destination);
+        destinationStop.setFlight(flight);
+        destinationStop.setStopOrder(1);
+        destinationStop.setStopStatus(StopStatus.PENDING);
     }
 
     @Test
     void tickMovesShipmentFromOriginToInTransitOnlyAtDeparture() {
-        SimulationConfig config = SimulationConfig.builder().isRunning(true).build();
+        SimulationConfig config = new SimulationConfig();
+        config.setIsRunning(true);
         when(simulationConfigRepository.findTopByOrderByIdAsc()).thenReturn(config);
         when(runtimeService.isPaused()).thenReturn(false);
-        when(runtimeService.currentSpeed()).thenReturn(1);
         when(runtimeService.currentSimulationTime()).thenReturn(java.util.Optional.of(LocalDateTime.now().minusMinutes(3)));
 
         when(flightRepository.findByStatusAndScheduledDepartureLessThanEqual(any(), any())).thenReturn(List.of(flight));
@@ -107,8 +132,6 @@ class SimulationEngineDepartureFlowTest {
         when(travelStopRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         when(flightRepository.findByStatusAndScheduledArrivalLessThanEqual(any(), any())).thenReturn(List.of());
-        when(shipmentRepository.findActiveShipments()).thenReturn(List.of(shipment));
-
         simulationEngineService.tick();
 
         assertEquals(StopStatus.COMPLETED, originStop.getStopStatus());

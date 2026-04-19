@@ -1,6 +1,7 @@
 import type {
   DashboardKpis,
   DashboardOverview,
+  MapLiveFlight,
   NodeDetail,
   RouteNetworkEdge,
   ShipmentSearchResult,
@@ -8,6 +9,7 @@ import type {
   ShipmentStatus,
   ShipmentSummary,
   SystemStatus,
+  Page,
 } from '@/lib/types';
 import { api } from './client';
 
@@ -16,7 +18,9 @@ export interface ShipmentDashboardFilter {
   origin?: string;
   destination?: string;
   status?: ShipmentStatus;
-  limit?: number;
+  date?: string;
+  page?: number;
+  size?: number;
 }
 
 export const dashboardApi = {
@@ -32,9 +36,11 @@ export const dashboardApi = {
     if (filter?.origin) query.set('origin', filter.origin);
     if (filter?.destination) query.set('destination', filter.destination);
     if (filter?.status) query.set('status', filter.status);
-    if (typeof filter?.limit === 'number') query.set('limit', String(filter.limit));
+    if (filter?.date) query.set('date', filter.date);
+    if (typeof filter?.page === 'number') query.set('page', String(filter.page));
+    if (typeof filter?.size === 'number') query.set('size', String(filter.size));
     const suffix = query.toString() ? `?${query.toString()}` : '';
-    return api<ShipmentSummary[]>(`/api/dashboard/shipments${suffix}`);
+    return api<Page<ShipmentSummary>>(`/api/dashboard/shipments${suffix}`);
   },
 
   searchShipmentByCode: (code: string) =>
@@ -45,6 +51,9 @@ export const dashboardApi = {
 
   getRoutesNetwork: () => api<RouteNetworkEdge[]>('/api/dashboard/routes-network'),
 
-  getMapLive: (limit = 450) =>
-    api<MapLiveShipment[]>(`/api/dashboard/map-live?limit=${encodeURIComponent(String(limit))}`),
+  getMapLive: (limit?: number) =>
+    api<MapLiveShipment[]>(`/api/dashboard/map-live${typeof limit === 'number' ? `?limit=${encodeURIComponent(String(limit))}` : ''}`),
+
+  getMapLiveFlights: (limit?: number) =>
+    api<MapLiveFlight[]>(`/api/dashboard/map-live-flights${typeof limit === 'number' ? `?limit=${encodeURIComponent(String(limit))}` : ''}`),
 };

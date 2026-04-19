@@ -24,6 +24,11 @@ public record ShipmentDetailDto(
         ShipmentStatus status,
         Double progressPercentage,
         Boolean isInterContinental,
+        String lastConfirmedNode,
+        ShipmentLegDto currentLeg,
+        ShipmentLegDto nextLeg,
+        LocalDateTime estimatedDestinationArrival,
         List<TravelStopDto> stops,
+        List<ShipmentLegDto> legs,
         List<ShipmentAuditLogDto> audit
 ) {}

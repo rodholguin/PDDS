@@ -19,6 +19,7 @@ export interface SimConfigUpdate {
   interNodeCapacity?: number;
   normalThresholdPct?: number;
   warningThresholdPct?: number;
+  scenarioStartDate?: string;
   primaryAlgorithm?: AlgorithmType;
   secondaryAlgorithm?: AlgorithmType;
 }
@@ -49,6 +50,8 @@ export const simulationApi = {
   resetToInitial: () => api<{ message: string; state: SimulationState }>('/api/simulation/reset-to-initial', { method: 'POST' }),
 
   pause: () => api<{ message: string; state: SimulationState }>('/api/simulation/pause', { method: 'POST' }),
+
+  resume: () => api<{ message: string; state: SimulationState }>('/api/simulation/resume', { method: 'POST' }),
 
   setSpeed: (speed: number) =>
     api<{ message: string; speed: number; state: SimulationState }>('/api/simulation/speed', {

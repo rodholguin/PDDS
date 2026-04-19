@@ -6,6 +6,7 @@ import com.tasfb2b.model.FlightStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -18,9 +19,13 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface FlightRepository extends JpaRepository<Flight, Long> {
+public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecificationExecutor<Flight> {
 
     Optional<Flight> findByFlightCode(String flightCode);
+
+    @Override
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Optional<Flight> findById(Long id);
 
     /** Vuelos entre un par origen-destino específico. */
     List<Flight> findByOriginAirportAndDestinationAirport(
@@ -34,9 +39,45 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
 
     List<Flight> findByStatusAndScheduledArrivalLessThanEqual(FlightStatus status, LocalDateTime cutoff);
 
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.status = 'SCHEDULED'
+              AND f.currentLoad < f.maxCapacity
+              AND f.scheduledDeparture >= :from
+              AND f.scheduledDeparture < :to
+            ORDER BY f.scheduledDeparture ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findSchedulableFlightsBetween(@Param("from") LocalDateTime from,
+                                               @Param("to") LocalDateTime to);
+
     @Override
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     List<Flight> findAll();
+
+    @Query("SELECT MIN(f.scheduledDeparture) FROM Flight f WHERE f.scheduledDeparture IS NOT NULL")
+    LocalDateTime findEarliestScheduledDeparture();
+
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.scheduledDeparture >= :from
+              AND f.scheduledDeparture < :to
+            ORDER BY f.scheduledDeparture ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findFlightsWithinWindow(@Param("from") LocalDateTime from,
+                                         @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.scheduledDeparture >= :templateFrom
+              AND f.scheduledDeparture < :templateTo
+              AND f.scheduledArrival IS NOT NULL
+            ORDER BY f.flightCode ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findTemplateFlightsWithinWindow(@Param("templateFrom") LocalDateTime templateFrom,
+                                                 @Param("templateTo") LocalDateTime templateTo);
 
     /** Cantidad de vuelos en estado dado (sin cargar entidades). */
     long countByStatus(FlightStatus status);
@@ -44,10 +85,50 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
     /** Cantidad de vuelos activos en un instante dado (en vuelo). */
     @Query("""
             SELECT COUNT(f) FROM Flight f
-            WHERE f.status = 'IN_FLIGHT'
-              AND :now BETWEEN f.scheduledDeparture AND f.scheduledArrival
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.status <> 'CANCELLED'
             """)
     long countActiveFlightsAt(@Param("now") LocalDateTime now);
+
+    @Query("""
+            SELECT COUNT(f) FROM Flight f
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :dayStart
+              AND f.scheduledDeparture < :dayEnd
+              AND f.status <> 'CANCELLED'
+            """)
+    long countActiveFlightsAtWithinDay(@Param("now") LocalDateTime now,
+                                       @Param("dayStart") LocalDateTime dayStart,
+                                       @Param("dayEnd") LocalDateTime dayEnd);
+
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :dayStart
+              AND f.scheduledDeparture < :dayEnd
+              AND f.status <> 'CANCELLED'
+            ORDER BY f.scheduledDeparture ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findActiveFlightsAtWithinDay(@Param("now") LocalDateTime now,
+                                              @Param("dayStart") LocalDateTime dayStart,
+                                              @Param("dayEnd") LocalDateTime dayEnd);
+
+    @Query("""
+            SELECT COUNT(f) FROM Flight f
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :dayStart
+              AND f.scheduledDeparture < :dayEnd
+              AND f.status <> 'CANCELLED'
+              AND f.currentLoad > 0
+            """)
+    long countLoadedActiveFlightsAtWithinDay(@Param("now") LocalDateTime now,
+                                             @Param("dayStart") LocalDateTime dayStart,
+                                             @Param("dayEnd") LocalDateTime dayEnd);
 
     /** Vuelos saliendo desde un aeropuerto en un rango horario. */
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
@@ -57,6 +138,20 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
             LocalDateTime to
     );
 
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.status = 'SCHEDULED'
+              AND f.currentLoad < f.maxCapacity
+              AND f.originAirport IN :origins
+              AND f.scheduledDeparture >= :from
+              AND f.scheduledDeparture < :to
+            ORDER BY f.scheduledDeparture ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findSchedulableFlightsByOriginsAndWindow(@Param("origins") List<Airport> origins,
+                                                          @Param("from") LocalDateTime from,
+                                                          @Param("to") LocalDateTime to);
+
     /** Vuelos SCHEDULED que parten desde ahora en adelante. */
     @Query("""
             SELECT f FROM Flight f
@@ -65,6 +160,16 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
             ORDER BY f.scheduledDeparture ASC
             """)
     List<Flight> findScheduledFlights(@Param("from") LocalDateTime from);
+
+    @Query("""
+            SELECT COUNT(f) FROM Flight f
+            WHERE f.status = 'SCHEDULED'
+              AND f.scheduledDeparture >= :from
+              AND f.scheduledDeparture < :to
+              AND f.currentLoad > 0
+            """)
+    long countLoadedScheduledFlightsBetween(@Param("from") LocalDateTime from,
+                                            @Param("to") LocalDateTime to);
 
     /** Vuelos que aún tienen capacidad disponible. */
     @Query("""
@@ -98,24 +203,8 @@ public interface FlightRepository extends JpaRepository<Flight, Long> {
             @Param("dayStart") LocalDateTime dayStart,
             @Param("dayEnd")   LocalDateTime dayEnd);
 
-    @Query("""
-            SELECT f FROM Flight f
-            WHERE (:status IS NULL OR f.status = :status)
-              AND (:code IS NULL OR LOWER(f.flightCode) LIKE CONCAT('%', :code, '%'))
-              AND (:origin IS NULL OR f.originAirport.icaoCode = :origin)
-              AND (:destination IS NULL OR f.destinationAirport.icaoCode = :destination)
-              AND (:dayStart IS NULL OR f.scheduledDeparture >= :dayStart)
-              AND (:dayEnd IS NULL OR f.scheduledDeparture < :dayEnd)
-            """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
-    Page<Flight> search(
-            @Param("status") FlightStatus status,
-            @Param("code") String code,
-            @Param("origin") String origin,
-            @Param("destination") String destination,
-            @Param("dayStart") LocalDateTime dayStart,
-            @Param("dayEnd") LocalDateTime dayEnd,
-            Pageable pageable);
+    Page<Flight> findAll(org.springframework.data.jpa.domain.Specification<Flight> spec, Pageable pageable);
 
     /** Todos los vuelos que pasan por un aeropuerto (origen o destino). */
     @Query("""

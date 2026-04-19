@@ -3,6 +3,7 @@ export type AirportStatus = 'NORMAL' | 'ALERTA' | 'CRITICO';
 export type FlightStatus = 'SCHEDULED' | 'IN_FLIGHT' | 'COMPLETED' | 'CANCELLED';
 export type ShipmentStatus = 'PENDING' | 'IN_ROUTE' | 'DELIVERED' | 'DELAYED' | 'CRITICAL';
 export type StopStatus = 'PENDING' | 'IN_TRANSIT' | 'COMPLETED';
+export type SimulationTimeMode = 'REAL_TIME' | 'ACCELERATED';
 export type AlgorithmType = 'GENETIC' | 'ANT_COLONY' | 'SIMULATED_ANNEALING';
 export type SimScenario = 'DAY_TO_DAY' | 'PERIOD_SIMULATION' | 'COLLAPSE_TEST';
 export type ImportStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
@@ -73,6 +74,20 @@ export interface Shipment {
   isInterContinental: boolean;
 }
 
+export interface ShipmentUpcoming extends Shipment {
+  nextFlightId: number | null;
+  nextFlightCode: string | null;
+  nextFlightDeparture: string | null;
+}
+
+export interface Page<T> {
+  content: T[];
+  totalElements: number;
+  totalPages: number;
+  number: number;
+  size: number;
+}
+
 export interface TravelStop {
   id: number;
   stopOrder: number;
@@ -81,6 +96,7 @@ export interface TravelStop {
   airportLatitude: number;
   airportLongitude: number;
   flightCode: string | null;
+  scheduledDeparture: string | null;
   scheduledArrival: string | null;
   actualArrival: string | null;
   stopStatus: StopStatus;
@@ -123,8 +139,29 @@ export interface ShipmentDetail {
   status: ShipmentStatus;
   progressPercentage: number;
   isInterContinental: boolean;
+  lastConfirmedNode: string;
+  currentLeg: ShipmentLeg | null;
+  nextLeg: ShipmentLeg | null;
+  estimatedDestinationArrival: string | null;
   stops: TravelStop[];
+  legs: ShipmentLeg[];
   audit: ShipmentAuditLog[];
+}
+
+export interface ShipmentLeg {
+  flightId: number | null;
+  flightCode: string | null;
+  fromIcaoCode: string;
+  fromCity: string;
+  toIcaoCode: string;
+  toCity: string;
+  scheduledDeparture: string | null;
+  scheduledArrival: string | null;
+  actualArrival: string | null;
+  flightStatus: FlightStatus | null;
+  stopStatus: StopStatus;
+  current: boolean;
+  next: boolean;
 }
 
 export interface ShipmentFeasibility {
@@ -149,6 +186,7 @@ export interface SimulationConfig {
   executionMinutes: number;
   normalThresholdPct: number;
   warningThresholdPct: number;
+  scenarioStartAt: string | null;
   primaryAlgorithm: AlgorithmType;
   secondaryAlgorithm: AlgorithmType;
   isRunning: boolean;
@@ -168,11 +206,25 @@ export interface SimulationState {
   interNodeCapacity: number;
   normalThresholdPct: number;
   warningThresholdPct: number;
+  scenarioStartAt: string | null;
+  requestedScenarioStartAt: string | null;
+  effectiveScenarioStartAt: string | null;
+  dateAdjusted: boolean;
+  dateAdjustmentReason: string | null;
+  projectedDemandReady: boolean;
+  projectedHistoricalFrom: string | null;
+  projectedHistoricalTo: string | null;
+  projectedFrom: string | null;
+  projectedTo: string | null;
+  projectedGeneratedAt: string | null;
   primaryAlgorithm: AlgorithmType;
   secondaryAlgorithm: AlgorithmType;
   running: boolean;
   paused: boolean;
   speed: number;
+  timeMode: SimulationTimeMode;
+  simulationSecondsPerTick: number;
+  effectiveSpeed: number;
   replannings: number;
   injectedEvents: number;
   startedAt: string | null;
@@ -289,6 +341,20 @@ export interface DemandGenerationResult {
   finishedAt: string;
 }
 
+export interface FutureDemandGenerationResult {
+  historicalFrom: string;
+  historicalTo: string;
+  projectionStart: string;
+  projectionEnd: string;
+  generatedRows: number;
+  deletedRows: number;
+  noisePct: number;
+  randomSeed: number;
+  projectedDemandReady: boolean;
+  startedAt: string;
+  finishedAt: string;
+}
+
 export interface DatasetStatus {
   totalShipments: number;
   pendingShipments: number;
@@ -296,6 +362,12 @@ export interface DatasetStatus {
   deliveredShipments: number;
   delayedShipments: number;
   criticalShipments: number;
+  projectedDemandReady: boolean;
+  projectedHistoricalFrom: string | null;
+  projectedHistoricalTo: string | null;
+  projectedFrom: string | null;
+  projectedTo: string | null;
+  projectedGeneratedAt: string | null;
 }
 
 export interface DashboardKpis {
@@ -313,6 +385,7 @@ export interface DashboardKpis {
 
 export interface DashboardOverview {
   totalActiveFlights: number;
+  nextScheduledFlights: number;
   shipmentsInRoute: number;
   totalShipmentsToday: number;
   inTransitToday: number;
@@ -381,6 +454,52 @@ export interface MapLiveShipment {
   progressPct: number;
   originLatitude: number;
   originLongitude: number;
+  currentFlightCode?: string | null;
+}
+
+export interface MapLiveFlight {
+  flightId: number;
+  flightCode: string;
+  originIcao: string;
+  destinationIcao: string;
+  currentLatitude: number;
+  currentLongitude: number;
+  originLatitude: number;
+  originLongitude: number;
+  destinationLatitude: number;
+  destinationLongitude: number;
+  loadPct: number;
+}
+
+export interface FlightShipmentAssignment {
+  shipmentId: number;
+  shipmentCode: string;
+  airlineName: string;
+  luggageCount: number;
+  status: ShipmentStatus;
+  stopOrder: number;
+}
+
+export interface FlightDetail {
+  id: number;
+  flightCode: string;
+  originIcao: string;
+  destinationIcao: string;
+  status: FlightStatus;
+  scheduledDeparture: string;
+  scheduledArrival: string;
+  maxCapacity: number;
+  currentLoad: number;
+  availableCapacity: number;
+  loadPct: number;
+  routeType: 'INTRA' | 'INTER';
+}
+
+export interface FlightDetailResponse {
+  flight: FlightDetail;
+  assignedShipments: FlightShipmentAssignment[];
+  loadPct: number;
+  availableCapacity: number;
 }
 
 export interface ShipmentSearchResult {

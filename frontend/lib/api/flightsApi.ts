@@ -1,4 +1,4 @@
-import type { Flight, FlightCapacityView, FlightSearchPage, FlightStatus } from '@/lib/types';
+import type { Flight, FlightCapacityView, FlightDetailResponse, FlightSearchPage, FlightStatus } from '@/lib/types';
 import { api } from './client';
 
 export const flightsApi = {
@@ -9,7 +9,7 @@ export const flightsApi = {
     return api<Flight[]>(`/api/flights?${q}`);
   },
   getById: (id: number) =>
-    api<{ flight: Flight; assignedShipments: unknown[]; loadPct: number }>(`/api/flights/${id}`),
+    api<FlightDetailResponse>(`/api/flights/${id}`),
   cancel:  (id: number) =>
     api<unknown>(`/api/flights/${id}/cancel`, { method: 'PUT' }),
 

@@ -13,6 +13,7 @@ public record TravelStopDto(
         Double airportLatitude,
         Double airportLongitude,
         String flightCode,
+        LocalDateTime scheduledDeparture,
         LocalDateTime scheduledArrival,
         LocalDateTime actualArrival,
         StopStatus stopStatus

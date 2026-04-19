@@ -12,6 +12,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -20,6 +21,9 @@ public interface TravelStopRepository extends JpaRepository<TravelStop, Long> {
     /** Paradas de un envío, ordenadas por posición. */
     @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
     List<TravelStop> findByShipmentOrderByStopOrderAsc(Shipment shipment);
+
+    @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
+    List<TravelStop> findByShipmentInOrderByShipmentIdAscStopOrderAsc(Collection<Shipment> shipments);
 
     /** Paradas de un envío (sin orden, para conteos rápidos). */
     @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
@@ -34,6 +38,14 @@ public interface TravelStopRepository extends JpaRepository<TravelStop, Long> {
 
     @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
     List<TravelStop> findByFlightAndStopStatus(Flight flight, StopStatus stopStatus);
+
+    @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
+    List<TravelStop> findByFlightInAndStopStatus(List<Flight> flights, StopStatus stopStatus);
+
+    boolean existsByIdIsNotNull();
+
+    @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
+    List<TravelStop> findByFlight(Flight flight);
 
     @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
     List<TravelStop> findByStopStatusInAndShipmentStatusInOrderByShipmentIdAscStopOrderAsc(List<StopStatus> stopStatuses,

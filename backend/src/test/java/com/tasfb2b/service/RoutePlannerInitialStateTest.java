@@ -16,6 +16,7 @@ import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.algorithm.AntColonyOptimization;
 import com.tasfb2b.service.algorithm.GeneticAlgorithm;
+import com.tasfb2b.service.algorithm.SimulatedAnnealingOptimization;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +38,7 @@ class RoutePlannerInitialStateTest {
 
     @Mock private GeneticAlgorithm geneticAlgorithm;
     @Mock private AntColonyOptimization antColonyOptimization;
+    @Mock private SimulatedAnnealingOptimization simulatedAnnealingOptimization;
     @Mock private AirportRepository airportRepository;
     @Mock private FlightRepository flightRepository;
     @Mock private ShipmentRepository shipmentRepository;
@@ -54,54 +56,73 @@ class RoutePlannerInitialStateTest {
 
     @BeforeEach
     void setUp() {
-        origin = Airport.builder().id(1L).icaoCode("SKBO").continent(Continent.AMERICA).build();
-        destination = Airport.builder().id(2L).icaoCode("SEQM").continent(Continent.AMERICA).build();
-        shipment = Shipment.builder()
-                .id(10L)
-                .originAirport(origin)
-                .destinationAirport(destination)
-                .luggageCount(10)
-                .registrationDate(LocalDateTime.now().minusMinutes(5))
-                .status(ShipmentStatus.PENDING)
-                .progressPercentage(0.0)
-                .build();
+        origin = new Airport();
+        origin.setId(1L);
+        origin.setIcaoCode("SKBO");
+        origin.setContinent(Continent.AMERICA);
+        origin.setCity("Bogota");
+        origin.setCountry("Colombia");
+        origin.setLatitude(4.7016);
+        origin.setLongitude(-74.1469);
+        origin.setMaxStorageCapacity(800);
+        origin.setCurrentStorageLoad(0);
 
-        flight = Flight.builder()
-                .id(99L)
-                .flightCode("SKBOSEQM1")
-                .originAirport(origin)
-                .destinationAirport(destination)
-                .scheduledDeparture(LocalDateTime.now().plusHours(1))
-                .scheduledArrival(LocalDateTime.now().plusHours(2))
-                .maxCapacity(50)
-                .currentLoad(0)
-                .status(FlightStatus.SCHEDULED)
-                .build();
+        destination = new Airport();
+        destination.setId(2L);
+        destination.setIcaoCode("SEQM");
+        destination.setContinent(Continent.AMERICA);
+        destination.setCity("Quito");
+        destination.setCountry("Ecuador");
+        destination.setLatitude(-0.1292);
+        destination.setLongitude(-78.3575);
+        destination.setMaxStorageCapacity(800);
+        destination.setCurrentStorageLoad(0);
+
+        shipment = new Shipment();
+        shipment.setId(10L);
+        shipment.setShipmentCode("TEST-1");
+        shipment.setOriginAirport(origin);
+        shipment.setDestinationAirport(destination);
+        shipment.setLuggageCount(10);
+        shipment.setRegistrationDate(LocalDateTime.now().minusMinutes(5));
+        shipment.setStatus(ShipmentStatus.PENDING);
+        shipment.setProgressPercentage(0.0);
+
+        flight = new Flight();
+        flight.setId(99L);
+        flight.setFlightCode("SKBOSEQM1");
+        flight.setOriginAirport(origin);
+        flight.setDestinationAirport(destination);
+        flight.setScheduledDeparture(LocalDateTime.now().plusHours(1));
+        flight.setScheduledArrival(LocalDateTime.now().plusHours(2));
+        flight.setMaxCapacity(50);
+        flight.setCurrentLoad(0);
+        flight.setStatus(FlightStatus.SCHEDULED);
     }
 
     @Test
     void planShipmentStartsAtOriginWithZeroProgress() {
-        TravelStop originStop = TravelStop.builder()
-                .airport(origin)
-                .flight(null)
-                .stopOrder(0)
-                .stopStatus(StopStatus.PENDING)
-                .scheduledArrival(shipment.getRegistrationDate())
-                .build();
-        TravelStop destinationStop = TravelStop.builder()
-                .airport(destination)
-                .flight(flight)
-                .stopOrder(1)
-                .stopStatus(StopStatus.PENDING)
-                .scheduledArrival(flight.getScheduledArrival())
-                .build();
+        TravelStop originStop = new TravelStop();
+        originStop.setAirport(origin);
+        originStop.setFlight(null);
+        originStop.setStopOrder(0);
+        originStop.setStopStatus(StopStatus.PENDING);
+        originStop.setScheduledArrival(shipment.getRegistrationDate());
+
+        TravelStop destinationStop = new TravelStop();
+        destinationStop.setAirport(destination);
+        destinationStop.setFlight(flight);
+        destinationStop.setStopOrder(1);
+        destinationStop.setStopStatus(StopStatus.PENDING);
+        destinationStop.setScheduledArrival(flight.getScheduledArrival());
 
         when(antColonyOptimization.getAlgorithmName()).thenReturn("Ant Colony Optimization");
+        when(simulatedAnnealingOptimization.getAlgorithmName()).thenReturn("Simulated Annealing");
         when(geneticAlgorithm.planRoute(any(), anyList(), anyList())).thenReturn(List.of(originStop, destinationStop));
-        when(configRepository.findTopByOrderByIdAsc()).thenReturn(SimulationConfig.builder()
-                .normalThresholdPct(70)
-                .warningThresholdPct(90)
-                .build());
+        SimulationConfig config = new SimulationConfig();
+        config.setNormalThresholdPct(70);
+        config.setWarningThresholdPct(90);
+        when(configRepository.findTopByOrderByIdAsc()).thenReturn(config);
         when(travelStopRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
         when(shipmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 

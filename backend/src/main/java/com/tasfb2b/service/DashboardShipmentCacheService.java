@@ -2,7 +2,6 @@ package com.tasfb2b.service;
 
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.projection.ShipmentSummaryRow;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -23,22 +22,6 @@ public class DashboardShipmentCacheService {
     private final ShipmentRepository shipmentRepository;
     private final Map<String, CachedRows> cache = new ConcurrentHashMap<>();
     private final Set<String> refreshing = ConcurrentHashMap.newKeySet();
-
-    @PostConstruct
-    void warmup() {
-        refreshSync(null, 240);
-        refreshSync("IN_ROUTE", 240);
-        refreshSync(null, 900);
-        refreshSync("IN_ROUTE", 900);
-    }
-
-    @Scheduled(initialDelay = 6_000L, fixedDelay = 10_000L)
-    void keepWarm() {
-        refreshAsync(null, 240);
-        refreshAsync("IN_ROUTE", 240);
-        refreshAsync(null, 900);
-        refreshAsync("IN_ROUTE", 900);
-    }
 
     public List<ShipmentSnapshotRow> getRows(String status, int limit) {
         String key = (status == null ? "ALL" : status) + "|" + limit;

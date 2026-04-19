@@ -91,6 +91,18 @@ public class DataImportService {
             "^(\\d+)-(\\d{8})-(\\d{2})-(\\d{2})-([A-Z]{4})-(\\d{3})-(\\d{7})$"
     );
 
+    private static final Map<String, String> COUNTRY_FIXES = Map.ofEntries(
+            Map.entry("Azerbaiyan", "Azerbaiyán"),
+            Map.entry("Belgica", "Bélgica"),
+            Map.entry("Checa", "Chequia"),
+            Map.entry("Afganistan", "Afganistán"),
+            Map.entry("Emiratos A.U", "Emiratos Árabes Unidos")
+    );
+
+    private static final Map<String, String> CITY_FIXES = Map.of(
+            "Motenvideo", "Montevideo"
+    );
+
     private final ShipmentRepository shipmentRepository;
     private final AirportRepository airportRepository;
     private final FlightRepository flightRepository;
@@ -748,8 +760,8 @@ public class DataImportService {
         }
 
         String icao = prefixMatcher.group(2);
-        String city = normalizeText(prefixMatcher.group(3));
-        String country = normalizeText(prefixMatcher.group(4));
+        String city = normalizeVisibleCity(prefixMatcher.group(3));
+        String country = normalizeVisibleCountry(prefixMatcher.group(4));
         int capacity = Integer.parseInt(prefixMatcher.group(6));
 
         Matcher latMatcher = LAT_PATTERN.matcher(rawLine);
@@ -1015,6 +1027,16 @@ public class DataImportService {
 
     private String normalizeText(String input) {
         return sanitizeLine(input).replaceAll("\\s+", " ");
+    }
+
+    private String normalizeVisibleCountry(String input) {
+        String normalized = normalizeText(input);
+        return COUNTRY_FIXES.getOrDefault(normalized, normalized);
+    }
+
+    private String normalizeVisibleCity(String input) {
+        String normalized = normalizeText(input);
+        return CITY_FIXES.getOrDefault(normalized, normalized);
     }
 
     private double dmsToDecimal(int deg, int min, int sec, String hemisphere) {

@@ -5,6 +5,8 @@ import com.tasfb2b.model.SimulationScenario;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+import java.time.LocalDate;
+
 /**
  * Cuerpo de POST /api/simulation/configure.
  * Solo expone los campos modificables por el usuario;
@@ -43,6 +45,8 @@ public record SimulationConfigUpdateDto(
 
         @Min(51) @Max(100)
         Integer warningThresholdPct,
+
+        LocalDate scenarioStartDate,
 
         AlgorithmType primaryAlgorithm,
 

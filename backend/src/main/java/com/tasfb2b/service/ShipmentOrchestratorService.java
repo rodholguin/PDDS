@@ -5,6 +5,7 @@ import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentAuditType;
 import com.tasfb2b.model.ShipmentStatus;
+import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.model.TravelStop;
 import com.tasfb2b.repository.AirportRepository;
 import com.tasfb2b.repository.ShipmentRepository;
@@ -27,6 +28,7 @@ public class ShipmentOrchestratorService {
     private final RoutePlannerService routePlannerService;
     private final ShipmentAuditService shipmentAuditService;
     private final ShipmentCodeService shipmentCodeService;
+    private final SimulationRuntimeService simulationRuntimeService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Shipment createAndPlan(ShipmentCreateDto dto) {
@@ -45,7 +47,9 @@ public class ShipmentOrchestratorService {
             throw new IllegalArgumentException("Capacidad maxima del nodo excedida");
         }
 
-        LocalDateTime registrationDate = dto.registrationDate() == null ? LocalDateTime.now() : dto.registrationDate();
+        LocalDateTime registrationDate = dto.registrationDate() == null
+                ? simulationRuntimeService.currentSimulationTime().orElse(LocalDateTime.now())
+                : dto.registrationDate();
 
         Shipment shipment = Shipment.builder()
                 .shipmentCode(shipmentCodeService.nextCode(registrationDate))
@@ -102,7 +106,9 @@ public class ShipmentOrchestratorService {
                 .originAirport(origin)
                 .destinationAirport(destination)
                 .luggageCount(requested)
-                .registrationDate(dto.registrationDate() == null ? LocalDateTime.now() : dto.registrationDate())
+                .registrationDate(dto.registrationDate() == null
+                        ? simulationRuntimeService.currentSimulationTime().orElse(LocalDateTime.now())
+                        : dto.registrationDate())
                 .status(ShipmentStatus.PENDING)
                 .progressPercentage(0.0)
                 .isInterContinental(origin.getContinent() != destination.getContinent())
@@ -121,15 +127,14 @@ public class ShipmentOrchestratorService {
     }
 
     private String activeAlgorithmName() {
-        return simulationConfigRepository.findAll().stream()
-                .findFirst()
-                .map(config -> {
-                    String primary = config.getPrimaryAlgorithm().name();
-                    if ("ANT_COLONY".equals(primary)) return "Ant Colony Optimization";
-                    if ("SIMULATED_ANNEALING".equals(primary)) return "Simulated Annealing";
-                    return "Genetic Algorithm";
-                })
-                .orElse("Genetic Algorithm");
+        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        if (config == null) {
+            return "Genetic Algorithm";
+        }
+        String primary = config.getPrimaryAlgorithm().name();
+        if ("ANT_COLONY".equals(primary)) return "Ant Colony Optimization";
+        if ("SIMULATED_ANNEALING".equals(primary)) return "Simulated Annealing";
+        return "Genetic Algorithm";
     }
 
 }

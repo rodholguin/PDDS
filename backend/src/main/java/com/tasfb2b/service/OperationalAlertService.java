@@ -7,7 +7,6 @@ import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentAuditType;
 import com.tasfb2b.repository.OperationalAlertRepository;
 import com.tasfb2b.repository.ShipmentRepository;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,27 +14,56 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
-@RequiredArgsConstructor
 public class OperationalAlertService {
 
     private final OperationalAlertRepository alertRepository;
     private final ShipmentRepository shipmentRepository;
     private final ShipmentAuditService shipmentAuditService;
 
+    public OperationalAlertService(
+            OperationalAlertRepository alertRepository,
+            ShipmentRepository shipmentRepository,
+            ShipmentAuditService shipmentAuditService
+    ) {
+        this.alertRepository = alertRepository;
+        this.shipmentRepository = shipmentRepository;
+        this.shipmentAuditService = shipmentAuditService;
+    }
+
     @Transactional
     public OperationalAlertDto createFromShipment(Long shipmentId, String type, String note) {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new IllegalArgumentException("Envío no encontrado: " + shipmentId));
 
-        OperationalAlert alert = OperationalAlert.builder()
-                .shipment(shipment)
-                .shipmentCode(shipment.getShipmentCode())
-                .type(type)
-                .status(OperationalAlertStatus.PENDING)
-                .note(note)
-                .build();
+        return toDto(ensureAlert(shipment, type, note));
+    }
 
-        return toDto(alertRepository.save(alert));
+    @Transactional
+    public OperationalAlertDto ensureShipmentAlert(Long shipmentId, String type, String note) {
+        Shipment shipment = shipmentRepository.findById(shipmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Envío no encontrado: " + shipmentId));
+
+        return toDto(ensureAlert(shipment, type, note));
+    }
+
+    @Transactional
+    public void ensureShipmentAlert(Shipment shipment, String type, String note) {
+        ensureAlert(shipment, type, note);
+    }
+
+    private OperationalAlert ensureAlert(Shipment shipment, String type, String note) {
+        return alertRepository.findFirstByShipmentIdAndTypeAndStatusInOrderByIdDesc(
+                        shipment.getId(),
+                        type,
+                        List.of(OperationalAlertStatus.PENDING, OperationalAlertStatus.IN_REVIEW)
+                )
+                .orElseGet(() -> alertRepository.save(OperationalAlert.builder()
+                        .shipment(shipment)
+                        .shipmentCode(shipment.getShipmentCode())
+                        .type(type)
+                        .status(OperationalAlertStatus.PENDING)
+                        .note(note)
+                        .build()));
     }
 
     @Transactional(readOnly = true)

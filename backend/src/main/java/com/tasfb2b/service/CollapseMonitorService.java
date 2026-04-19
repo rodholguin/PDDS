@@ -11,9 +11,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.Collections;
+import java.time.Duration;
 import java.util.List;
-import java.util.OptionalDouble;
 
 /**
  * Monitor de colapso del sistema en tiempo real.
@@ -41,6 +40,8 @@ import java.util.OptionalDouble;
 @Transactional(readOnly = true)
 public class CollapseMonitorService {
 
+    private volatile Snapshot cachedSnapshot = new Snapshot(0.0, List.of(), Double.MAX_VALUE, LocalDateTime.MIN);
+
     private final AirportRepository          airportRepository;
     private final ShipmentRepository         shipmentRepository;
     private final SimulationConfigRepository configRepository;
@@ -59,6 +60,7 @@ public class CollapseMonitorService {
         double avgLoad = computeSystemLoad();
         List<Airport> bottlenecks = getBottleneckAirports();
         double hoursLeft = estimateTimeToCollapse();
+        cachedSnapshot = new Snapshot(avgLoad, bottlenecks, hoursLeft, LocalDateTime.now());
 
         log.info("[CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: {} | "
                + "Tiempo estimado al colapso: {:.1f}h",
@@ -160,11 +162,8 @@ public class CollapseMonitorService {
 
         if (freeCapacity <= 0) return 0.0; // ya colapsado
 
-        // Maletas en tránsito o pendientes de asignación
-        List<Shipment> activeShipments = shipmentRepository.findActiveShipments();
-        long pendingLuggage = activeShipments.stream()
-                .mapToLong(Shipment::getLuggageCount)
-                .sum();
+        // Evita cargar todos los envíos activos en memoria para esta métrica.
+        long pendingLuggage = shipmentRepository.sumActiveLuggage();
 
         if (pendingLuggage == 0) return Double.MAX_VALUE;
 
@@ -191,9 +190,10 @@ public class CollapseMonitorService {
      * @return mapa con claves: avgLoad, bottlenecks, hoursToCollapse, isCollapsed
      */
     public java.util.Map<String, Object> getSystemSnapshot() {
-        double avgLoad       = computeSystemLoad();
-        List<Airport> necks  = getBottleneckAirports();
-        double hoursLeft     = estimateTimeToCollapse();
+        Snapshot snapshot = snapshot();
+        double avgLoad = snapshot.avgLoadPct();
+        List<Airport> necks = snapshot.bottlenecks();
+        double hoursLeft = snapshot.hoursToCollapse();
         boolean collapsed    = avgLoad >= 100.0 || necks.size() == airportRepository.count();
 
         return java.util.Map.of(
@@ -206,11 +206,22 @@ public class CollapseMonitorService {
         );
     }
 
+    public Snapshot snapshot() {
+        Snapshot current = cachedSnapshot;
+        if (Duration.between(current.computedAt(), LocalDateTime.now()).getSeconds() > 20) {
+            current = new Snapshot(computeSystemLoad(), getBottleneckAirports(), estimateTimeToCollapse(), LocalDateTime.now());
+            cachedSnapshot = current;
+        }
+        return current;
+    }
+
     // ── Helper ───────────────────────────────────────────────────────────────
 
     private SimulationConfig getConfig() {
-        return configRepository.findAll().stream()
-                .findFirst()
-                .orElseGet(() -> SimulationConfig.builder().build());
+        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        return config == null ? SimulationConfig.builder().build() : config;
+    }
+
+    public record Snapshot(double avgLoadPct, List<Airport> bottlenecks, double hoursToCollapse, LocalDateTime computedAt) {
     }
 }

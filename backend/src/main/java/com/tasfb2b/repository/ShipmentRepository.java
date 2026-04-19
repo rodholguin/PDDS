@@ -3,6 +3,7 @@ package com.tasfb2b.repository;
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentStatus;
+import com.tasfb2b.repository.projection.FutureRouteBaselineRow;
 import com.tasfb2b.repository.projection.ShipmentSummaryRow;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -13,7 +14,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.sql.Date;
 import java.util.List;
 import java.util.Optional;
 
@@ -114,8 +117,12 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             SELECT COUNT(s) FROM Shipment s
             WHERE s.status IN ('PENDING', 'IN_ROUTE')
               AND s.isInterContinental = :inter
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
             """)
-    long countActiveByRouteType(@Param("inter") boolean inter);
+    long countActiveByRouteTypeBetween(@Param("inter") boolean inter,
+                                       @Param("from") LocalDateTime from,
+                                       @Param("to") LocalDateTime to);
 
     /** Envíos con riesgo de incumplimiento (ETA > deadline o vencido sin entregar). */
     @Query("""
@@ -170,19 +177,88 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
 
     @Query("""
             SELECT s FROM Shipment s
-            WHERE s.status IN ('PENDING', 'IN_ROUTE', 'CRITICAL', 'DELAYED')
+            WHERE (:airline IS NULL OR UPPER(s.airlineName) = :airline)
+              AND (:originIcao IS NULL OR UPPER(s.originAirport.icaoCode) = :originIcao)
+              AND (:destinationIcao IS NULL OR UPPER(s.destinationAirport.icaoCode) = :destinationIcao)
+              AND (:status IS NULL OR s.status = :status)
+              AND (:code IS NULL OR UPPER(s.shipmentCode) LIKE :code)
+              AND s.registrationDate >= :dateFrom
+              AND s.registrationDate < :dateTo
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> searchShipmentsPageOnDate(
+            @Param("airline") String airline,
+            @Param("originIcao") String originIcao,
+            @Param("destinationIcao") String destinationIcao,
+            @Param("status") ShipmentStatus status,
+            @Param("code") String code,
+            @Param("dateFrom") LocalDateTime dateFrom,
+            @Param("dateTo") LocalDateTime dateTo,
+            Pageable pageable
+    );
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE (:airline IS NULL OR UPPER(s.airlineName) = :airline)
+              AND (:originIcao IS NULL OR UPPER(s.originAirport.icaoCode) = :originIcao)
+              AND (:destinationIcao IS NULL OR UPPER(s.destinationAirport.icaoCode) = :destinationIcao)
+              AND (:status IS NULL OR s.status = :status)
+              AND (:code IS NULL OR UPPER(s.shipmentCode) LIKE :code)
+              AND s.registrationDate >= :dateFrom
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> searchShipmentsPageFromDate(
+            @Param("airline") String airline,
+            @Param("originIcao") String originIcao,
+            @Param("destinationIcao") String destinationIcao,
+            @Param("status") ShipmentStatus status,
+            @Param("code") String code,
+            @Param("dateFrom") LocalDateTime dateFrom,
+            Pageable pageable
+    );
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status = 'PENDING'
             ORDER BY
-              CASE
-                WHEN s.status = 'IN_ROUTE' THEN 0
-                WHEN s.status = 'PENDING' THEN 1
-                WHEN s.status = 'CRITICAL' THEN 2
-                WHEN s.status = 'DELAYED' THEN 2
-                ELSE 3
-              END,
               s.registrationDate DESC
             """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     Page<Shipment> findActiveForDashboard(Pageable pageable);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE')
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> findVisibleForOperationalDay(@Param("from") LocalDateTime from,
+                                                @Param("to") LocalDateTime to,
+                                                Pageable pageable);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE')
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+              AND (:airline IS NULL OR UPPER(s.airlineName) = :airline)
+              AND (:originIcao IS NULL OR UPPER(s.originAirport.icaoCode) = :originIcao)
+              AND (:destinationIcao IS NULL OR UPPER(s.destinationAirport.icaoCode) = :destinationIcao)
+              AND (:status IS NULL OR s.status = :status)
+              AND (:code IS NULL OR UPPER(s.shipmentCode) LIKE :code)
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> searchVisibleForOperationalDay(@Param("airline") String airline,
+                                                  @Param("originIcao") String originIcao,
+                                                  @Param("destinationIcao") String destinationIcao,
+                                                  @Param("status") ShipmentStatus status,
+                                                  @Param("code") String code,
+                                                  @Param("from") LocalDateTime from,
+                                                  @Param("to") LocalDateTime to,
+                                                  Pageable pageable);
 
     /**
      * Envíos sin movimiento en un umbral de horas: todos sus stops siguen PENDING
@@ -211,6 +287,12 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     List<Shipment> findActiveShipments();
 
+    @Query("""
+            SELECT COALESCE(SUM(s.luggageCount), 0) FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE')
+            """)
+    long sumActiveLuggage();
+
     /** Envíos en estado CRITICAL u DELAYED para alertas. */
     @Query("""
             SELECT s FROM Shipment s
@@ -223,6 +305,8 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     long countByStatus(ShipmentStatus status);
 
     long countByStatusIn(List<ShipmentStatus> statuses);
+
+    boolean existsByStatusNot(ShipmentStatus status);
 
     @Query(value = """
             SELECT s.*
@@ -239,8 +323,97 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     List<Shipment> findPendingWithoutRouteForPlanning(@Param("horizon") LocalDateTime horizon,
                                                       @Param("batchSize") int batchSize);
 
+    @Query(value = """
+            SELECT s.*
+            FROM shipment s
+            WHERE s.status = 'PENDING'
+              AND s.registration_date >= :windowStart
+              AND s.registration_date <= :horizon
+              AND NOT EXISTS (
+                    SELECT 1 FROM travel_stop ts
+                    WHERE ts.shipment_id = s.id
+              )
+            ORDER BY s.registration_date ASC
+            LIMIT :batchSize
+            """, nativeQuery = true)
+    List<Shipment> findPendingWithoutRouteForPlanningInWindow(@Param("windowStart") LocalDateTime windowStart,
+                                                              @Param("horizon") LocalDateTime horizon,
+                                                              @Param("batchSize") int batchSize);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status = 'IN_ROUTE'
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            """)
+    long countInRouteBetween(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.deadline < :now
+              AND s.status <> 'DELIVERED'
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            """)
+    long countOverdueShipmentsBetween(@Param("from") LocalDateTime from,
+                                      @Param("to") LocalDateTime to,
+                                      @Param("now") LocalDateTime now);
+
+    @Query("""
+            SELECT COUNT(DISTINCT s) FROM Shipment s
+            LEFT JOIN TravelStop ts ON ts.shipment = s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE', 'DELAYED', 'CRITICAL')
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+              AND (
+                    (ts.scheduledArrival IS NOT NULL AND ts.scheduledArrival > s.deadline)
+                 OR (s.deadline < :now AND s.status <> 'DELIVERED')
+              )
+            """)
+    long countAtRiskShipmentsBetween(@Param("from") LocalDateTime from,
+                                     @Param("to") LocalDateTime to,
+                                     @Param("now") LocalDateTime now);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE')
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+              AND s.registrationDate < :threshold
+              AND NOT EXISTS (
+                    SELECT ts FROM TravelStop ts
+                    WHERE ts.shipment = s
+                      AND ts.stopStatus IN ('IN_TRANSIT', 'COMPLETED')
+              )
+            """)
+    long countShipmentsWithoutMovementBetween(@Param("from") LocalDateTime from,
+                                              @Param("to") LocalDateTime to,
+                                              @Param("threshold") LocalDateTime threshold);
+
     @Query("SELECT MIN(s.registrationDate) FROM Shipment s")
     LocalDateTime findMinRegistrationDate();
+
+    @Query("SELECT MAX(s.registrationDate) FROM Shipment s")
+    LocalDateTime findMaxRegistrationDate();
+
+    @Query(value = """
+            SELECT COUNT(DISTINCT DATE(s.registration_date))
+            FROM shipment s
+            WHERE s.registration_date >= :fromTs
+              AND s.registration_date < :toTs
+            """, nativeQuery = true)
+    long countDistinctRegistrationDaysBetween(@Param("fromTs") LocalDateTime fromTs,
+                                              @Param("toTs") LocalDateTime toTs);
+
+    @Query(value = """
+            SELECT DISTINCT DATE(s.registration_date)
+            FROM shipment s
+            WHERE s.registration_date >= :fromTs
+              AND s.registration_date < :toTs
+            ORDER BY DATE(s.registration_date)
+            """, nativeQuery = true)
+    List<Date> findDistinctRegistrationDatesBetween(@Param("fromTs") LocalDateTime fromTs,
+                                                    @Param("toTs") LocalDateTime toTs);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
@@ -256,6 +429,42 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """)
     int markActiveAsDelayedBefore(@Param("now") LocalDateTime now);
 
+    @Query(value = """
+            SELECT
+              UPPER(o.icao_code) AS originIcao,
+              UPPER(d.icao_code) AS destinationIcao,
+              EXTRACT(ISODOW FROM s.registration_date)::int AS isoDow,
+              COUNT(*) AS shipmentCount,
+              COALESCE(AVG(s.luggage_count), 0) AS avgLuggage
+            FROM shipment s
+            JOIN airport o ON o.id = s.origin_airport_id
+            JOIN airport d ON d.id = s.destination_airport_id
+            WHERE s.registration_date >= :fromTs
+              AND s.registration_date < :toTs
+            GROUP BY UPPER(o.icao_code), UPPER(d.icao_code), EXTRACT(ISODOW FROM s.registration_date)
+            """, nativeQuery = true)
+    List<FutureRouteBaselineRow> aggregateFutureBaseline(@Param("fromTs") LocalDateTime fromTs,
+                                                         @Param("toTs") LocalDateTime toTs);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE ((:status IS NULL AND s.status IN ('PENDING', 'IN_ROUTE', 'CRITICAL', 'DELAYED')) OR s.status = :status)
+              AND (:origin IS NULL OR UPPER(s.originAirport.icaoCode) = :origin)
+              AND (:destination IS NULL OR UPPER(s.destinationAirport.icaoCode) = :destination)
+              AND (:code IS NULL OR UPPER(s.shipmentCode) LIKE :code)
+              AND s.registrationDate >= :dateFrom
+              AND s.registrationDate < :dateTo
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> findUpcomingShipmentCandidates(@Param("status") ShipmentStatus status,
+                                                  @Param("origin") String origin,
+                                                  @Param("destination") String destination,
+                                                  @Param("code") String code,
+                                                  @Param("dateFrom") LocalDateTime dateFrom,
+                                                  @Param("dateTo") LocalDateTime dateTo,
+                                                  Pageable pageable);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             UPDATE Shipment s
@@ -267,6 +476,13 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                OR s.deliveredAt IS NOT NULL
             """)
     int resetAllToInitialState();
+
+    @Query(value = """
+            SELECT COALESCE(MAX(CAST(SUBSTRING(s.shipment_code FROM '[0-9]+$') AS BIGINT)), 0)
+            FROM shipment s
+            WHERE s.shipment_code LIKE :prefix
+            """, nativeQuery = true)
+    long findMaxProjectedSequenceByPrefix(@Param("prefix") String prefix);
 
     @Query("""
             SELECT COUNT(s) FROM Shipment s
@@ -392,4 +608,9 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """, nativeQuery = true)
     List<ShipmentSummaryRow> fetchDashboardSummaryRows(@Param("status") String status,
                                                        @Param("limitRows") int limitRows);
+
+    List<Shipment> findByRegistrationDateBetweenOrderByRegistrationDateAsc(LocalDateTime from,
+                                                                            LocalDateTime to);
+
+    long deleteByRegistrationDateAfter(LocalDateTime cutoff);
 }

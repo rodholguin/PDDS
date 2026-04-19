@@ -1,4 +1,13 @@
-import type { BenchmarkJobState, DataImportLog, DatasetImportResult, DatasetStatus, DemandGenerationResult, EnviosImportJobState, EnviosImportResult } from '@/lib/types';
+import type {
+  BenchmarkJobState,
+  DataImportLog,
+  DatasetImportResult,
+  DatasetStatus,
+  DemandGenerationResult,
+  EnviosImportJobState,
+  EnviosImportResult,
+  FutureDemandGenerationResult,
+} from '@/lib/types';
 import { download, upload, api } from './client';
 
 export type ImportType = 'shipments' | 'airports' | 'flights';
@@ -41,6 +50,19 @@ export const importApi = {
     algorithmName?: string;
   }) =>
     api<{ message: string; result: DemandGenerationResult }>('/api/import/demand/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  projectFutureDemand: (payload: {
+    historicalFrom?: string;
+    historicalTo?: string;
+    projectionStart?: string;
+    projectionEnd?: string;
+    randomSeed?: number;
+    randomNoisePct?: number;
+  }) =>
+    api<FutureDemandGenerationResult>('/api/import/demand/project-future', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

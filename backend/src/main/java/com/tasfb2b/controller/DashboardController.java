@@ -4,10 +4,12 @@ import com.tasfb2b.dto.DashboardKpisDto;
 import com.tasfb2b.dto.DashboardOverviewDto;
 import com.tasfb2b.dto.NodeDetailDto;
 import com.tasfb2b.dto.MapLiveShipmentDto;
+import com.tasfb2b.dto.MapLiveFlightDto;
 import com.tasfb2b.dto.RouteNetworkEdgeDto;
 import com.tasfb2b.dto.ShipmentSearchResultDto;
 import com.tasfb2b.dto.ShipmentSummaryDto;
 import com.tasfb2b.dto.SystemStatusDto;
+import org.springframework.data.domain.Page;
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.AirportStatus;
 import com.tasfb2b.model.Flight;
@@ -27,10 +29,10 @@ import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.DashboardShipmentCacheService;
 import com.tasfb2b.service.RoutePlannerService;
+import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationRuntimeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,7 +53,6 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/dashboard")
-@RequiredArgsConstructor
 @Tag(name = "Dashboard", description = "KPIs y estado global del sistema para el mapa")
 public class DashboardController {
 
@@ -66,16 +67,48 @@ public class DashboardController {
     private final ShipmentAuditLogRepository shipmentAuditLogRepository;
     private final SimulationRuntimeService simulationRuntimeService;
     private final DashboardShipmentCacheService dashboardShipmentCacheService;
+    private final SimulationEngineService simulationEngineService;
+
+    public DashboardController(
+            AirportRepository airportRepository,
+            FlightRepository flightRepository,
+            ShipmentRepository shipmentRepository,
+            SimulationConfigRepository configRepository,
+            TravelStopRepository travelStopRepository,
+            RoutePlannerService routePlannerService,
+            CollapseMonitorService collapseMonitorService,
+            OperationalAlertRepository operationalAlertRepository,
+            ShipmentAuditLogRepository shipmentAuditLogRepository,
+            SimulationRuntimeService simulationRuntimeService,
+            DashboardShipmentCacheService dashboardShipmentCacheService,
+            SimulationEngineService simulationEngineService
+    ) {
+        this.airportRepository = airportRepository;
+        this.flightRepository = flightRepository;
+        this.shipmentRepository = shipmentRepository;
+        this.configRepository = configRepository;
+        this.travelStopRepository = travelStopRepository;
+        this.routePlannerService = routePlannerService;
+        this.collapseMonitorService = collapseMonitorService;
+        this.operationalAlertRepository = operationalAlertRepository;
+        this.shipmentAuditLogRepository = shipmentAuditLogRepository;
+        this.simulationRuntimeService = simulationRuntimeService;
+        this.dashboardShipmentCacheService = dashboardShipmentCacheService;
+        this.simulationEngineService = simulationEngineService;
+    }
 
     @GetMapping("/kpis")
     @Operation(summary = "KPIs principales para la cabecera del dashboard")
     public ResponseEntity<DashboardKpisDto> getKpis() {
         int[] thresholds = getThresholds();
-        long totalShipments = shipmentRepository.count();
+        LocalDateTime now = effectiveNow();
+        LocalDateTime todayStart = operationalDayStart(now);
+        LocalDateTime tomorrow = todayStart.plusDays(1);
+        long totalShipments = shipmentRepository.countByRegistrationDateBetween(todayStart, tomorrow);
         long activeShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
-        long inRouteShipments = shipmentRepository.countByStatus(ShipmentStatus.IN_ROUTE);
-        long criticalShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
-        long delivered = shipmentRepository.countDeliveredTotal();
+        long inRouteShipments = shipmentRepository.countInRouteBetween(todayStart, tomorrow);
+        long criticalShipments = shipmentRepository.countAtRiskShipmentsBetween(todayStart, tomorrow, now);
+        long delivered = shipmentRepository.countDeliveredBetween(todayStart, tomorrow);
 
         double sysLoad = collapseMonitorService.computeSystemLoad();
         double collapseRisk = routePlannerService.getCollapseRisk();
@@ -126,9 +159,13 @@ public class DashboardController {
                 .average()
                 .orElse(0.0);
 
-        long totalFlights = flightRepository.count();
-        long scheduledFlights = flightRepository.countByStatus(FlightStatus.SCHEDULED);
-        long inFlight = flightRepository.countByStatus(FlightStatus.IN_FLIGHT);
+        LocalDateTime now = effectiveNow();
+        LocalDateTime dayStart = operationalDayStart(now);
+        LocalDateTime dayEnd = dayStart.plusDays(1);
+        List<Flight> visibleFlights = flightRepository.findFlightsWithinWindow(dayStart, dayEnd);
+        long totalFlights = visibleFlights.size();
+        long scheduledFlights = visibleFlights.stream().filter(flight -> flight.getStatus() == FlightStatus.SCHEDULED).count();
+        long inFlight = visibleFlights.stream().filter(flight -> flight.getStatus() == FlightStatus.IN_FLIGHT).count();
 
         return ResponseEntity.ok(new SystemStatusDto(
                 total,
@@ -146,12 +183,13 @@ public class DashboardController {
     @Operation(summary = "Resumen operacional extendido del panel principal")
     public ResponseEntity<DashboardOverviewDto> getOverview() {
         LocalDateTime now = effectiveNow();
-        LocalDateTime todayStart = now.toLocalDate().atStartOfDay();
+        LocalDateTime todayStart = operationalDayStart(now);
         LocalDateTime tomorrow = todayStart.plusDays(1);
         LocalDateTime yesterdayStart = todayStart.minusDays(1);
 
-        long activeFlights = flightRepository.countActiveFlightsAt(now);
-        long inRoute = shipmentRepository.countInRoute();
+        long activeFlights = flightRepository.countLoadedActiveFlightsAtWithinDay(now, todayStart, tomorrow);
+        long nextScheduledFlights = Math.min(25L, flightRepository.countLoadedScheduledFlightsBetween(now, tomorrow));
+        long inRoute = shipmentRepository.countInRouteBetween(todayStart, tomorrow);
         long totalToday = shipmentRepository.countByRegistrationDateBetween(todayStart, tomorrow);
 
         long deliveredToday = shipmentRepository.countDeliveredBetween(todayStart, tomorrow);
@@ -169,12 +207,12 @@ public class DashboardController {
                 com.tasfb2b.model.OperationalAlertStatus.PENDING,
                 com.tasfb2b.model.OperationalAlertStatus.IN_REVIEW
         ));
-        long overdue = shipmentRepository.countOverdueShipments(now);
-        long atRisk = shipmentRepository.countAtRiskShipments(now);
-        long stalled = shipmentRepository.countShipmentsWithoutMovement(now.minusHours(6));
+        long overdue = shipmentRepository.countOverdueShipmentsBetween(todayStart, tomorrow, now);
+        long atRisk = shipmentRepository.countAtRiskShipmentsBetween(todayStart, tomorrow, now);
+        long stalled = shipmentRepository.countShipmentsWithoutMovementBetween(todayStart, tomorrow, now.minusHours(6));
 
-        long intra = shipmentRepository.countActiveByRouteType(false);
-        long inter = shipmentRepository.countActiveByRouteType(true);
+        long intra = shipmentRepository.countActiveByRouteTypeBetween(false, todayStart, tomorrow);
+        long inter = shipmentRepository.countActiveByRouteTypeBetween(true, todayStart, tomorrow);
         long totalActive = intra + inter;
         double intraPct = totalActive == 0 ? 0.0 : (intra * 100.0) / totalActive;
         double interPct = totalActive == 0 ? 0.0 : (inter * 100.0) / totalActive;
@@ -195,6 +233,7 @@ public class DashboardController {
 
         return ResponseEntity.ok(new DashboardOverviewDto(
                 activeFlights,
+                nextScheduledFlights,
                 inRoute,
                 totalToday,
                 inRoute,
@@ -219,42 +258,60 @@ public class DashboardController {
 
     @GetMapping("/shipments")
     @Operation(summary = "Listado resumido de envios para panel y mapa")
-    public ResponseEntity<List<ShipmentSummaryDto>> getShipmentSummaries(
+    public ResponseEntity<Page<ShipmentSummaryDto>> getShipmentSummaries(
             @RequestParam(required = false) String airline,
             @RequestParam(required = false) String origin,
             @RequestParam(required = false) String destination,
             @RequestParam(required = false) ShipmentStatus status,
-            @RequestParam(required = false, defaultValue = "700") Integer limit
+            @RequestParam(required = false) LocalDate date,
+            @RequestParam(required = false, defaultValue = "0") Integer page,
+            @RequestParam(required = false, defaultValue = "50") Integer size
     ) {
         LocalDateTime now = effectiveNow();
-        int safeLimit = Math.max(50, Math.min(2500, limit == null ? 700 : limit));
-        List<DashboardShipmentCacheService.ShipmentSnapshotRow> rows = dashboardShipmentCacheService.getRows(
-                status == null ? null : status.name(),
-                safeLimit
+        LocalDate effectiveDate = date == null ? now.toLocalDate() : date;
+        LocalDateTime dayStart = effectiveDate.atStartOfDay();
+        LocalDateTime dayEnd = effectiveDate.plusDays(1).atStartOfDay();
+        int safePage = Math.max(0, page == null ? 0 : page);
+        int safeSize = Math.max(1, Math.min(200, size == null ? 50 : size));
+        Page<Shipment> shipments = shipmentRepository.searchVisibleForOperationalDay(
+                normalizeUpper(airline),
+                normalizeUpper(origin),
+                normalizeUpper(destination),
+                status,
+                null,
+                dayStart,
+                dayEnd,
+                PageRequest.of(safePage, safeSize)
         );
 
-        List<ShipmentSummaryDto> response = rows.stream()
-                .filter(row -> airline == null || airline.isBlank() || row.airlineName().equalsIgnoreCase(airline))
-                .filter(row -> origin == null || origin.isBlank() || row.originIcao().equalsIgnoreCase(origin))
-                .filter(row -> destination == null || destination.isBlank() || row.destinationIcao().equalsIgnoreCase(destination))
-                .map(row -> toSummaryDtoFast(row, now))
+        List<ShipmentSummaryDto> response = shipments.getContent().stream()
+                .map(shipment -> toSummaryDto(shipment, now))
                 .toList();
 
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(new org.springframework.data.domain.PageImpl<>(response, shipments.getPageable(), shipments.getTotalElements()));
     }
 
     @GetMapping("/map-live")
     @Operation(summary = "Feed liviano para aviones en ruta del mapa")
     public ResponseEntity<List<MapLiveShipmentDto>> mapLive(
-            @RequestParam(required = false, defaultValue = "450") Integer limit
+            @RequestParam(required = false) Integer limit
     ) {
-        int safeLimit = Math.max(50, Math.min(1200, limit == null ? 450 : limit));
         LocalDateTime now = effectiveNow();
+        LocalDateTime dayStart = operationalDayStart(now);
+        LocalDateTime dayEnd = dayStart.plusDays(1);
 
-        List<Shipment> inRoute = shipmentRepository.findByStatus(ShipmentStatus.IN_ROUTE).stream()
+        List<Shipment> sorted = shipmentRepository.findByStatus(ShipmentStatus.IN_ROUTE).stream()
+                .filter(shipment -> shipment.getRegistrationDate() != null)
+                .filter(shipment -> !shipment.getRegistrationDate().isBefore(dayStart))
+                .filter(shipment -> shipment.getRegistrationDate().isBefore(dayEnd))
                 .sorted(Comparator.comparing(Shipment::getRegistrationDate))
-                .limit(safeLimit)
                 .toList();
+        List<Shipment> inRoute;
+        if (limit == null || limit <= 0) {
+            inRoute = sorted;
+        } else {
+            inRoute = sorted.stream().limit(limit).toList();
+        }
 
         if (inRoute.isEmpty()) {
             return ResponseEntity.ok(List.of());
@@ -296,6 +353,50 @@ public class DashboardController {
         }
 
         return ResponseEntity.ok(rows);
+    }
+
+    @GetMapping("/map-live-flights")
+    @Operation(summary = "Feed liviano de vuelos activos para el mapa")
+    public ResponseEntity<List<MapLiveFlightDto>> mapLiveFlights(@RequestParam(required = false) Integer limit) {
+        LocalDateTime now = effectiveNow();
+        LocalDateTime dayStart = operationalDayStart(now);
+        LocalDateTime dayEnd = dayStart.plusDays(1);
+        List<Flight> active = flightRepository.findActiveFlightsAtWithinDay(now, dayStart, dayEnd).stream()
+                .filter(flight -> flight.getCurrentLoad() != null && flight.getCurrentLoad() > 0)
+                .toList();
+
+        List<Flight> rows = (limit == null || limit <= 0) ? active : active.stream().limit(limit).toList();
+        List<MapLiveFlightDto> dto = new ArrayList<>();
+        for (Flight flight : rows) {
+            Airport origin = flight.getOriginAirport();
+            Airport destination = flight.getDestinationAirport();
+            long total = Math.max(1L, Duration.between(flight.getScheduledDeparture(), flight.getScheduledArrival()).toSeconds());
+            long elapsed = Math.max(0L, Duration.between(flight.getScheduledDeparture(), now).toSeconds());
+            double ratio = Math.max(0.0, Math.min(1.0, elapsed / (double) total));
+
+            double fromLon = normalizeLongitude(origin.getLongitude());
+            double toLon = nearestWrappedLongitude(normalizeLongitude(destination.getLongitude()), fromLon);
+            double lon = normalizeLongitude(fromLon + (toLon - fromLon) * ratio);
+
+            double fromMercY = mercatorY(origin.getLatitude());
+            double toMercY = mercatorY(destination.getLatitude());
+            double lat = inverseMercatorY(fromMercY + (toMercY - fromMercY) * ratio);
+
+            dto.add(new MapLiveFlightDto(
+                    flight.getId(),
+                    flight.getFlightCode(),
+                    origin.getIcaoCode(),
+                    destination.getIcaoCode(),
+                    lat,
+                    lon,
+                    origin.getLatitude(),
+                    origin.getLongitude(),
+                    destination.getLatitude(),
+                    destination.getLongitude(),
+                    flight.getLoadPct()
+            ));
+        }
+        return ResponseEntity.ok(dto);
     }
 
     @GetMapping("/shipments/search")
@@ -459,7 +560,7 @@ public class DashboardController {
                 computeRemainingTime(shipment.getDeadline(), now),
                 shipment.getProgressPercentage(),
                 isAtRisk(shipment, now),
-                shipment.isOverdue(),
+                shipment.getDeadline() != null && now.isAfter(shipment.getDeadline()) && shipment.getStatus() != ShipmentStatus.DELIVERED,
                 computeCriticalReason(shipment)
         );
     }
@@ -687,6 +788,21 @@ public class DashboardController {
         return simulationRuntimeService.currentSimulationTime().orElse(LocalDateTime.now());
     }
 
+    private LocalDateTime operationalDayStart(LocalDateTime now) {
+        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        LocalDateTime configuredStart = config == null ? null : config.getEffectiveScenarioStartAt();
+
+        if (configuredStart == null) {
+            return now.toLocalDate().atStartOfDay();
+        }
+
+        LocalDateTime candidate = configuredStart.toLocalDate().atStartOfDay();
+        while (!candidate.plusDays(1).isAfter(now)) {
+            candidate = candidate.plusDays(1);
+        }
+        return candidate;
+    }
+
     private boolean isAtRisk(Shipment shipment, LocalDateTime now) {
         if (shipment.getStatus() == ShipmentStatus.DELIVERED) return false;
         if (shipment.getDeadline() != null && shipment.getDeadline().isBefore(now)) return true;
@@ -698,10 +814,8 @@ public class DashboardController {
     }
 
     private int[] getThresholds() {
-        return configRepository.findAll().stream()
-                .findFirst()
-                .map(this::thresholdsFromConfig)
-                .orElse(new int[]{70, 90});
+        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        return config == null ? new int[]{70, 90} : thresholdsFromConfig(config);
     }
 
     private int[] thresholdsFromConfig(SimulationConfig config) {

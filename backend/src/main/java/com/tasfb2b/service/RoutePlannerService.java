@@ -20,7 +20,6 @@ import com.tasfb2b.service.algorithm.GeneticAlgorithm;
 import com.tasfb2b.service.algorithm.OptimizationResult;
 import com.tasfb2b.service.algorithm.RouteOptimizer;
 import com.tasfb2b.service.algorithm.SimulatedAnnealingOptimization;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,7 +34,6 @@ import java.util.Map;
 import java.util.Set;
 
 @Service
-@RequiredArgsConstructor
 @Transactional
 public class RoutePlannerService {
 
@@ -49,10 +47,38 @@ public class RoutePlannerService {
     private final TravelStopRepository travelStopRepository;
     private final SimulationConfigRepository configRepository;
     private final ShipmentAuditService shipmentAuditService;
+    private final FlightScheduleService flightScheduleService;
+    private final OperationalAlertService operationalAlertService;
+
+    public RoutePlannerService(
+            GeneticAlgorithm geneticAlgorithm,
+            AntColonyOptimization antColonyOptimization,
+            SimulatedAnnealingOptimization simulatedAnnealingOptimization,
+            AirportRepository airportRepository,
+            FlightRepository flightRepository,
+            ShipmentRepository shipmentRepository,
+            TravelStopRepository travelStopRepository,
+            SimulationConfigRepository configRepository,
+            ShipmentAuditService shipmentAuditService,
+            FlightScheduleService flightScheduleService,
+            OperationalAlertService operationalAlertService
+    ) {
+        this.geneticAlgorithm = geneticAlgorithm;
+        this.antColonyOptimization = antColonyOptimization;
+        this.simulatedAnnealingOptimization = simulatedAnnealingOptimization;
+        this.airportRepository = airportRepository;
+        this.flightRepository = flightRepository;
+        this.shipmentRepository = shipmentRepository;
+        this.travelStopRepository = travelStopRepository;
+        this.configRepository = configRepository;
+        this.shipmentAuditService = shipmentAuditService;
+        this.flightScheduleService = flightScheduleService;
+        this.operationalAlertService = operationalAlertService;
+    }
 
     public List<TravelStop> planShipment(Shipment shipment, String algorithmName) {
         return planShipment(shipment, algorithmName,
-                flightRepository.findFlightsWithAvailableCapacity(),
+                flightScheduleService.availableFlightsForShipment(shipment.getRegistrationDate()),
                 airportRepository.findAll(),
                 true);
     }
@@ -75,6 +101,7 @@ public class RoutePlannerService {
             shipment.setStatus(ShipmentStatus.CRITICAL);
             shipment.setProgressPercentage(0.0);
             shipmentRepository.save(shipment);
+            operationalAlertService.ensureShipmentAlert(shipment, "NO_ROUTE", "No se encontró ruta factible para el envío");
             return stops;
         }
 
@@ -103,7 +130,7 @@ public class RoutePlannerService {
         return previewRoute(
                 shipment,
                 algorithmName,
-                flightRepository.findFlightsWithAvailableCapacity(),
+                flightScheduleService.availableFlightsForShipment(shipment.getRegistrationDate()),
                 airportRepository.findAll()
         );
     }
@@ -134,14 +161,23 @@ public class RoutePlannerService {
         List<TravelStop> newStops = optimizer.replanRoute(
                 shipment,
                 failedStop,
-                flightRepository.findFlightsWithAvailableCapacity()
+                flightScheduleService.availableFlightsForShipment(shipment.getRegistrationDate())
         );
 
         if (newStops.isEmpty()) {
             shipment.setStatus(ShipmentStatus.DELAYED);
             shipmentRepository.save(shipment);
+            operationalAlertService.ensureShipmentAlert(shipment, "REPLAN_FAILED", "La replanificación no encontró una nueva ruta operativa");
             return newStops;
         }
+
+        releaseFlightLoads(
+                shipment,
+                currentStops.stream()
+                        .filter(stop -> stop.getStopStatus() == StopStatus.PENDING || stop.getStopStatus() == StopStatus.IN_TRANSIT)
+                        .toList(),
+                true
+        );
 
         travelStopRepository.deleteAll(
                 currentStops.stream()
@@ -166,6 +202,19 @@ public class RoutePlannerService {
         );
 
         return newStops;
+    }
+
+    @Transactional(readOnly = true)
+    public List<Flight> availableFlightsForWindow(LocalDateTime fromInclusive, LocalDateTime toExclusive) {
+        LocalDateTime from = fromInclusive == null ? LocalDateTime.now() : fromInclusive;
+        LocalDateTime to = toExclusive == null || !toExclusive.isAfter(from) ? from.plusDays(3) : toExclusive;
+        flightScheduleService.ensureFlightsForWindow(from, to);
+        return flightRepository.findSchedulableFlightsBetween(from, to);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Airport> allAirports() {
+        return airportRepository.findAll();
     }
 
     @Transactional(readOnly = true)
@@ -254,9 +303,21 @@ public class RoutePlannerService {
     public Shipment markDelivered(Long shipmentId) {
         Shipment shipment = shipmentRepository.findById(shipmentId)
                 .orElseThrow(() -> new IllegalArgumentException("Envío no encontrado: " + shipmentId));
+        LocalDateTime deliveredAt = LocalDateTime.now();
+
+        List<TravelStop> stops = travelStopRepository.findByShipmentOrderByStopOrderAsc(shipment);
+        for (TravelStop stop : stops) {
+            if (stop.getStopStatus() != StopStatus.COMPLETED) {
+                stop.setStopStatus(StopStatus.COMPLETED);
+                stop.setActualArrival(deliveredAt);
+            }
+        }
+        if (!stops.isEmpty()) {
+            travelStopRepository.saveAll(stops);
+        }
 
         shipment.setStatus(ShipmentStatus.DELIVERED);
-        shipment.setDeliveredAt(LocalDateTime.now());
+        shipment.setDeliveredAt(deliveredAt);
         shipment.setProgressPercentage(100.0);
         Shipment saved = shipmentRepository.save(shipment);
         shipmentAuditService.log(
@@ -267,6 +328,37 @@ public class RoutePlannerService {
                 null
         );
         return saved;
+    }
+
+    @Transactional
+    public int repairDeliveredShipments() {
+        int repaired = 0;
+        for (Shipment shipment : shipmentRepository.findByStatus(ShipmentStatus.DELIVERED)) {
+            List<TravelStop> stops = travelStopRepository.findByShipmentOrderByStopOrderAsc(shipment);
+            boolean hasPending = stops.stream().anyMatch(stop -> stop.getStopStatus() != StopStatus.COMPLETED);
+            boolean hasVisualResidue = !stops.isEmpty();
+            if (!hasPending && !hasVisualResidue) {
+                continue;
+            }
+
+            LocalDateTime deliveredAt = shipment.getDeliveredAt() != null ? shipment.getDeliveredAt() : LocalDateTime.now();
+            for (TravelStop stop : stops) {
+                if (stop.getStopStatus() != StopStatus.COMPLETED) {
+                    stop.setStopStatus(StopStatus.COMPLETED);
+                    stop.setActualArrival(deliveredAt);
+                }
+            }
+            if (!stops.isEmpty()) {
+                travelStopRepository.deleteAll(stops);
+            }
+            shipment.setProgressPercentage(100.0);
+            if (shipment.getDeliveredAt() == null) {
+                shipment.setDeliveredAt(deliveredAt);
+            }
+            shipmentRepository.save(shipment);
+            repaired++;
+        }
+        return repaired;
     }
 
     @Transactional(readOnly = true)
@@ -312,6 +404,21 @@ public class RoutePlannerService {
             Flight flight = stop.getFlight();
             if (flight == null) continue;
             flight.setCurrentLoad(Math.min(flight.getMaxCapacity(), flight.getCurrentLoad() + luggage));
+            touched.add(flight);
+        }
+
+        if (persistImmediately && !touched.isEmpty()) {
+            flightRepository.saveAll(touched);
+        }
+    }
+
+    private void releaseFlightLoads(Shipment shipment, List<TravelStop> stops, boolean persistImmediately) {
+        int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
+        java.util.Set<Flight> touched = new java.util.HashSet<>();
+        for (TravelStop stop : stops) {
+            Flight flight = stop.getFlight();
+            if (flight == null) continue;
+            flight.setCurrentLoad(Math.max(0, flight.getCurrentLoad() - luggage));
             touched.add(flight);
         }
 

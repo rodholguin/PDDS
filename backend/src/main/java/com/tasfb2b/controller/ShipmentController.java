@@ -3,14 +3,19 @@ package com.tasfb2b.controller;
 import com.tasfb2b.dto.ShipmentCreateDto;
 import com.tasfb2b.dto.ShipmentDetailDto;
 import com.tasfb2b.dto.ShipmentFeasibilityDto;
+import com.tasfb2b.dto.ShipmentLegDto;
 import com.tasfb2b.dto.ShipmentPlanningEventDto;
+import com.tasfb2b.dto.ShipmentUpcomingDto;
 import com.tasfb2b.dto.TravelStopDto;
+import com.tasfb2b.model.Flight;
+import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.ShipmentAuditType;
 import com.tasfb2b.model.ShipmentAuditType;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.TravelStop;
 import com.tasfb2b.repository.ShipmentAuditLogRepository;
+import com.tasfb2b.repository.FlightRepository;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.RoutePlannerService;
@@ -21,6 +26,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
@@ -37,8 +44,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/api/shipments")
@@ -47,6 +59,7 @@ import java.util.List;
 public class ShipmentController {
 
     private final ShipmentRepository shipmentRepository;
+    private final FlightRepository flightRepository;
     private final TravelStopRepository travelStopRepository;
     private final ShipmentAuditLogRepository shipmentAuditLogRepository;
     private final RoutePlannerService routePlannerService;
@@ -61,20 +74,63 @@ public class ShipmentController {
             @RequestParam(required = false) String origin,
             @RequestParam(required = false) String destination,
             @RequestParam(required = false) String code,
+            @RequestParam(required = false) LocalDate date,
+            @RequestParam(required = false, defaultValue = "false") boolean fromDate,
+            @RequestParam(required = false, defaultValue = "false") boolean currentOnly,
             @PageableDefault(size = 20, sort = "registrationDate") Pageable pageable
     ) {
         boolean hasAdvancedFilters = airline != null || origin != null || destination != null || code != null;
+        LocalDateTime dateFrom = null;
+        LocalDateTime dateTo = null;
+        if (date != null) {
+            dateFrom = date.atStartOfDay();
+            dateTo = fromDate ? null : date.plusDays(1).atStartOfDay();
+        }
 
         Page<Shipment> page;
-        if (hasAdvancedFilters) {
-            page = shipmentRepository.searchShipmentsPage(
+        if (currentOnly && dateFrom != null && dateTo != null) {
+            page = shipmentRepository.searchVisibleForOperationalDay(
                     normalizeUpper(airline),
                     normalizeUpper(origin),
                     normalizeUpper(destination),
                     status,
                     normalizeLikeUpper(code),
+                    dateFrom,
+                    dateTo,
                     pageable
             );
+        } else if (hasAdvancedFilters || dateFrom != null) {
+            if (dateFrom != null && dateTo != null) {
+                page = shipmentRepository.searchShipmentsPageOnDate(
+                        normalizeUpper(airline),
+                        normalizeUpper(origin),
+                        normalizeUpper(destination),
+                        status,
+                        normalizeLikeUpper(code),
+                        dateFrom,
+                        dateTo,
+                        pageable
+                );
+            } else if (dateFrom != null) {
+                page = shipmentRepository.searchShipmentsPageFromDate(
+                        normalizeUpper(airline),
+                        normalizeUpper(origin),
+                        normalizeUpper(destination),
+                        status,
+                        normalizeLikeUpper(code),
+                        dateFrom,
+                        pageable
+                );
+            } else {
+                page = shipmentRepository.searchShipmentsPage(
+                        normalizeUpper(airline),
+                        normalizeUpper(origin),
+                        normalizeUpper(destination),
+                        status,
+                        normalizeLikeUpper(code),
+                        pageable
+                );
+            }
         } else if (status != null) {
             page = shipmentRepository.findByStatus(status, pageable);
         } else {
@@ -82,6 +138,67 @@ public class ShipmentController {
         }
 
         return ResponseEntity.ok(page);
+    }
+
+    @GetMapping("/upcoming")
+    @Operation(summary = "Listar envíos por próxima salida de vuelo")
+    public ResponseEntity<Page<ShipmentUpcomingDto>> upcoming(
+            @RequestParam(required = false) ShipmentStatus status,
+            @RequestParam(required = false) String origin,
+            @RequestParam(required = false) String destination,
+            @RequestParam(required = false) String code,
+            @RequestParam(required = false) LocalDate date,
+            @PageableDefault(size = 20, sort = "registrationDate") Pageable pageable
+    ) {
+        LocalDate effectiveDate = date == null ? LocalDate.now() : date;
+        LocalDateTime dateFrom = effectiveDate.atStartOfDay();
+        LocalDateTime dateTo = effectiveDate.plusDays(1).atStartOfDay();
+        String normalizedCode = normalizeLikeUpper(code);
+        int candidateSize = Math.max((int) pageable.getOffset() + pageable.getPageSize() * 2, 20);
+        Pageable candidatePageable = PageRequest.of(0, candidateSize);
+
+        Page<Shipment> candidates = shipmentRepository.findUpcomingShipmentCandidates(
+                status == null ? ShipmentStatus.PENDING : status,
+                normalizeUpper(origin),
+                normalizeUpper(destination),
+                normalizedCode,
+                dateFrom,
+                dateTo,
+                candidatePageable
+        );
+
+        List<Airport> candidateOrigins = candidates.getContent().stream()
+                .map(Shipment::getOriginAirport)
+                .distinct()
+                .toList();
+        LocalDateTime flightsFrom = candidates.getContent().stream()
+                .map(Shipment::getRegistrationDate)
+                .min(LocalDateTime::compareTo)
+                .orElse(dateFrom);
+        LocalDateTime flightsTo = candidates.getContent().stream()
+                .map(shipment -> shipment.getDeadline() == null ? shipment.getRegistrationDate().plusDays(2) : shipment.getDeadline().plusDays(1))
+                .max(LocalDateTime::compareTo)
+                .orElse(dateTo.plusDays(2));
+        Map<Long, List<Flight>> flightsByOriginId = candidateOrigins.isEmpty()
+                ? Map.of()
+                : flightRepository.findSchedulableFlightsByOriginsAndWindow(candidateOrigins, flightsFrom, flightsTo).stream()
+                        .collect(java.util.stream.Collectors.groupingBy(flight -> flight.getOriginAirport().getId()));
+        Map<Long, List<TravelStop>> stopsByShipmentId = candidates.getContent().isEmpty()
+                ? Map.of()
+                : travelStopRepository.findByShipmentInOrderByShipmentIdAscStopOrderAsc(candidates.getContent()).stream()
+                        .collect(java.util.stream.Collectors.groupingBy(stop -> stop.getShipment().getId()));
+
+        List<ShipmentUpcomingDto> ordered = candidates.getContent().stream()
+                .map(shipment -> toUpcomingDto(shipment, flightsByOriginId, stopsByShipmentId.getOrDefault(shipment.getId(), List.of())))
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(ShipmentUpcomingDto::nextFlightDeparture, Comparator.nullsLast(LocalDateTime::compareTo)))
+                .toList();
+
+        int fromIndex = Math.min((int) pageable.getOffset(), ordered.size());
+        int toIndex = Math.min(fromIndex + pageable.getPageSize(), ordered.size());
+        List<ShipmentUpcomingDto> content = ordered.subList(fromIndex, toIndex);
+
+        return ResponseEntity.ok(new PageImpl<>(content, pageable, candidates.getTotalElements()));
     }
 
     @GetMapping("/overdue")
@@ -138,6 +255,16 @@ public class ShipmentController {
         Shipment delivered = routePlannerService.markDelivered(id);
         List<TravelStop> stops = travelStopRepository.findByShipmentOrderByStopOrderAsc(delivered);
         return ResponseEntity.ok(toDetailDto(delivered, stops));
+    }
+
+    @PostMapping("/repair-delivered")
+    @Operation(summary = "Reparar envíos DELIVERED con stops/legs residuales")
+    public ResponseEntity<Map<String, Object>> repairDelivered() {
+        int repaired = routePlannerService.repairDeliveredShipments();
+        return ResponseEntity.ok(Map.of(
+                "message", "Envíos entregados reparados",
+                "repaired", repaired
+        ));
     }
 
     @GetMapping("/{id}/receipt")
@@ -222,11 +349,49 @@ public class ShipmentController {
                     stop.getAirport().getLatitude(),
                     stop.getAirport().getLongitude(),
                     stop.getFlight() == null ? null : stop.getFlight().getFlightCode(),
+                    stop.getFlight() == null ? null : stop.getFlight().getScheduledDeparture(),
                     stop.getScheduledArrival(),
                     stop.getActualArrival(),
                     stop.getStopStatus()
             ));
         }
+
+        List<ShipmentLegDto> legs = new ArrayList<>();
+        for (int i = 1; i < stops.size(); i++) {
+            TravelStop fromStop = stops.get(i - 1);
+            TravelStop toStop = stops.get(i);
+            Flight flight = toStop.getFlight();
+            ShipmentLegDto leg = new ShipmentLegDto(
+                    flight == null ? null : flight.getId(),
+                    flight == null ? null : flight.getFlightCode(),
+                    fromStop.getAirport().getIcaoCode(),
+                    fromStop.getAirport().getCity(),
+                    toStop.getAirport().getIcaoCode(),
+                    toStop.getAirport().getCity(),
+                    flight == null ? null : flight.getScheduledDeparture(),
+                    flight == null ? toStop.getScheduledArrival() : flight.getScheduledArrival(),
+                    toStop.getActualArrival(),
+                    flight == null ? null : flight.getStatus(),
+                    toStop.getStopStatus(),
+                    toStop.getStopStatus() == com.tasfb2b.model.StopStatus.IN_TRANSIT,
+                    toStop.getStopStatus() == com.tasfb2b.model.StopStatus.PENDING
+                            && legs.stream().noneMatch(ShipmentLegDto::next)
+            );
+            legs.add(leg);
+        }
+
+        ShipmentLegDto currentLeg = legs.stream().filter(ShipmentLegDto::current).findFirst().orElse(null);
+        ShipmentLegDto nextLeg = legs.stream().filter(ShipmentLegDto::next).findFirst().orElse(null);
+        String lastConfirmedNode = stops.stream()
+                .filter(stop -> stop.getStopStatus() == com.tasfb2b.model.StopStatus.COMPLETED)
+                .reduce((first, second) -> second)
+                .map(stop -> stop.getAirport().getIcaoCode())
+                .orElse(shipment.getOriginAirport().getIcaoCode());
+        LocalDateTime estimatedDestinationArrival = legs.stream()
+                .map(ShipmentLegDto::scheduledArrival)
+                .filter(java.util.Objects::nonNull)
+                .reduce((first, second) -> second)
+                .orElse(shipment.getDeadline());
 
         return new ShipmentDetailDto(
                 shipment.getId(),
@@ -243,8 +408,55 @@ public class ShipmentController {
                 shipment.getStatus(),
                 shipment.getProgressPercentage(),
                 shipment.getIsInterContinental(),
+                lastConfirmedNode,
+                currentLeg,
+                nextLeg,
+                estimatedDestinationArrival,
                 stopDtos,
+                legs,
                 shipmentAuditService.getAudit(shipment)
+        );
+    }
+
+    private ShipmentUpcomingDto toUpcomingDto(Shipment shipment, Map<Long, List<Flight>> flightsByOriginId, List<TravelStop> stops) {
+        TravelStop nextFlightStop = stops.stream()
+                .filter(stop -> stop.getStopStatus() == com.tasfb2b.model.StopStatus.PENDING)
+                .filter(stop -> stop.getFlight() != null)
+                .min(Comparator.comparing(TravelStop::getStopOrder))
+                .orElse(null);
+
+        Flight flight = nextFlightStop == null ? null : nextFlightStop.getFlight();
+        if (flight == null) {
+            LocalDateTime from = shipment.getRegistrationDate();
+            LocalDateTime to = shipment.getDeadline() == null ? from.plusDays(2) : shipment.getDeadline().plusDays(1);
+            flight = flightsByOriginId.getOrDefault(shipment.getOriginAirport().getId(), List.of()).stream()
+                    .filter(candidate -> !candidate.getScheduledDeparture().isBefore(from))
+                    .filter(candidate -> candidate.getScheduledDeparture().isBefore(to))
+                    .filter(candidate -> (candidate.getMaxCapacity() - candidate.getCurrentLoad()) >= shipment.getLuggageCount())
+                    .min(Comparator.comparing(Flight::getScheduledDeparture))
+                    .orElse(null);
+        }
+
+        if (flight == null) {
+            return null;
+        }
+
+        return new ShipmentUpcomingDto(
+                shipment.getId(),
+                shipment.getShipmentCode(),
+                shipment.getAirlineName(),
+                Map.of("icaoCode", shipment.getOriginAirport().getIcaoCode()),
+                Map.of("icaoCode", shipment.getDestinationAirport().getIcaoCode()),
+                shipment.getLuggageCount(),
+                shipment.getRegistrationDate(),
+                shipment.getDeadline(),
+                shipment.getDeliveredAt(),
+                shipment.getStatus(),
+                shipment.getProgressPercentage(),
+                shipment.getIsInterContinental(),
+                flight.getId(),
+                flight.getFlightCode(),
+                flight.getScheduledDeparture()
         );
     }
 
