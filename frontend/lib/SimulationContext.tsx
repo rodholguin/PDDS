@@ -62,7 +62,6 @@ interface SimulationCtx {
   airports: Airport[];
   mapLive: MapLiveShipment[];
   mapLiveFlights: MapLiveFlight[];
-  flightCatalog: Map<number, Flight>;
   upcomingFlights: Flight[];
 
   /** Projected simulation time on the client (extrapolated every 250 ms). */
@@ -80,7 +79,6 @@ const ctx = createContext<SimulationCtx>({
   airports: [],
   mapLive: [],
   mapLiveFlights: [],
-  flightCatalog: new Map(),
   upcomingFlights: [],
   simulatedNowMs: null,
 });
@@ -96,7 +94,6 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const [airports, setAirports] = useState<Airport[]>([]);
   const [mapLive, setMapLive] = useState<MapLiveShipment[]>([]);
   const [mapLiveFlights, setMapLiveFlights] = useState<MapLiveFlight[]>([]);
-  const [flightCatalog, setFlightCatalog] = useState<Map<number, Flight>>(() => new Map());
   const [upcomingFlights, setUpcomingFlights] = useState<Flight[]>([]);
   const [simulatedNowMs, setSimulatedNowMs] = useState<number | null>(null);
 
@@ -124,6 +121,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const simActive = Boolean(sim?.running || sim?.paused);
+  const simRunning = Boolean(sim?.running && !sim?.paused);
 
   // -- System status (8s) ---------------------------------------------------------------
   useEffect(() => {
@@ -132,6 +130,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       setCollapseRisk(null);
       return;
     }
+    if (!simRunning) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -155,7 +154,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [simActive]);
+  }, [simRunning]);
 
   // -- Airports catalog (30s — rarely changes) ------------------------------------------
   useEffect(() => {
@@ -178,7 +177,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   // -- Overview (3s when sim is active; keeps last value across pauses / nav) -----------
   useEffect(() => {
-    if (!simActive) return;
+    if (!simActive || !simRunning) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -194,7 +193,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [simActive]);
+  }, [simRunning]);
 
   // -- Map live (1s when sim is active) -------------------------------------------------
   useEffect(() => {
@@ -203,6 +202,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       setMapLiveFlights([]);
       return;
     }
+    if (!simRunning) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -223,46 +223,20 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [simActive]);
+  }, [simRunning]);
 
-  // -- Flight catalog (day±1 window — refreshed when the sim day changes) ---------------
   const anchorDate = useMemo(
     () => toIsoDate(sim?.simulatedNow ?? sim?.effectiveScenarioStartAt),
     [sim?.simulatedNow, sim?.effectiveScenarioStartAt],
   );
 
-  useEffect(() => {
-    if (!anchorDate) {
-      setFlightCatalog(new Map());
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const [current, previous] = await Promise.all([
-          flightsApi.list(undefined, anchorDate),
-          flightsApi.list(undefined, shiftIsoDate(anchorDate, -1)),
-        ]);
-        if (cancelled) return;
-        const next = new Map<number, Flight>();
-        for (const flight of previous) next.set(flight.id, flight);
-        for (const flight of current) next.set(flight.id, flight);
-        setFlightCatalog(next);
-      } catch {
-        /* keep last */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [anchorDate]);
-
   // -- Upcoming flights (next 20 SCHEDULED with scheduledDeparture >= simulatedNow) -----
   useEffect(() => {
-    if (!simActive || !anchorDate) {
+    if (!simActive) {
       setUpcomingFlights([]);
       return;
     }
+    if (!simRunning || !anchorDate) return;
     let cancelled = false;
     const load = async () => {
       try {
@@ -291,7 +265,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [simActive, anchorDate, sim?.simulatedNow]);
+  }, [simRunning, anchorDate, sim?.simulatedNow]);
 
   // -- Client-side simulated-clock extrapolation ----------------------------------------
   // Anchor uses client wall-clock (Date.now()) — NOT sim.lastTickAt — to avoid negative
@@ -300,7 +274,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const clockAnchorRef = useRef<{ simMs: number; wallMs: number; secondsPerRealSecond: number } | null>(null);
 
   useEffect(() => {
-    if (!sim?.running || !sim.simulatedNow) {
+    if (!sim?.running || sim?.paused || !sim.simulatedNow) {
       clockAnchorRef.current = null;
       setSimulatedNowMs(sim?.simulatedNow ? new Date(sim.simulatedNow).getTime() : null);
       return;
@@ -326,10 +300,10 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       clockAnchorRef.current = { simMs, wallMs: wallNow, secondsPerRealSecond: factor };
       setSimulatedNowMs(simMs);
     }
-  }, [sim?.running, sim?.simulatedNow, sim?.simulationSecondsPerTick]);
+  }, [sim?.running, sim?.paused, sim?.simulatedNow, sim?.simulationSecondsPerTick]);
 
   useEffect(() => {
-    if (!sim?.running) return;
+    if (!sim?.running || sim?.paused) return;
     const interval = setInterval(() => {
       const anchor = clockAnchorRef.current;
       if (!anchor) return;
@@ -338,7 +312,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       setSimulatedNowMs(projected);
     }, 250);
     return () => clearInterval(interval);
-  }, [sim?.running]);
+  }, [sim?.running, sim?.paused]);
 
   const value = useMemo<SimulationCtx>(() => ({
     sim,
@@ -351,7 +325,6 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     airports,
     mapLive,
     mapLiveFlights,
-    flightCatalog,
     upcomingFlights,
     simulatedNowMs,
   }), [
@@ -365,7 +338,6 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     airports,
     mapLive,
     mapLiveFlights,
-    flightCatalog,
     upcomingFlights,
     simulatedNowMs,
   ]);

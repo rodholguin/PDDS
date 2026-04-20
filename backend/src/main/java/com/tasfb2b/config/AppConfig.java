@@ -33,6 +33,7 @@ public class AppConfig implements WebMvcConfigurer {
         registry.addMapping("/api/**")
                 .allowedOrigins(
                         "http://localhost:3000",   // Next.js dev
+                        "http://127.0.0.1:3000",   // Local browser via loopback IP
                         "http://frontend:3000"     // Docker Compose
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")

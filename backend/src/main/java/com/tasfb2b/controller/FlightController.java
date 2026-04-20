@@ -66,18 +66,17 @@ public class FlightController {
     public ResponseEntity<List<Flight>> list(
             @RequestParam(required = false) FlightStatus status,
             @RequestParam(required = false) LocalDate date) {
-        List<Flight> flights;
-        if (date == null) {
-            flights = status == null ? flightRepository.findAll() : flightRepository.findByStatus(status);
-        } else {
-            LocalDateTime dayStart = date.atStartOfDay();
-            LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
-            flights = (status == null ? flightRepository.findAll() : flightRepository.findByStatus(status)).stream()
-                    .filter(f -> f.getScheduledDeparture() != null)
-                    .filter(f -> !f.getScheduledDeparture().isBefore(dayStart))
-                    .filter(f -> f.getScheduledDeparture().isBefore(dayEnd))
-                    .toList();
-        }
+        LocalDate effectiveDate = date != null
+                ? date
+                : java.util.Optional.ofNullable(simulationRuntimeService.getState().simulatedNow())
+                .map(LocalDateTime::toLocalDate)
+                .orElseGet(LocalDate::now);
+        LocalDateTime dayStart = effectiveDate.atStartOfDay();
+        LocalDateTime dayEnd = effectiveDate.plusDays(1).atStartOfDay();
+
+        List<Flight> flights = status == null
+                ? flightRepository.findFlightsWithinWindow(dayStart, dayEnd)
+                : flightRepository.findByStatusAndDate(status, dayStart, dayEnd);
         return ResponseEntity.ok(flights);
     }
 

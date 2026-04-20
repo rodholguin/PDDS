@@ -9,7 +9,7 @@ import { alertsApi } from '@/lib/api/alertsApi';
 import { importApi } from '@/lib/api/importApi';
 import { simulationApi } from '@/lib/api/simulationApi';
 import { useSimulation } from '@/lib/SimulationContext';
-import type { Airport, Flight, MapLiveFlight, NodeDetail, OperationalAlert, SimScenario } from '@/lib/types';
+import type { Airport, MapLiveFlight, NodeDetail, OperationalAlert, SimScenario } from '@/lib/types';
 
 const MAP_STYLE = 'https://demotiles.maplibre.org/style.json';
 const SATELLITE_STYLE: StyleSpecification = {
@@ -144,30 +144,6 @@ function interpolateFlightPosition(from: { latitude: number; longitude: number }
   };
 }
 
-function positionForFlightAtTime(flight: Flight, atMs: number) {
-  const departureMs = new Date(flight.scheduledDeparture).getTime();
-  const arrivalMs = new Date(flight.scheduledArrival).getTime();
-
-  if (!Number.isFinite(departureMs) || !Number.isFinite(arrivalMs) || arrivalMs <= departureMs) {
-    return {
-      latitude: flight.originAirport.latitude,
-      longitude: flight.originAirport.longitude,
-    };
-  }
-
-  const totalMs = arrivalMs - departureMs;
-  const ratio = clamp01((atMs - departureMs) / totalMs);
-  const fromLon = normalizeLongitude(flight.originAirport.longitude);
-  const toLon = nearestWrappedLongitude(normalizeLongitude(flight.destinationAirport.longitude), fromLon);
-  const fromMercY = mercatorY(flight.originAirport.latitude);
-  const toMercY = mercatorY(flight.destinationAirport.latitude);
-
-  return {
-    latitude: inverseMercatorY(fromMercY + (toMercY - fromMercY) * ratio),
-    longitude: normalizeLongitude(fromLon + (toLon - fromLon) * ratio),
-  };
-}
-
 function computeBearing(fromLat: number, fromLon: number, toLat: number, toLon: number): number {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const toDeg = (value: number) => (value * 180) / Math.PI;
@@ -242,7 +218,6 @@ export default function HomePage() {
     airports,
     mapLive,
     mapLiveFlights,
-    flightCatalog: flightCatalogShared,
     simulatedNowMs,
   } = useSimulation();
 
@@ -262,12 +237,6 @@ export default function HomePage() {
   const [renderedFlights, setRenderedFlights] = useState<MapLiveFlight[]>([]);
   const renderedFlightsRef = useRef<MapLiveFlight[]>([]);
   const flightAnimationFrameRef = useRef<number | null>(null);
-  const flightCatalogRef = useRef<Map<number, Flight>>(new globalThis.Map());
-
-  // Mirror the shared flight catalog into the local ref used by flight animation logic
-  useEffect(() => {
-    flightCatalogRef.current = flightCatalogShared;
-  }, [flightCatalogShared]);
 
   // Derived clock display from the globally-extrapolated simulated time
   const displayedSimTime = useMemo(() => {
@@ -314,7 +283,7 @@ export default function HomePage() {
     }
   }, [sim, draftDirty, hydrateFromState]);
 
-  // All live data (overview/system/airports/mapLive/mapLiveFlights/flightCatalog) and the
+  // All live data (overview/system/airports/mapLive/mapLiveFlights) and the
   // simulated-clock extrapolation are provided globally by SimulationContext so that
   // navigation between pages never triggers a flash of empty state.
   useEffect(() => {
@@ -344,25 +313,10 @@ export default function HomePage() {
 
     const previousById = new globalThis.Map(renderedFlightsRef.current.map((flight) => [flight.flightId, flight]));
     const startAt = performance.now();
-    const serverSimNowMs = sim?.simulatedNow ? new Date(sim.simulatedNow).getTime() : Number.NaN;
-    const previousTickMs = Number.isFinite(serverSimNowMs)
-      ? serverSimNowMs - Math.max(1, sim?.simulationSecondsPerTick ?? 1) * 1000
-      : Number.NaN;
-
     const fromFlights = mapLiveFlights.map((flight) => {
       const previous = previousById.get(flight.flightId);
       if (previous) {
         return previous;
-      }
-
-      const catalogFlight = flightCatalogRef.current.get(flight.flightId);
-      if (catalogFlight && Number.isFinite(previousTickMs)) {
-        const position = positionForFlightAtTime(catalogFlight, previousTickMs);
-        return {
-          ...flight,
-          currentLatitude: position.latitude,
-          currentLongitude: position.longitude,
-        };
       }
 
       return {

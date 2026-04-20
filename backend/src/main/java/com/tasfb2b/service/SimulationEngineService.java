@@ -138,6 +138,10 @@ public class SimulationEngineService {
         return tickInProgress.get();
     }
 
+    public void resetTickSequence() {
+        tickSequence.set(0L);
+    }
+
     private void executeTick(SimulationConfig config) {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime simulatedNow = runtimeService.currentSimulationTime().orElseGet(() -> resolveInitialSimulationTime(now));

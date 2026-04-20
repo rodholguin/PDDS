@@ -1,4 +1,7 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.NEXT_PUBLIC_API_URL
+  ?? (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:8080`
+    : 'http://localhost:8080');
 
 /** Generic JSON fetcher with unified error handling. */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -8,7 +11,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body?.message ?? `HTTP ${res.status}: ${path}`);
+    throw new Error(body?.message ?? body?.error ?? `HTTP ${res.status}: ${path}`);
   }
   return res.json() as Promise<T>;
 }

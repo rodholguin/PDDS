@@ -206,6 +206,8 @@ public class SimulationController {
             flightScheduleService.ensureFlightsForSimulationWindow(desiredStart);
         }
 
+        simulationEngineService.resetTickSequence();
+
         // Flip isRunning last — after all scenario/date fields are finalized in memory —
         // so the single save below atomically publishes a consistent state to the DB.
         config.setIsRunning(true);
@@ -234,6 +236,7 @@ public class SimulationController {
     public ResponseEntity<?> stop() {
         runtimeService.prepareStop();
         awaitTickDrain();
+        simulationEngineService.resetTickSequence();
         runtimeService.resetOperationalData();
 
         return ResponseEntity.ok(Map.of(
@@ -248,6 +251,7 @@ public class SimulationController {
     public ResponseEntity<?> resetToInitial() {
         runtimeService.prepareStop();
         awaitTickDrain();
+        simulationEngineService.resetTickSequence();
         runtimeService.resetOperationalData();
         return ResponseEntity.ok(Map.of(
                 "message", "Estado inicial restaurado",
@@ -279,8 +283,8 @@ public class SimulationController {
             ));
         }
 
-        configRepository.save(config);
         runtimeService.markPaused();
+        awaitTickDrain();
         return ResponseEntity.ok(Map.of(
                 "message", "Simulacion pausada",
                 "state", runtimeService.getState()
