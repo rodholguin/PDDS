@@ -224,19 +224,25 @@ public class RoutePlannerService {
 
     @Transactional(readOnly = true)
     public Map<String, OptimizationResult> runBothAlgorithms(List<Shipment> shipments, LocalDate from, LocalDate to) {
+        List<Shipment> filtered = shipments == null ? List.of() : shipments.stream()
+                .filter(shipment -> withinPeriod(shipment, from, to))
+                .sorted(Comparator.comparing(Shipment::getRegistrationDate, Comparator.nullsLast(LocalDateTime::compareTo)))
+                .limit(220)
+                .toList();
+        List<Airport> airports = airportRepository.findAll();
+        List<Flight> availableFlights = flightRepository.findFlightsWithAvailableCapacity();
+        return benchmarkGaVsAco(filtered, availableFlights, airports);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, OptimizationResult> benchmarkGaVsAco(List<Shipment> shipments,
+                                                            List<Flight> availableFlights,
+                                                            List<Airport> airports) {
+        List<Shipment> filtered = shipments == null ? List.of() : shipments;
+
         Map<String, OptimizationResult> results = new HashMap<>();
-        results.put(
-                geneticAlgorithm.getAlgorithmName(),
-                geneticAlgorithm.evaluatePerformance(shipments, from, to)
-        );
-        results.put(
-                antColonyOptimization.getAlgorithmName(),
-                antColonyOptimization.evaluatePerformance(shipments, from, to)
-        );
-        results.put(
-                simulatedAnnealingOptimization.getAlgorithmName(),
-                simulatedAnnealingOptimization.evaluatePerformance(shipments, from, to)
-        );
+        results.put(geneticAlgorithm.getAlgorithmName(), benchmarkAlgorithm(geneticAlgorithm, filtered, availableFlights, airports));
+        results.put(antColonyOptimization.getAlgorithmName(), benchmarkAlgorithm(antColonyOptimization, filtered, availableFlights, airports));
         return results;
     }
 
@@ -258,6 +264,100 @@ public class RoutePlannerService {
                 })
                 .map(OptimizationResult::getAlgorithmName)
                 .orElse("N/A");
+    }
+
+    private OptimizationResult benchmarkAlgorithm(RouteOptimizer optimizer,
+                                                  List<Shipment> shipments,
+                                                  List<Flight> availableFlights,
+                                                  List<Airport> airports) {
+        if (shipments == null || shipments.isEmpty()) {
+            return OptimizationResult.builder()
+                    .algorithmName(optimizer.getAlgorithmName())
+                    .completedShipments(0)
+                    .completedPct(0.0)
+                    .avgTransitHours(0.0)
+                    .totalReplanning(0)
+                    .operationalCost(0.0)
+                    .flightUtilizationPct(0.0)
+                    .saturatedAirports(0)
+                    .collapseReachedAt(null)
+                    .build();
+        }
+
+        int total = shipments.size();
+        int feasible = 0;
+        int misses = 0;
+        double transitHoursSum = 0.0;
+        double operationalCost = 0.0;
+        double utilizationSum = 0.0;
+        int saturatedAirports = 0;
+        LocalDateTime collapseReachedAt = null;
+        java.util.Set<Long> touchedAirports = new java.util.HashSet<>();
+
+        for (Shipment shipment : shipments) {
+            List<TravelStop> stops = optimizer.planRoute(shipment, availableFlights, airports);
+            if (stops.isEmpty()) {
+                misses++;
+                if (collapseReachedAt == null) {
+                    collapseReachedAt = shipment.getRegistrationDate();
+                }
+                continue;
+            }
+
+            feasible++;
+            LocalDateTime arrival = stops.stream()
+                    .filter(stop -> stop.getFlight() != null)
+                    .map(stop -> stop.getFlight().getScheduledArrival())
+                    .filter(java.util.Objects::nonNull)
+                    .max(LocalDateTime::compareTo)
+                    .orElse(shipment.getRegistrationDate());
+
+            double etaHours = Math.max(0.0, ChronoUnit.MINUTES.between(
+                    shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate(),
+                    arrival == null ? LocalDateTime.now() : arrival
+            ) / 60.0);
+            transitHoursSum += etaHours;
+            if (shipment.getDeadline() != null && arrival != null && arrival.isAfter(shipment.getDeadline())) {
+                misses++;
+            }
+
+            int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
+            operationalCost += luggage * 0.25 + etaHours * 1.3 + Math.max(0, stops.size() - 2) * 7.0;
+            utilizationSum += stops.stream()
+                    .filter(stop -> stop.getFlight() != null)
+                    .map(TravelStop::getFlight)
+                    .mapToDouble(Flight::getLoadPct)
+                    .average()
+                    .orElse(0.0);
+
+            for (TravelStop stop : stops) {
+                Airport airport = stop.getAirport();
+                if (airport != null && touchedAirports.add(airport.getId()) && airport.getOccupancyPct() >= getConfig().getWarningThresholdPct()) {
+                    saturatedAirports++;
+                }
+            }
+        }
+
+        double completedPct = feasible == 0 ? 0.0 : feasible * 100.0 / total;
+        return OptimizationResult.builder()
+                .algorithmName(optimizer.getAlgorithmName())
+                .completedShipments(feasible)
+                .completedPct(completedPct)
+                .avgTransitHours(feasible == 0 ? 0.0 : transitHoursSum / feasible)
+                .totalReplanning(Math.max(0, total - feasible))
+                .operationalCost(total == 0 ? 0.0 : operationalCost)
+                .flightUtilizationPct(feasible == 0 ? 0.0 : utilizationSum / feasible)
+                .saturatedAirports(saturatedAirports)
+                .collapseReachedAt(collapseReachedAt)
+                .build();
+    }
+
+    private boolean withinPeriod(Shipment shipment, LocalDate from, LocalDate to) {
+        if (shipment == null || shipment.getRegistrationDate() == null) return true;
+        LocalDate day = shipment.getRegistrationDate().toLocalDate();
+        boolean afterFrom = from == null || !day.isBefore(from);
+        boolean beforeTo = to == null || !day.isAfter(to);
+        return afterFrom && beforeTo;
     }
 
     @Transactional(readOnly = true)

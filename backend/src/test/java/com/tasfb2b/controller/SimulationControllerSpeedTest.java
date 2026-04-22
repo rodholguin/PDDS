@@ -8,6 +8,7 @@ import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.service.AlgorithmProfileService;
 import com.tasfb2b.service.AlgorithmRaceService;
 import com.tasfb2b.service.CollapseMonitorService;
+import com.tasfb2b.service.FutureDemandProjectionService;
 import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
@@ -49,6 +50,7 @@ class SimulationControllerSpeedTest {
     @MockBean private SimulationEngineService simulationEngineService;
     @MockBean private AlgorithmProfileService algorithmProfileService;
     @MockBean private FlightScheduleService flightScheduleService;
+    @MockBean private FutureDemandProjectionService futureDemandProjectionService;
     @MockBean private PlatformTransactionManager transactionManager;
 
     @Test

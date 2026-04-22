@@ -85,10 +85,8 @@ public class BenchmarkTuningService {
         List<AlgorithmProfile> baseProfiles = List.of(
                 new AlgorithmProfile("GA-P1", "Genetic Algorithm", 55, 24, 0.05, 24, 20, 0.10, 1.0, 2.0),
                 new AlgorithmProfile("GA-P2", "Genetic Algorithm", 70, 30, 0.06, 24, 20, 0.10, 1.0, 2.0),
-                new AlgorithmProfile("ACO-P1", "Ant Colony Optimization", 60, 24, 0.06, 20, 24, 0.10, 1.1, 2.1),
-                new AlgorithmProfile("ACO-P2", "Ant Colony Optimization", 60, 24, 0.06, 24, 30, 0.09, 1.2, 2.2),
-                new AlgorithmProfile("SA-P1", "Simulated Annealing", 55, 24, 0.05, 24, 220, 0.965, 160.0, 0.0),
-                new AlgorithmProfile("SA-P2", "Simulated Annealing", 55, 24, 0.05, 24, 280, 0.955, 220.0, 0.0)
+                new AlgorithmProfile("ACO-P1", "Ant Colony Optimization", 55, 24, 0.05, 20, 24, 0.10, 1.1, 2.1),
+                new AlgorithmProfile("ACO-P2", "Ant Colony Optimization", 70, 30, 0.06, 24, 30, 0.09, 1.2, 2.2)
         );
 
         List<BenchmarkPhase> phases = List.of(
@@ -316,6 +314,10 @@ public class BenchmarkTuningService {
                                                     List<Airport> airports) {
         if (shipments == null || shipments.isEmpty()) {
             return new PlanningMetrics(0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0);
+        }
+
+        if (!"Genetic Algorithm".equals(algorithmName) && !"Ant Colony Optimization".equals(algorithmName)) {
+            return new PlanningMetrics(0, 0, 0.0, 0.0, 0.0, 100.0, 0.0, 0.0, 0, 0);
         }
 
         int total = shipments.size();

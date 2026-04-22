@@ -7,6 +7,7 @@ import com.tasfb2b.model.SimulationScenario;
 import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.service.AlgorithmRaceService;
 import com.tasfb2b.service.CollapseMonitorService;
+import com.tasfb2b.service.FutureDemandProjectionService;
 import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
@@ -56,6 +57,8 @@ class SimulationControllerSeedStatisticalTest {
     private AlgorithmProfileService algorithmProfileService;
     @MockBean
     private FlightScheduleService flightScheduleService;
+    @MockBean
+    private FutureDemandProjectionService futureDemandProjectionService;
     @MockBean
     private PlatformTransactionManager transactionManager;
 

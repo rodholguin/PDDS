@@ -126,8 +126,8 @@ class SimulationEngineDepartureFlowTest {
         when(runtimeService.currentSimulationTime()).thenReturn(java.util.Optional.of(LocalDateTime.now().minusMinutes(3)));
 
         when(flightRepository.findByStatusAndScheduledDepartureLessThanEqual(any(), any())).thenReturn(List.of(flight));
-        when(travelStopRepository.findByFlightAndStopStatus(flight, StopStatus.PENDING)).thenReturn(List.of(destinationStop));
-        when(travelStopRepository.findByShipmentOrderByStopOrderAsc(shipment)).thenReturn(List.of(originStop, destinationStop));
+        when(travelStopRepository.findByFlightInAndStopStatus(List.of(flight), StopStatus.PENDING)).thenReturn(List.of(destinationStop));
+        when(travelStopRepository.findByShipmentInOrderByShipmentIdAscStopOrderAsc(List.of(shipment))).thenReturn(List.of(originStop, destinationStop));
         when(shipmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(travelStopRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 

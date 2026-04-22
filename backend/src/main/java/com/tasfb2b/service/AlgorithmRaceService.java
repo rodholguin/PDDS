@@ -24,9 +24,23 @@ public class AlgorithmRaceService {
 
     @Transactional(readOnly = true)
     public AlgorithmRaceReportDto buildRaceReport(LocalDate from, LocalDate to, String scenario) {
-        List<Shipment> all = shipmentRepository.findAll();
-        Map<String, OptimizationResult> map = routePlannerService.runBothAlgorithms(all, from, to);
-        String winner = routePlannerService.benchmarkWinner(all, from, to);
+        List<Shipment> all = shipmentRepository.findAll().stream()
+                .filter(shipment -> shipment.getRegistrationDate() == null
+                        || ((from == null || !shipment.getRegistrationDate().toLocalDate().isBefore(from))
+                        && (to == null || !shipment.getRegistrationDate().toLocalDate().isAfter(to))))
+                .sorted(Comparator.comparing(Shipment::getRegistrationDate, Comparator.nullsLast(java.time.LocalDateTime::compareTo)))
+                .limit(220)
+                .toList();
+        Map<String, OptimizationResult> map = routePlannerService.benchmarkGaVsAco(
+                all,
+                routePlannerService.availableFlightsForWindow(null, null),
+                routePlannerService.allAirports()
+        );
+        String winner = map.values().stream()
+                .max(Comparator.comparingDouble(OptimizationResult::getCompletedPct)
+                        .thenComparing(Comparator.comparingDouble(OptimizationResult::getAvgTransitHours).reversed()))
+                .map(OptimizationResult::getAlgorithmName)
+                .orElse("N/A");
 
         List<BenchmarkMetricsDto> metrics = map.values().stream()
                 .map(this::toMetric)
@@ -35,7 +49,8 @@ public class AlgorithmRaceService {
 
         List<String> notes = new ArrayList<>();
         notes.add("Score primario: completedPct, desempate por avgTransitHours y flightUtilizationPct.");
-        notes.add("Comparativa activa entre GA, ACO y SA sobre envios persistidos en base.");
+        notes.add("Comparativa activa entre GA y ACO usando planificación real sobre el mismo lote de envíos.");
+        notes.add("SA se mantiene solo como referencia histórica, no como algoritmo oficial del sistema.");
         notes.add("Para benchmark reproducible se recomienda generar lote synthetic con semilla fija.");
 
         return new AlgorithmRaceReportDto(

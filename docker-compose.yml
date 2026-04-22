@@ -48,8 +48,9 @@ services:
       dockerfile: Dockerfile
       args:
         # NEXT_PUBLIC_* se hornea en el bundle en tiempo de build.
-        # Usar localhost:8080 porque el navegador del host accede al puerto mapeado.
-        NEXT_PUBLIC_API_URL: http://localhost:8080
+        # Usar 127.0.0.1:8080 para evitar desalineacion de origen cuando el frontend
+        # se abre desde http://127.0.0.1:3000 durante pruebas reales con navegador.
+        NEXT_PUBLIC_API_URL: http://127.0.0.1:8080
     container_name: tasfb2b-frontend
     restart: unless-stopped
     depends_on:

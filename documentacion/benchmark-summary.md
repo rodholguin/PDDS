@@ -1,41 +1,41 @@
-# Benchmark Exhaustivo de Algoritmos
+# Benchmark oficial completo
 
-Generado: 2026-04-05T12:26:36
-Ganador global: **Ant Colony Optimization**
-Muestra total: 11 corridas
+Ganador global: **Genetic Algorithm**
+Corridas totales: 204
+Muestra perfil ganador: 20
 
-## Defaults aplicados
-- Semillas por escenario: 2
-- Tamaños de demanda: 100 / 300 / 600
-- Ponderaciones: completed 30%, avgTransit 25%, deadlineMiss 20%, replanSuccess 10%, cost 10%, saturated 5%
+## Alcance actual
+- Comparacion oficial centrada en **GA vs ACO**
+- `GA` queda como algoritmo operativo del sistema
+- `ACO` se conserva completo para comparacion tecnica y exposicion de codigo
+
+## Escenarios oficiales ejecutados
+- COLLAPSE_SENS_0
+- COLLAPSE_SENS_M15
+- COLLAPSE_SENS_M30
+- COLLAPSE_SENS_P15
+- COLLAPSE_SENS_P30
+- DAY_TO_DAY
+- PERIOD_D3_M30
+- PERIOD_D5_M60
+- PERIOD_D7_M90
 
 ## Perfil ganador
-- Perfil: `ACO-P1`
-- Familia algoritmo: `Ant Colony Optimization`
-- Score compuesto: `86.12`
-- Completed % promedio: `100.00`
-- Avg transit hours promedio: `12.18`
-- Deadline miss rate promedio: `0.00`
-- Replan success % promedio: `100.00`
-- IC95 winner score: `[86.09, 86.15]`
-- Delta vs runner-up: `0.05`
+- Perfil: `GA-P1`
+- Algoritmo: `Genetic Algorithm`
+- Score promedio: `80.2649`
+- Collapse delay h: `31.81`
+- Completed %: `100.00`
+- Avg transit h: `12.20`
 
-## Fundamentos de elección
-- Maximiza score multi-criterio ponderado bajo escenarios normales, picos, colapso, disrupción y recuperación.
-- Prioriza cumplimiento y tiempo de tránsito sin ignorar resiliencia (replanificación) ni costo operacional.
-- Mantiene desempeño estable en diferentes tamaños de demanda y múltiples semillas.
+## Sensibilidad vuelos (LE-066)
+- COLLAPSE_SENS_M30: score `80.005`, collapseDelay `33.31h`
+- COLLAPSE_SENS_M15: score `79.710`, collapseDelay `31.62h`
+- COLLAPSE_SENS_0: score `80.455`, collapseDelay `31.46h`
+- COLLAPSE_SENS_P15: score `81.346`, collapseDelay `32.59h`
+- COLLAPSE_SENS_P30: score `80.527`, collapseDelay `31.40h`
 
-## Ganador por escenario
-| Escenario | Ganador | Completed % | Avg Transit h | Deadline Miss % | Score |
-|---|---|---:|---:|---:|---:|
-| NORMAL | Ant Colony Optimization | 100.00 | 12.20 | 0.00 | 86.15 |
-| PEAK | Ant Colony Optimization | 100.00 | 12.17 | 0.00 | 86.08 |
-
-## Archivos de evidencia
-- Datos de demanda: `documentacion/datasets/demand_scenarios.csv`
-- Resultados exhaustivos tabulares: `documentacion/benchmark-results.csv`
-- Resultado completo estructurado: `documentacion/benchmark-results.json`
-
-## Notas
-- Corridas registradas: 59
-- El algoritmo elegido surge del score compuesto y no de una única métrica aislada.
+## Archivos
+- `documentacion/benchmark-results.csv`
+- `documentacion/benchmark-results.json`
+- `documentacion/benchmark-summary.md`
