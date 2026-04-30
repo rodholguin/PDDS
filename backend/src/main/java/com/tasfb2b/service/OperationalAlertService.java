@@ -7,6 +7,7 @@ import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentAuditType;
 import com.tasfb2b.repository.OperationalAlertRepository;
 import com.tasfb2b.repository.ShipmentRepository;
+import com.tasfb2b.repository.SimulationConfigRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,15 +20,18 @@ public class OperationalAlertService {
     private final OperationalAlertRepository alertRepository;
     private final ShipmentRepository shipmentRepository;
     private final ShipmentAuditService shipmentAuditService;
+    private final SimulationConfigRepository simulationConfigRepository;
 
     public OperationalAlertService(
             OperationalAlertRepository alertRepository,
             ShipmentRepository shipmentRepository,
-            ShipmentAuditService shipmentAuditService
+            ShipmentAuditService shipmentAuditService,
+            SimulationConfigRepository simulationConfigRepository
     ) {
         this.alertRepository = alertRepository;
         this.shipmentRepository = shipmentRepository;
         this.shipmentAuditService = shipmentAuditService;
+        this.simulationConfigRepository = simulationConfigRepository;
     }
 
     @Transactional
@@ -68,10 +72,30 @@ public class OperationalAlertService {
 
     @Transactional(readOnly = true)
     public List<OperationalAlertDto> activeAlerts() {
-        return alertRepository.findByStatusInOrderByIdDesc(List.of(OperationalAlertStatus.PENDING, OperationalAlertStatus.IN_REVIEW))
+        LocalDateTime now = currentOperationalNow();
+        LocalDateTime dayStart = now.toLocalDate().atStartOfDay();
+        LocalDateTime dayEnd = dayStart.plusDays(1);
+
+        return alertRepository.findByStatusInAndShipmentRegistrationDateBetweenOrderByIdDesc(
+                        List.of(OperationalAlertStatus.PENDING, OperationalAlertStatus.IN_REVIEW),
+                        dayStart,
+                        dayEnd
+                )
                 .stream()
                 .map(this::toDto)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public long countActiveAlertsForCurrentOperationalDay() {
+        LocalDateTime now = currentOperationalNow();
+        LocalDateTime dayStart = now.toLocalDate().atStartOfDay();
+        LocalDateTime dayEnd = dayStart.plusDays(1);
+        return alertRepository.countByStatusInAndShipmentRegistrationDateBetween(
+                List.of(OperationalAlertStatus.PENDING, OperationalAlertStatus.IN_REVIEW),
+                dayStart,
+                dayEnd
+        );
     }
 
     @Transactional
@@ -113,5 +137,12 @@ public class OperationalAlertService {
                 alert.getResolvedAt(),
                 alert.getResolutionNote()
         );
+    }
+
+    private LocalDateTime currentOperationalNow() {
+        var config = simulationConfigRepository.findTopByOrderByIdAsc();
+        return config != null && config.getRuntimeSimulatedNow() != null
+                ? config.getRuntimeSimulatedNow()
+                : LocalDateTime.now();
     }
 }

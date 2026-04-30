@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import Link from 'next/link';
-import Map, { Marker, NavigationControl, Popup, type MapRef } from 'react-map-gl/maplibre';
+import Map, { Marker, NavigationControl, Popup, type MapLayerMouseEvent, type MapRef } from 'react-map-gl/maplibre';
 import type { StyleSpecification } from 'maplibre-gl';
 import { dashboardApi } from '@/lib/api/dashboardApi';
 import { alertsApi } from '@/lib/api/alertsApi';
@@ -90,13 +90,15 @@ function formatSimTime(value: Date): string {
   return SIM_TIME_FORMATTER.format(value);
 }
 
-function formatTimeScaleLabel(simulationSecondsPerTick: number | null | undefined): string {
+function formatTimeScaleLabel(simulationSecondsPerTick: number | null | undefined, tickIntervalMs: number | null | undefined): string {
   const simSeconds = Math.max(1, simulationSecondsPerTick ?? 1);
+  const realSeconds = Math.max(1, tickIntervalMs ?? 1_000) / 1_000;
+  const realLabel = Number.isInteger(realSeconds) ? `${realSeconds.toFixed(0)} s real` : `${realSeconds.toFixed(1)} s real`;
   if (simSeconds % 60 === 0) {
     const minutes = simSeconds / 60;
-    return `${minutes} min simulados = 1 s real`;
+    return `${minutes} min simulados = ${realLabel}`;
   }
-  return `${simSeconds} s simulados = 1 s real`;
+  return `${simSeconds} s simulados = ${realLabel}`;
 }
 
 function normalizeLongitude(longitude: number): number {
@@ -104,15 +106,6 @@ function normalizeLongitude(longitude: number): number {
   while (value > 180) value -= 360;
   while (value < -180) value += 360;
   return value;
-}
-
-function mercatorY(latitude: number): number {
-  const rad = (latitude * Math.PI) / 180;
-  return Math.log(Math.tan(Math.PI / 4 + rad / 2));
-}
-
-function inverseMercatorY(value: number): number {
-  return (Math.atan(Math.sinh(value)) * 180) / Math.PI;
 }
 
 function nearestWrappedLongitude(target: number, reference: number): number {
@@ -160,35 +153,108 @@ function computeBearing(fromLat: number, fromLon: number, toLat: number, toLon: 
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
-function PlaneIcon({ rotation, selected }: { rotation: number; selected: boolean }) {
-  const fill = selected ? '#facc15' : '#ffffff';
-  const shadow = selected
-    ? 'drop-shadow(0 0 8px rgba(250, 204, 21, 0.9)) drop-shadow(0 0 14px rgba(15, 23, 42, 0.9))'
-    : 'drop-shadow(0 0 7px rgba(15, 23, 42, 0.98)) drop-shadow(0 0 12px rgba(15, 23, 42, 0.92))';
+function BootstrapOverlay({ planned, total, message }: { planned: number; total: number; message: string | null | undefined }) {
+  const safeTotal = Math.max(0, total);
+  const safePlanned = Math.max(0, Math.min(planned, safeTotal || planned));
+  const progress = safeTotal > 0 ? (safePlanned * 100) / safeTotal : 0;
 
   return (
-    <svg
-      width="28"
-      height="28"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
+    <div
       style={{
-        display: 'block',
-        overflow: 'visible',
-        transform: `rotate(${rotation}deg)`,
-        transformOrigin: '50% 50%',
-        filter: shadow,
-        pointerEvents: 'none',
+        position: 'absolute',
+        inset: 0,
+        zIndex: 7,
+        display: 'grid',
+        placeItems: 'center',
+        background: 'rgba(5, 8, 18, 0.68)',
+        backdropFilter: 'blur(4px)',
+        padding: 24,
       }}
     >
-      <path
-        d="M12 2 9.4 10.7 3 13.2 3 15.1 9.4 14.2 12 22 14.6 14.2 21 15.1 21 13.2 14.6 10.7Z"
-        fill={fill}
-        stroke="#08111f"
-        strokeWidth="1.1"
-        strokeLinejoin="round"
-      />
-    </svg>
+      <article className="surface-panel" style={{ width: 'min(460px, 100%)', padding: 22, border: '1px solid rgba(96, 165, 250, 0.28)' }}>
+        <p style={{ margin: 0, color: '#c7d2fe', fontSize: 12, letterSpacing: 1.2, textTransform: 'uppercase' }}>Preplanificación</p>
+        <h3 style={{ margin: '8px 0 6px', color: '#eff3ff', fontSize: 24 }}>Programando envíos antes de iniciar la simulación</h3>
+        <p style={{ margin: 0, color: '#a9b3cf', fontSize: 14 }}>{message ?? 'Construyendo rutas iniciales del período para arrancar con operación consistente.'}</p>
+        <div style={{ marginTop: 18, height: 12, borderRadius: 999, background: 'rgba(148, 163, 184, 0.18)', overflow: 'hidden' }}>
+          <div style={{ width: `${progress.toFixed(1)}%`, height: '100%', background: 'linear-gradient(90deg, #60a5fa 0%, #818cf8 55%, #a78bfa 100%)' }} />
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'space-between', color: '#dbeafe', fontSize: 14 }}>
+          <span>{safePlanned.toLocaleString('es-PE')} / {safeTotal.toLocaleString('es-PE')} envíos</span>
+          <strong>{progress.toFixed(1)}%</strong>
+        </div>
+      </article>
+    </div>
+  );
+}
+
+function RollingPlanningCard({ plannedThrough, backlog, message }: { plannedThrough: string | null | undefined; backlog: number; message: string | null | undefined }) {
+  const plannedLabel = plannedThrough
+    ? new Date(plannedThrough).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })
+    : 'Pendiente';
+
+  return (
+    <article className="surface-panel" style={{ padding: 14, border: '1px solid rgba(96, 165, 250, 0.24)' }}>
+      <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 99, background: '#60a5fa', boxShadow: '0 0 0 3px rgba(96, 165, 250, 0.22)' }} />
+        Planificación incremental
+      </p>
+      <strong style={{ marginTop: 4, display: 'block', fontSize: 18, color: '#eff3ff' }}>Cobertura hasta {plannedLabel}</strong>
+      <p style={{ margin: '6px 0 0', color: '#9ca3bf', fontSize: 12 }}>{message ?? 'Completando rutas del resto del período mientras la simulación ya está corriendo.'}</p>
+      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', color: '#dbeafe', fontSize: 12 }}>
+        <span>Backlog restante</span>
+        <strong>{Math.max(0, backlog).toLocaleString('es-PE')} envíos</strong>
+      </div>
+    </article>
+  );
+}
+
+function formatTelemetryDate(value: string | null | undefined): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'medium' });
+}
+
+function PeriodTelemetryCard({
+  seedTarget,
+  plannedThrough,
+  backlog,
+  batchCount,
+  lastBatchPlanned,
+  lastBatchFailed,
+  lastBatchElapsedMs,
+  lastBatchAt,
+  tickWaitCount,
+  tickLastElapsedMs,
+  tickLastWaitAt,
+}: {
+  seedTarget: string | null | undefined;
+  plannedThrough: string | null | undefined;
+  backlog: number;
+  batchCount: number;
+  lastBatchPlanned: number;
+  lastBatchFailed: number;
+  lastBatchElapsedMs: number;
+  lastBatchAt: string | null | undefined;
+  tickWaitCount: number;
+  tickLastElapsedMs: number;
+  tickLastWaitAt: string | null | undefined;
+}) {
+  return (
+    <article className="surface-panel" style={{ padding: 14 }}>
+      <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf' }}>Telemetría período</p>
+      <div style={{ marginTop: 10, display: 'grid', gap: 6, fontSize: 12, color: '#dbeafe' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Semilla hasta</span><strong>{formatTelemetryDate(seedTarget)}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Cobertura actual</span><strong>{formatTelemetryDate(plannedThrough)}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Backlog</span><strong>{Math.max(0, backlog).toLocaleString('es-PE')}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Batches rolling</span><strong>{Math.max(0, batchCount).toLocaleString('es-PE')}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último batch</span><strong>{lastBatchPlanned}/{lastBatchFailed} en {Math.max(0, lastBatchElapsedMs)} ms</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último batch at</span><strong>{formatTelemetryDate(lastBatchAt)}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Tick waits</span><strong>{Math.max(0, tickWaitCount).toLocaleString('es-PE')}</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último tick</span><strong>{Math.max(0, tickLastElapsedMs)} ms</strong></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último wait at</span><strong>{formatTelemetryDate(tickLastWaitAt)}</strong></div>
+      </div>
+    </article>
   );
 }
 
@@ -204,9 +270,221 @@ function KpiCard({ title, value, status }: { title: string; value: string; statu
   );
 }
 
-export default function HomePage() {
+function PlaneIcon({ rotation, selected }: { rotation: number; selected: boolean }) {
+  const fill = selected ? '#f97316' : '#ffffff';
+  const stroke = selected ? '#fff7ed' : '#08111f';
+
+  return (
+    <svg
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      style={{
+        display: 'block',
+        overflow: 'visible',
+        transform: `rotate(${rotation}deg)`,
+        transformOrigin: '50% 50%',
+        pointerEvents: 'none',
+      }}
+    >
+      <path
+        d="M21 16.5V14l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2.5l8-2.5V20l-2 1.5V23l4-1 4 1v-1.5L14 20v-6l8 2.5Z"
+        fill={fill}
+        stroke={stroke}
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+type SelectedFlightView = MapLiveFlight & {
+  currentLatitude: number;
+  currentLongitude: number;
+};
+
+type SimulationMapPanelProps = {
+  airports: Airport[];
+  flights: MapLiveFlight[];
+  renderedFlights: MapLiveFlight[];
+  active: boolean;
+  mapMode: MapMode;
+  onMapModeChange: (mode: MapMode) => void;
+  selectedShipment: {
+    shipmentId: number;
+    shipmentCode: string;
+    originIcao: string;
+    destinationIcao: string;
+    currentLatitude: number;
+    currentLongitude: number;
+    progressPct: number;
+  } | null;
+  selectedFlight: SelectedFlightView | null;
+  selectedFlightId: number | null;
+  selectedNode: { point: { longitude: number; latitude: number }; detail: NodeDetail } | null;
+  onSelectedFlightIdChange: (flightId: number | null) => void;
+  onSelectedFlightVisualChange: (flight: MapLiveFlight | null) => void;
+  onSelectedNodeChange: (node: { point: { longitude: number; latitude: number }; detail: NodeDetail } | null) => void;
+  onSelectedShipmentChange: (shipmentId: number | null) => void;
+  onOpenNode: (airport: Airport) => void;
+  bootstrapping: boolean;
+  bootstrapPlannedShipments: number;
+  bootstrapTotalShipments: number;
+  bootstrapMessage: string | null | undefined;
+};
+
+const SimulationMapPanel = memo(function SimulationMapPanel({
+  airports,
+  flights,
+  renderedFlights,
+  active,
+  mapMode,
+  onMapModeChange,
+  selectedShipment,
+  selectedFlight,
+  selectedFlightId,
+  selectedNode,
+  onSelectedFlightIdChange,
+  onSelectedFlightVisualChange,
+  onSelectedNodeChange,
+  onSelectedShipmentChange,
+  onOpenNode,
+  bootstrapping,
+  bootstrapPlannedShipments,
+  bootstrapTotalShipments,
+  bootstrapMessage,
+}: SimulationMapPanelProps) {
   const mapRef = useRef<MapRef | null>(null);
 
+  const handleMapClick = useCallback((event: MapLayerMouseEvent) => {
+    onSelectedShipmentChange(null);
+    onSelectedFlightIdChange(null);
+    onSelectedFlightVisualChange(null);
+    onSelectedNodeChange(null);
+  }, [onSelectedFlightIdChange, onSelectedFlightVisualChange, onSelectedNodeChange, onSelectedShipmentChange]);
+
+  return (
+    <section className="surface-panel" style={{ overflow: 'hidden', position: 'relative' }}>
+      <div style={{ position: 'absolute', top: 12, left: 56, zIndex: 5, display: 'flex', gap: 8 }}>
+        <button className={`chip${mapMode === 'MAPA' ? ' is-active' : ''}`} onClick={() => onMapModeChange('MAPA')}>Mapa</button>
+        <button className={`chip${mapMode === 'SATELITAL' ? ' is-active' : ''}`} onClick={() => onMapModeChange('SATELITAL')}>Satelital</button>
+      </div>
+
+      <div style={{ position: 'absolute', inset: 0, zIndex: 1, background: 'rgba(8, 10, 20, 0.24)', pointerEvents: 'none' }} />
+
+      <Map
+        ref={mapRef}
+        mapStyle={mapMode === 'MAPA' ? MAP_STYLE : SATELLITE_STYLE}
+        initialViewState={INITIAL_VIEW}
+        style={{ width: '100%', height: '100%' }}
+        renderWorldCopies={false}
+        onClick={handleMapClick}
+      >
+        <NavigationControl position="top-left" />
+
+        {airports.map((a) => (
+          <Marker key={a.id} longitude={a.longitude} latitude={a.latitude} anchor="center" onClick={(e) => { e.originalEvent.stopPropagation(); onOpenNode(a); }}>
+            <button
+              title={`${a.icaoCode} ${a.occupancyPct.toFixed(1)}%`}
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: 99,
+                border: '1px solid rgba(8,17,31,0.9)',
+                background: a.status === 'CRITICO' ? '#ef4444' : a.status === 'ALERTA' ? '#f59e0b' : '#22c55e',
+                cursor: 'pointer',
+              }}
+            />
+          </Marker>
+        ))}
+
+        {active && renderedFlights.map((row) => {
+          const rotation = computeBearing(
+            row.currentLatitude,
+            row.currentLongitude,
+            row.destinationLatitude,
+            row.destinationLongitude,
+          );
+
+          return (
+            <Marker
+              key={`flight-${row.flightId}`}
+              longitude={row.currentLongitude}
+              latitude={row.currentLatitude}
+              anchor="center"
+              onClick={(e) => {
+                e.originalEvent.stopPropagation();
+                onSelectedShipmentChange(null);
+                onSelectedNodeChange(null);
+                onSelectedFlightIdChange(row.flightId);
+              }}
+            >
+              <button
+                title={row.flightCode}
+                type="button"
+                className="map-flight-button"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  margin: 0,
+                  cursor: 'pointer',
+                  display: 'block',
+                }}
+              >
+                <PlaneIcon rotation={rotation} selected={selectedFlightId === row.flightId} />
+              </button>
+            </Marker>
+          );
+        })}
+
+        {active && selectedShipment ? (
+          <Popup longitude={selectedShipment.currentLongitude} latitude={selectedShipment.currentLatitude} closeButton={false} closeOnClick={false} anchor="top">
+            <div style={{ minWidth: 180 }}>
+              <p style={{ margin: 0, fontWeight: 700 }}>{selectedShipment.shipmentCode}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>{selectedShipment.originIcao} {'->'} {selectedShipment.destinationIcao}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Progreso: {selectedShipment.progressPct.toFixed(1)}%</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}><Link href={`/shipments?selected=${selectedShipment.shipmentId}`} style={{ color: '#2563eb' }}>Abrir envío</Link></p>
+            </div>
+          </Popup>
+        ) : null}
+
+        {active && selectedFlight ? (
+          <Popup longitude={selectedFlight.currentLongitude} latitude={selectedFlight.currentLatitude} closeButton={false} closeOnClick={false} anchor="top">
+            <div style={{ minWidth: 180 }}>
+              <p style={{ margin: 0, fontWeight: 700 }}>{selectedFlight.flightCode}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>{selectedFlight.originIcao} {'->'} {selectedFlight.destinationIcao}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Carga: {selectedFlight.loadPct.toFixed(1)}%</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}><Link href={`/flights?selected=${selectedFlight.flightId}&status=IN_FLIGHT`} style={{ color: '#2563eb' }}>Abrir vuelo</Link></p>
+            </div>
+          </Popup>
+        ) : null}
+
+        {selectedNode ? (
+          <Popup longitude={selectedNode.point.longitude} latitude={selectedNode.point.latitude} closeOnClick={false} anchor="top" onClose={() => onSelectedNodeChange(null)}>
+            <div style={{ minWidth: 220 }}>
+              <p style={{ margin: 0, fontWeight: 700 }}>{selectedNode.detail.icaoCode} · {selectedNode.detail.city}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Ocupación: {selectedNode.detail.occupancyPct.toFixed(1)}%</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Capacidad: {selectedNode.detail.currentStorageLoad}/{selectedNode.detail.maxStorageCapacity}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Vuelos programados: {selectedNode.detail.scheduledFlights}</p>
+            </div>
+          </Popup>
+        ) : null}
+      </Map>
+      {bootstrapping ? (
+        <BootstrapOverlay
+          planned={bootstrapPlannedShipments}
+          total={bootstrapTotalShipments}
+          message={bootstrapMessage}
+        />
+      ) : null}
+    </section>
+  );
+});
+
+export default function HomePage() {
   // Shared sim state + live operational data from context — persists across navigation
   const {
     sim,
@@ -214,7 +492,6 @@ export default function HomePage() {
     loaded: stateLoaded,
     overview,
     system,
-    collapseRisk,
     airports,
     mapLive,
     mapLiveFlights,
@@ -234,6 +511,7 @@ export default function HomePage() {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('pdds-panel-collapsed') === 'true';
   });
+  const [selectedFlightVisual, setSelectedFlightVisual] = useState<MapLiveFlight | null>(null);
   const [renderedFlights, setRenderedFlights] = useState<MapLiveFlight[]>([]);
   const renderedFlightsRef = useRef<MapLiveFlight[]>([]);
   const flightAnimationFrameRef = useRef<number | null>(null);
@@ -259,6 +537,8 @@ export default function HomePage() {
   const canResume = Boolean(sim?.running && sim?.paused);
   const canEditConfig = !simulacionActiva;
   const speedOptions = config.scenario === 'DAY_TO_DAY' ? [1] : SPEED_OPTIONS;
+  const bootstrapping = Boolean(sim?.bootstrapping);
+  const rollingPlanning = Boolean(sim?.periodPlanningActive && !sim?.bootstrapping);
 
   const hydrateFromState = useCallback((state: typeof sim) => {
     if (!state) return;
@@ -292,6 +572,7 @@ export default function HomePage() {
       renderedFlightsRef.current = [];
       setSelectedShipmentId(null);
       setSelectedFlightId(null);
+      setSelectedFlightVisual(null);
     }
   }, [simulacionActiva]);
 
@@ -313,18 +594,7 @@ export default function HomePage() {
 
     const previousById = new globalThis.Map(renderedFlightsRef.current.map((flight) => [flight.flightId, flight]));
     const startAt = performance.now();
-    const fromFlights = mapLiveFlights.map((flight) => {
-      const previous = previousById.get(flight.flightId);
-      if (previous) {
-        return previous;
-      }
-
-      return {
-        ...flight,
-        currentLatitude: flight.currentLatitude,
-        currentLongitude: flight.currentLongitude,
-      };
-    });
+    const fromFlights = mapLiveFlights.map((flight) => previousById.get(flight.flightId) ?? flight);
 
     setRenderedFlights(fromFlights);
     renderedFlightsRef.current = fromFlights;
@@ -364,10 +634,47 @@ export default function HomePage() {
         flightAnimationFrameRef.current = null;
       }
     };
-  }, [mapLiveFlights, sim?.simulatedNow, sim?.simulationSecondsPerTick, simulacionActiva]);
+  }, [mapLiveFlights, simulacionActiva]);
+
+  useEffect(() => {
+    if (selectedFlightId == null) {
+      setSelectedFlightVisual(null);
+    }
+  }, [selectedFlightId]);
+
+  const flightSnapshotById = useMemo(
+    () => new globalThis.Map(mapLiveFlights.map((flight) => [flight.flightId, flight] as const)),
+    [mapLiveFlights],
+  );
 
   const selectedShipment = useMemo(() => mapLive.find((f) => f.shipmentId === selectedShipmentId) ?? null, [mapLive, selectedShipmentId]);
-  const selectedFlight = useMemo(() => renderedFlights.find((f) => f.flightId === selectedFlightId) ?? null, [renderedFlights, selectedFlightId]);
+  const selectedFlight = useMemo(() => {
+    if (selectedFlightId == null) {
+      return null;
+    }
+    const snapshot = flightSnapshotById.get(selectedFlightId) ?? null;
+    const visual = selectedFlightVisual && selectedFlightVisual.flightId === selectedFlightId
+      ? selectedFlightVisual
+      : null;
+    if (!snapshot && !visual) {
+      return null;
+    }
+    return {
+      ...(snapshot ?? visual!),
+      currentLatitude: visual?.currentLatitude ?? snapshot?.currentLatitude ?? 0,
+      currentLongitude: visual?.currentLongitude ?? snapshot?.currentLongitude ?? 0,
+    };
+  }, [flightSnapshotById, selectedFlightId, selectedFlightVisual]);
+
+  useEffect(() => {
+    if (selectedFlightId == null) {
+      return;
+    }
+    if (!flightSnapshotById.has(selectedFlightId)) {
+      setSelectedFlightId(null);
+      setSelectedFlightVisual(null);
+    }
+  }, [flightSnapshotById, selectedFlightId]);
 
   function patchConfig(patch: Partial<RuntimeConfig>) {
     setDraftDirty(true);
@@ -440,6 +747,8 @@ export default function HomePage() {
       const res = await simulationApi.stop();
       setSim(res.state);
       setSelectedShipmentId(null);
+      setSelectedFlightId(null);
+      setSelectedFlightVisual(null);
       setSelectedNode(null);
       setError(null);
     } catch (e) {
@@ -474,14 +783,14 @@ export default function HomePage() {
     }
   }
 
-  async function openNode(airport: Airport) {
+  const openNode = useCallback(async (airport: Airport) => {
     try {
       const detail = await dashboardApi.getNodeDetail(airport.icaoCode);
       setSelectedNode({ detail, point: { longitude: airport.longitude, latitude: airport.latitude } });
     } catch {
       setSelectedNode(null);
     }
-  }
+  }, []);
 
   async function resolveAlert(alertId: number): Promise<void> {
     try {
@@ -638,7 +947,7 @@ export default function HomePage() {
                     </div>
                   ) : null}
                   <p className="state-panel-copy">Inicio efectivo: {sim?.effectiveScenarioStartAt ? new Date(sim.effectiveScenarioStartAt).toLocaleDateString('es-PE') : 'Sin definir'}</p>
-                 <p className="state-panel-copy">Modo de tiempo: {sim ? formatTimeScaleLabel(sim.simulationSecondsPerTick) : 'Sin definir'}</p>
+                  <p className="state-panel-copy">Modo de tiempo: {sim ? formatTimeScaleLabel(sim.simulationSecondsPerTick, sim.tickIntervalMs) : 'Sin definir'}</p>
                  {config.scenario === 'DAY_TO_DAY' ? <p className="state-panel-copy">La operación día a día mantiene velocidad fija para preservar continuidad visual.</p> : null}
                   {sim?.dateAdjusted && sim?.dateAdjustmentReason ? <p className="state-panel-copy" style={{ color: '#fbbf24' }}>{sim.dateAdjustmentReason}</p> : null}
                 </div>
@@ -647,160 +956,35 @@ export default function HomePage() {
             )}
           </aside>
 
-          <section className="surface-panel" style={{ overflow: 'hidden', position: 'relative' }}>
-            <div style={{ position: 'absolute', top: 12, left: 56, zIndex: 5, display: 'flex', gap: 8 }}>
-              <button className={`chip${mapMode === 'MAPA' ? ' is-active' : ''}`} onClick={() => setMapMode('MAPA')}>Mapa</button>
-              <button className={`chip${mapMode === 'SATELITAL' ? ' is-active' : ''}`} onClick={() => setMapMode('SATELITAL')}>Satelital</button>
-            </div>
-
-            {/* Dark overlay to improve plane visibility — FlightRadar style */}
-            <div style={{ position: 'absolute', inset: 0, zIndex: 1, background: 'rgba(8, 10, 20, 0.35)', pointerEvents: 'none' }} />
-
-            <Map
-              ref={mapRef}
-              mapStyle={mapMode === 'MAPA' ? MAP_STYLE : SATELLITE_STYLE}
-              initialViewState={INITIAL_VIEW}
-              style={{ width: '100%', height: '100%' }}
-              renderWorldCopies={false}
-              onClick={() => {
-                  setSelectedShipmentId(null);
-                  setSelectedFlightId(null);
-                  setSelectedNode(null);
-              }}
-            >
-              <NavigationControl position="top-left" />
-
-              {airports.map((a) => (
-                <Marker key={a.id} longitude={a.longitude} latitude={a.latitude} anchor="center" onClick={(e) => { e.originalEvent.stopPropagation(); void openNode(a); }}>
-                  <button
-                    title={`${a.icaoCode} ${a.occupancyPct.toFixed(1)}%`}
-                    style={{
-                      width: 12,
-                      height: 12,
-                      borderRadius: 99,
-                      border: '2px solid rgba(8,17,31,0.95)',
-                      background: a.status === 'CRITICO' ? '#ef4444' : a.status === 'ALERTA' ? '#f59e0b' : '#22c55e',
-                      boxShadow: '0 0 0 2px rgba(255,255,255,0.55), 0 0 10px rgba(8,17,31,0.55)',
-                      cursor: 'pointer',
-                    }}
-                  />
-                </Marker>
-              ))}
-
-              {simulacionActiva && mapLive.map((row) => {
-                const point = { longitude: row.currentLongitude, latitude: row.currentLatitude };
-                return (
-                  <Marker
-                    key={row.shipmentId}
-                    longitude={point.longitude}
-                    latitude={point.latitude}
-                    anchor="center"
-                    onClick={(e) => {
-                      e.originalEvent.stopPropagation();
-                      setSelectedShipmentId(row.shipmentId);
-                    }}
-                  >
-                    <span
-                      title={row.shipmentCode}
-                      role="button"
-                      tabIndex={0}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 34,
-                        height: 34,
-                        fontSize: 16,
-                        color: selectedShipmentId === row.shipmentId ? '#fde68a' : '#dbeafe',
-                        cursor: 'pointer',
-                        lineHeight: 1,
-                        borderRadius: 999,
-                        border: `1px solid ${selectedShipmentId === row.shipmentId ? '#fbbf24' : '#60a5fa'}`,
-                        background: selectedShipmentId === row.shipmentId ? 'rgba(124, 58, 237, 0.92)' : 'rgba(15, 23, 42, 0.92)',
-                        boxShadow: selectedShipmentId === row.shipmentId
-                          ? '0 0 0 3px rgba(251, 191, 36, 0.25), 0 10px 24px rgba(15, 23, 42, 0.55)'
-                          : '0 8px 20px rgba(15, 23, 42, 0.5)',
-                      }}
-                    >
-                      ◆
-                    </span>
-                  </Marker>
-                );
-              })}
-
-              {simulacionActiva && renderedFlights.map((row) => {
-                const rotation = computeBearing(
-                  row.currentLatitude,
-                  row.currentLongitude,
-                  row.destinationLatitude,
-                  row.destinationLongitude,
-                );
-
-                return (
-                  <Marker
-                    key={`flight-${row.flightId}`}
-                    longitude={row.currentLongitude}
-                    latitude={row.currentLatitude}
-                    anchor="center"
-                    onClick={(e) => {
-                      e.originalEvent.stopPropagation();
-                      setSelectedFlightId(row.flightId);
-                    }}
-                  >
-                    <button
-                      title={row.flightCode}
-                      type="button"
-                      className="map-flight-button"
-                    >
-                      <PlaneIcon rotation={rotation} selected={selectedFlightId === row.flightId} />
-                    </button>
-                  </Marker>
-                );
-              })}
-
-              {simulacionActiva && selectedShipment ? (
-                <Popup longitude={selectedShipment.currentLongitude} latitude={selectedShipment.currentLatitude} closeButton={false} closeOnClick={false} anchor="top">
-                  <div style={{ minWidth: 180 }}>
-                    <p style={{ margin: 0, fontWeight: 700 }}>{selectedShipment.shipmentCode}</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}>{selectedShipment.originIcao} {'->'} {selectedShipment.destinationIcao}</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}>Progreso: {selectedShipment.progressPct.toFixed(1)}%</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}><Link href={`/shipments?selected=${selectedShipment.shipmentId}`} style={{ color: '#2563eb' }}>Abrir envío</Link></p>
-                  </div>
-                </Popup>
-              ) : null}
-
-              {simulacionActiva && selectedFlight ? (
-                <Popup longitude={selectedFlight.currentLongitude} latitude={selectedFlight.currentLatitude} closeButton={false} closeOnClick={false} anchor="top">
-                  <div style={{ minWidth: 180 }}>
-                    <p style={{ margin: 0, fontWeight: 700 }}>{selectedFlight.flightCode}</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}>{selectedFlight.originIcao} {'->'} {selectedFlight.destinationIcao}</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}>Carga: {selectedFlight.loadPct.toFixed(1)}%</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}><Link href={`/flights?selected=${selectedFlight.flightId}&status=IN_FLIGHT`} style={{ color: '#2563eb' }}>Abrir vuelo</Link></p>
-                  </div>
-                </Popup>
-              ) : null}
-
-              {selectedNode ? (
-                <Popup longitude={selectedNode.point.longitude} latitude={selectedNode.point.latitude} closeOnClick={false} anchor="top" onClose={() => setSelectedNode(null)}>
-                  <div style={{ minWidth: 220 }}>
-                    <p style={{ margin: 0, fontWeight: 700 }}>{selectedNode.detail.icaoCode} · {selectedNode.detail.city}</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}>Ocupación: {selectedNode.detail.occupancyPct.toFixed(1)}%</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}>Capacidad: {selectedNode.detail.currentStorageLoad}/{selectedNode.detail.maxStorageCapacity}</p>
-                    <p style={{ margin: '4px 0 0', fontSize: 12 }}>Vuelos programados: {selectedNode.detail.scheduledFlights}</p>
-                  </div>
-                </Popup>
-              ) : null}
-            </Map>
-          </section>
+          <SimulationMapPanel
+            airports={airports}
+            flights={mapLiveFlights}
+            renderedFlights={renderedFlights}
+            active={simulacionActiva}
+            mapMode={mapMode}
+            onMapModeChange={setMapMode}
+            selectedShipment={selectedShipment}
+            selectedFlight={selectedFlight}
+            selectedFlightId={selectedFlightId}
+            selectedNode={selectedNode}
+            onSelectedFlightIdChange={setSelectedFlightId}
+            onSelectedFlightVisualChange={setSelectedFlightVisual}
+            onSelectedNodeChange={setSelectedNode}
+            onSelectedShipmentChange={setSelectedShipmentId}
+            onOpenNode={openNode}
+            bootstrapping={bootstrapping}
+            bootstrapPlannedShipments={sim?.bootstrapPlannedShipments ?? 0}
+            bootstrapTotalShipments={sim?.bootstrapTotalShipments ?? 0}
+            bootstrapMessage={sim?.bootstrapMessage}
+          />
 
           <aside style={{ display: 'grid', gap: 10, alignContent: 'start' }}>
-            <KpiCard title="Vuelos visibles" value={String(simulacionActiva ? renderedFlights.length : 0)} status={semaforoRiesgo(simulacionActiva ? renderedFlights.length : 0)} />
+            <KpiCard title="Vuelos visibles" value={String(simulacionActiva ? mapLiveFlights.length : 0)} status={semaforoRiesgo(simulacionActiva ? mapLiveFlights.length : 0)} />
             <KpiCard title="Próximos vuelos" value={String(simulacionActiva ? (overview?.nextScheduledFlights ?? 0) : 0)} status={semaforoRiesgo(simulacionActiva ? (overview?.nextScheduledFlights ?? 0) : 0)} />
-            <KpiCard title="Envíos visibles" value={String(simulacionActiva ? mapLive.length : 0)} status={semaforoRiesgo(simulacionActiva ? mapLive.length : 0)} />
-            <KpiCard title="SLA actual" value={fmtPct(simulacionActiva ? (overview?.slaCompliancePct ?? 0) : 0)} status={semaforoSla(simulacionActiva ? (overview?.slaCompliancePct ?? 0) : 0)} />
+            <KpiCard title="Envíos operativos" value={String(simulacionActiva ? (overview?.shipmentsInRoute ?? 0) : 0)} status={semaforoRiesgo(simulacionActiva ? (overview?.shipmentsInRoute ?? 0) : 0)} />
+            <KpiCard title="SLA actual" value={fmtPct(simulacionActiva ? (overview?.slaCompliancePct ?? 100) : 100)} status={semaforoSla(simulacionActiva ? (overview?.slaCompliancePct ?? 100) : 100)} />
             <KpiCard title="Nodos críticos" value={String(system?.criticoAirports ?? 0)} status={semaforoRiesgo(system?.criticoAirports ?? 0)} />
-            <KpiCard title="Alertas operativas" value={String(simulacionActiva ? (overview?.unresolvedAlerts ?? 0) : 0)} status={semaforoRiesgo(simulacionActiva ? (overview?.unresolvedAlerts ?? 0) : 0)} />
-            <KpiCard title="Riesgo de colapso" value={fmtPct(collapseRisk?.risk ?? 0)} status={semaforoRiesgo(collapseRisk?.risk ?? 0)} />
+            <KpiCard title="Envíos en riesgo" value={String(simulacionActiva ? (overview?.atRiskShipments ?? 0) : 0)} status={semaforoRiesgo(simulacionActiva ? (overview?.atRiskShipments ?? 0) : 0)} />
             <article className="surface-panel" style={{ padding: 14 }}>
               <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 99, background: simulacionActiva ? '#22c55e' : '#64748b' }} />
@@ -809,8 +993,30 @@ export default function HomePage() {
               <strong style={{ marginTop: 4, display: 'block', fontSize: 18, color: '#eff3ff' }}>
                 {!stateLoaded ? 'Cargando...' : displayedSimTime ?? '-'}
               </strong>
-              {stateLoaded && sim ? <p style={{ margin: '6px 0 0', color: '#9ca3bf', fontSize: 12 }}>{formatTimeScaleLabel(sim.simulationSecondsPerTick)}</p> : null}
+              {stateLoaded && sim ? <p style={{ margin: '6px 0 0', color: '#9ca3bf', fontSize: 12 }}>{formatTimeScaleLabel(sim.simulationSecondsPerTick, sim.tickIntervalMs)}</p> : null}
             </article>
+            {rollingPlanning ? (
+              <RollingPlanningCard
+                plannedThrough={sim?.periodPlannedThrough}
+                backlog={sim?.periodPlanningBacklog ?? 0}
+                message={sim?.bootstrapMessage}
+              />
+            ) : null}
+            {sim?.scenario === 'PERIOD_SIMULATION' ? (
+              <PeriodTelemetryCard
+                seedTarget={sim?.periodPlanningSeedTarget}
+                plannedThrough={sim?.periodPlannedThrough}
+                backlog={sim?.periodPlanningBacklog ?? 0}
+                batchCount={sim?.periodPlanningBatchCount ?? 0}
+                lastBatchPlanned={sim?.periodPlanningLastBatchPlanned ?? 0}
+                lastBatchFailed={sim?.periodPlanningLastBatchFailed ?? 0}
+                lastBatchElapsedMs={sim?.periodPlanningLastBatchElapsedMs ?? 0}
+                lastBatchAt={sim?.periodPlanningLastBatchAt}
+                tickWaitCount={sim?.periodTickWaitCount ?? 0}
+                tickLastElapsedMs={sim?.periodTickLastElapsedMs ?? 0}
+                tickLastWaitAt={sim?.periodTickLastWaitAt}
+              />
+            ) : null}
             <article className="surface-panel" style={{ padding: 14 }}>
               <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf' }}>Alertas activas</p>
               {alerts.length === 0 ? (

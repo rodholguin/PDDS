@@ -17,17 +17,18 @@ import com.tasfb2b.model.FlightStatus;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.SimulationConfig;
+import com.tasfb2b.model.SimulationScenario;
 import com.tasfb2b.model.StopStatus;
 import com.tasfb2b.model.TravelStop;
 import com.tasfb2b.repository.AirportRepository;
 import com.tasfb2b.repository.FlightRepository;
-import com.tasfb2b.repository.OperationalAlertRepository;
 import com.tasfb2b.repository.ShipmentAuditLogRepository;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.DashboardShipmentCacheService;
+import com.tasfb2b.service.OperationalAlertService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationRuntimeService;
@@ -45,7 +46,6 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -63,11 +63,11 @@ public class DashboardController {
     private final TravelStopRepository travelStopRepository;
     private final RoutePlannerService routePlannerService;
     private final CollapseMonitorService collapseMonitorService;
-    private final OperationalAlertRepository operationalAlertRepository;
     private final ShipmentAuditLogRepository shipmentAuditLogRepository;
     private final SimulationRuntimeService simulationRuntimeService;
     private final DashboardShipmentCacheService dashboardShipmentCacheService;
     private final SimulationEngineService simulationEngineService;
+    private final OperationalAlertService operationalAlertService;
 
     public DashboardController(
             AirportRepository airportRepository,
@@ -77,11 +77,11 @@ public class DashboardController {
             TravelStopRepository travelStopRepository,
             RoutePlannerService routePlannerService,
             CollapseMonitorService collapseMonitorService,
-            OperationalAlertRepository operationalAlertRepository,
             ShipmentAuditLogRepository shipmentAuditLogRepository,
             SimulationRuntimeService simulationRuntimeService,
             DashboardShipmentCacheService dashboardShipmentCacheService,
-            SimulationEngineService simulationEngineService
+            SimulationEngineService simulationEngineService,
+            OperationalAlertService operationalAlertService
     ) {
         this.airportRepository = airportRepository;
         this.flightRepository = flightRepository;
@@ -90,11 +90,11 @@ public class DashboardController {
         this.travelStopRepository = travelStopRepository;
         this.routePlannerService = routePlannerService;
         this.collapseMonitorService = collapseMonitorService;
-        this.operationalAlertRepository = operationalAlertRepository;
         this.shipmentAuditLogRepository = shipmentAuditLogRepository;
         this.simulationRuntimeService = simulationRuntimeService;
         this.dashboardShipmentCacheService = dashboardShipmentCacheService;
         this.simulationEngineService = simulationEngineService;
+        this.operationalAlertService = operationalAlertService;
     }
 
     @GetMapping("/kpis")
@@ -141,6 +141,7 @@ public class DashboardController {
     @Operation(summary = "Distribucion de aeropuertos y vuelos por estado")
     public ResponseEntity<SystemStatusDto> getSystemStatus() {
         int[] thresholds = getThresholds();
+        SimulationConfig config = currentConfig();
 
         List<Airport> airports = airportRepository.findAll();
         long total = airports.size();
@@ -160,9 +161,8 @@ public class DashboardController {
                 .orElse(0.0);
 
         LocalDateTime now = effectiveNow();
-        LocalDateTime dayStart = operationalDayStart(now);
-        LocalDateTime dayEnd = dayStart.plusDays(1);
-        List<Flight> visibleFlights = flightRepository.findFlightsWithinWindow(dayStart, dayEnd);
+        LocalDateTime visibleFrom = activeVisibilityStart(config, now);
+        List<Flight> visibleFlights = flightRepository.findFlightsWithinWindow(visibleFrom, now.plusDays(1));
         long totalFlights = visibleFlights.size();
         long scheduledFlights = visibleFlights.stream().filter(flight -> flight.getStatus() == FlightStatus.SCHEDULED).count();
         long inFlight = visibleFlights.stream().filter(flight -> flight.getStatus() == FlightStatus.IN_FLIGHT).count();
@@ -182,14 +182,20 @@ public class DashboardController {
     @GetMapping("/overview")
     @Operation(summary = "Resumen operacional extendido del panel principal")
     public ResponseEntity<DashboardOverviewDto> getOverview() {
+        SimulationConfig config = currentConfig();
         LocalDateTime now = effectiveNow();
         LocalDateTime todayStart = operationalDayStart(now);
         LocalDateTime tomorrow = todayStart.plusDays(1);
         LocalDateTime yesterdayStart = todayStart.minusDays(1);
+        LocalDateTime visibleFrom = activeVisibilityStart(config, now);
 
-        long activeFlights = flightRepository.countLoadedActiveFlightsAtWithinDay(now, todayStart, tomorrow);
+        long activeFlights = isPeriodSimulation(config)
+                ? flightRepository.countActiveFlightsSince(now, visibleFrom)
+                : flightRepository.countLoadedActiveFlightsAtWithinDay(now, todayStart, tomorrow);
         long nextScheduledFlights = Math.min(25L, flightRepository.countLoadedScheduledFlightsBetween(now, tomorrow));
-        long inRoute = shipmentRepository.countInRouteBetween(todayStart, tomorrow);
+        long inRoute = isPeriodSimulation(config)
+                ? shipmentRepository.countInRouteSince(visibleFrom)
+                : shipmentRepository.countVisibleForMapWithinDay(todayStart, tomorrow);
         long totalToday = shipmentRepository.countByRegistrationDateBetween(todayStart, tomorrow);
 
         long deliveredToday = shipmentRepository.countDeliveredBetween(todayStart, tomorrow);
@@ -197,16 +203,13 @@ public class DashboardController {
         long deliveredYesterday = shipmentRepository.countDeliveredBetween(yesterdayStart, todayStart);
         long deliveredOnTimeYesterday = shipmentRepository.countDeliveredOnTimeBetween(yesterdayStart, todayStart);
 
-        double slaToday = deliveredToday == 0 ? 0.0 : (deliveredOnTimeToday * 100.0) / deliveredToday;
-        double slaYesterday = deliveredYesterday == 0 ? 0.0 : (deliveredOnTimeYesterday * 100.0) / deliveredYesterday;
+        double slaToday = deliveredToday == 0 ? 100.0 : (deliveredOnTimeToday * 100.0) / deliveredToday;
+        double slaYesterday = deliveredYesterday == 0 ? 100.0 : (deliveredOnTimeYesterday * 100.0) / deliveredYesterday;
         double delta = deliveredYesterday == 0
                 ? (slaToday > 0 ? 100.0 : 0.0)
                 : ((slaToday - slaYesterday) / Math.max(0.0001, slaYesterday)) * 100.0;
 
-        long unresolved = operationalAlertRepository.countByStatusIn(List.of(
-                com.tasfb2b.model.OperationalAlertStatus.PENDING,
-                com.tasfb2b.model.OperationalAlertStatus.IN_REVIEW
-        ));
+        long unresolved = operationalAlertService.countActiveAlertsForCurrentOperationalDay();
         long overdue = shipmentRepository.countOverdueShipmentsBetween(todayStart, tomorrow, now);
         long atRisk = shipmentRepository.countAtRiskShipmentsBetween(todayStart, tomorrow, now);
         long stalled = shipmentRepository.countShipmentsWithoutMovementBetween(todayStart, tomorrow, now.minusHours(6));
@@ -296,21 +299,22 @@ public class DashboardController {
     public ResponseEntity<List<MapLiveShipmentDto>> mapLive(
             @RequestParam(required = false) Integer limit
     ) {
+        SimulationConfig config = currentConfig();
         LocalDateTime now = effectiveNow();
-        LocalDateTime dayStart = operationalDayStart(now);
-        LocalDateTime dayEnd = dayStart.plusDays(1);
+        LocalDateTime visibleFrom = activeVisibilityStart(config, now);
 
-        List<Shipment> sorted = shipmentRepository.findByStatus(ShipmentStatus.IN_ROUTE).stream()
-                .filter(shipment -> shipment.getRegistrationDate() != null)
-                .filter(shipment -> !shipment.getRegistrationDate().isBefore(dayStart))
-                .filter(shipment -> shipment.getRegistrationDate().isBefore(dayEnd))
-                .sorted(Comparator.comparing(Shipment::getRegistrationDate))
-                .toList();
-        List<Shipment> inRoute;
+        List<Shipment> inRoute = isPeriodSimulation(config)
+                ? shipmentRepository.findInRouteSince(visibleFrom)
+                : shipmentRepository.findInRouteWithinDay(operationalDayStart(now), operationalDayStart(now).plusDays(1));
         if (limit == null || limit <= 0) {
-            inRoute = sorted;
+            inRoute = inRoute.stream()
+                    .sorted(Comparator.comparing(Shipment::getRegistrationDate))
+                    .toList();
         } else {
-            inRoute = sorted.stream().limit(limit).toList();
+            inRoute = inRoute.stream()
+                    .sorted(Comparator.comparing(Shipment::getRegistrationDate))
+                    .limit(limit)
+                    .toList();
         }
 
         if (inRoute.isEmpty()) {
@@ -320,7 +324,7 @@ public class DashboardController {
         Map<Long, List<TravelStop>> stopsIndex = travelStopRepository
                 .findByStopStatusInAndShipmentStatusInOrderByShipmentIdAscStopOrderAsc(
                         List.of(StopStatus.PENDING, StopStatus.IN_TRANSIT, StopStatus.COMPLETED),
-                        List.of(ShipmentStatus.IN_ROUTE)
+                        List.of(ShipmentStatus.IN_ROUTE, ShipmentStatus.DELAYED, ShipmentStatus.CRITICAL)
                 )
                 .stream()
                 .collect(java.util.stream.Collectors.groupingBy(ts -> ts.getShipment().getId()));
@@ -358,10 +362,12 @@ public class DashboardController {
     @GetMapping("/map-live-flights")
     @Operation(summary = "Feed liviano de vuelos activos para el mapa")
     public ResponseEntity<List<MapLiveFlightDto>> mapLiveFlights(@RequestParam(required = false) Integer limit) {
+        SimulationConfig config = currentConfig();
         LocalDateTime now = effectiveNow();
-        LocalDateTime dayStart = operationalDayStart(now);
-        LocalDateTime dayEnd = dayStart.plusDays(1);
-        List<Flight> active = flightRepository.findActiveFlightsAtWithinDay(now, dayStart, dayEnd).stream()
+        LocalDateTime visibleFrom = activeVisibilityStart(config, now);
+        List<Flight> active = (isPeriodSimulation(config)
+                ? flightRepository.findActiveFlightsSince(now, visibleFrom)
+                : flightRepository.findActiveFlightsAtWithinDay(now, operationalDayStart(now), operationalDayStart(now).plusDays(1))).stream()
                 .filter(flight -> flight.getCurrentLoad() != null && flight.getCurrentLoad() > 0)
                 .toList();
 
@@ -460,18 +466,15 @@ public class DashboardController {
         LocalDate agendaDate = (date == null || date.isBlank()) ? now.toLocalDate() : LocalDate.parse(date);
         LocalDateTime dayStart = agendaDate.atStartOfDay();
         LocalDateTime dayEnd = agendaDate.plusDays(1).atStartOfDay();
-        List<Flight> allFlights = flightRepository.findByAirport(airport);
+        long scheduledFlights = flightRepository.countScheduledDeparturesByOriginAndWindow(airport, dayStart, dayEnd);
+        long inFlightFlights = flightRepository.countInFlightByAirportAtWithinDay(airport, now, dayStart, dayEnd);
 
-        long scheduledFlights = allFlights.stream().filter(flight -> flight.getStatus() == FlightStatus.SCHEDULED).count();
-        long inFlightFlights = allFlights.stream().filter(flight -> flight.getStatus() == FlightStatus.IN_FLIGHT).count();
-
-        List<Shipment> nodeShipments = shipmentRepository.findByOriginAirportOrDestinationAirport(airport, airport);
-        long storedShipments = nodeShipments.stream().filter(shipment -> shipment.getStatus() != ShipmentStatus.DELIVERED).count();
-        long inbound = nodeShipments.stream().filter(shipment -> shipment.getDestinationAirport().getId().equals(airport.getId())).count();
-        long outbound = nodeShipments.stream().filter(shipment -> shipment.getOriginAirport().getId().equals(airport.getId())).count();
+        long storedShipments = shipmentRepository.countStoredByAirportWithinDay(airport, dayStart, dayEnd);
+        long inbound = shipmentRepository.countInboundByAirportWithinDay(airport, dayStart, dayEnd);
+        long outbound = shipmentRepository.countOutboundByAirportWithinDay(airport, dayStart, dayEnd);
 
         List<com.tasfb2b.dto.FlightScheduleEntryDto> nextFlights = new ArrayList<>();
-        flightRepository.findByOriginAirportAndScheduledDepartureBetween(airport, dayStart, dayEnd)
+        flightRepository.findUpcomingDeparturesByOriginAndWindow(airport, dayStart, dayEnd)
                 .stream()
                 .sorted(Comparator.comparing(Flight::getScheduledDeparture))
                 .limit(12)
@@ -512,24 +515,27 @@ public class DashboardController {
     @GetMapping("/routes-network")
     @Operation(summary = "Red de rutas global con estado operativo/suspendido")
     public ResponseEntity<List<RouteNetworkEdgeDto>> getRoutesNetwork() {
-        List<Flight> flights = flightRepository.findAll();
-        Map<String, RouteAggregate> buckets = new HashMap<>();
-
-        for (Flight flight : flights) {
-            String key = flight.getOriginAirport().getIcaoCode() + "->" + flight.getDestinationAirport().getIcaoCode();
-            RouteAggregate aggregate = buckets.computeIfAbsent(key, ignored -> new RouteAggregate(
-                    flight.getOriginAirport().getIcaoCode(),
-                    flight.getOriginAirport().getLatitude(),
-                    flight.getOriginAirport().getLongitude(),
-                    flight.getDestinationAirport().getIcaoCode(),
-                    flight.getDestinationAirport().getLatitude(),
-                    flight.getDestinationAirport().getLongitude()
-            ));
-            aggregate.consume(flight.getStatus());
-        }
-
-        List<RouteNetworkEdgeDto> response = buckets.values().stream()
-                .map(RouteAggregate::toDto)
+        List<RouteNetworkEdgeDto> response = flightRepository.aggregateRouteNetwork().stream()
+                .map(row -> {
+                    long scheduledCount = row.getScheduledCount() == null ? 0L : row.getScheduledCount();
+                    long inFlightCount = row.getInFlightCount() == null ? 0L : row.getInFlightCount();
+                    long cancelledCount = row.getCancelledCount() == null ? 0L : row.getCancelledCount();
+                    boolean operational = scheduledCount > 0 || inFlightCount > 0;
+                    boolean suspended = !operational && cancelledCount > 0;
+                    return new RouteNetworkEdgeDto(
+                            row.getOriginIcao(),
+                            row.getOriginLatitude(),
+                            row.getOriginLongitude(),
+                            row.getDestinationIcao(),
+                            row.getDestinationLatitude(),
+                            row.getDestinationLongitude(),
+                            operational,
+                            suspended,
+                            scheduledCount,
+                            inFlightCount,
+                            cancelledCount
+                    );
+                })
                 .toList();
         return ResponseEntity.ok(response);
     }
@@ -708,57 +714,6 @@ public class DashboardController {
     private record Position(double latitude, double longitude, String node) {
     }
 
-    private static final class RouteAggregate {
-        private final String originIcao;
-        private final Double originLatitude;
-        private final Double originLongitude;
-        private final String destinationIcao;
-        private final Double destinationLatitude;
-        private final Double destinationLongitude;
-
-        private long scheduledCount;
-        private long inFlightCount;
-        private long cancelledCount;
-
-        private RouteAggregate(String originIcao,
-                               Double originLatitude,
-                               Double originLongitude,
-                               String destinationIcao,
-                               Double destinationLatitude,
-                               Double destinationLongitude) {
-            this.originIcao = originIcao;
-            this.originLatitude = originLatitude;
-            this.originLongitude = originLongitude;
-            this.destinationIcao = destinationIcao;
-            this.destinationLatitude = destinationLatitude;
-            this.destinationLongitude = destinationLongitude;
-        }
-
-        private void consume(FlightStatus status) {
-            if (status == FlightStatus.SCHEDULED) scheduledCount++;
-            if (status == FlightStatus.IN_FLIGHT) inFlightCount++;
-            if (status == FlightStatus.CANCELLED) cancelledCount++;
-        }
-
-        private RouteNetworkEdgeDto toDto() {
-            boolean operational = scheduledCount > 0 || inFlightCount > 0;
-            boolean suspended = !operational && cancelledCount > 0;
-            return new RouteNetworkEdgeDto(
-                    originIcao,
-                    originLatitude,
-                    originLongitude,
-                    destinationIcao,
-                    destinationLatitude,
-                    destinationLongitude,
-                    operational,
-                    suspended,
-                    scheduledCount,
-                    inFlightCount,
-                    cancelledCount
-            );
-        }
-    }
-
     private String computeRemainingTime(LocalDateTime deadline, LocalDateTime now) {
         if (deadline == null) return "N/A";
         Duration duration = Duration.between(now, deadline);
@@ -789,7 +744,7 @@ public class DashboardController {
     }
 
     private LocalDateTime operationalDayStart(LocalDateTime now) {
-        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = currentConfig();
         LocalDateTime configuredStart = config == null ? null : config.getEffectiveScenarioStartAt();
 
         if (configuredStart == null) {
@@ -801,6 +756,27 @@ public class DashboardController {
             candidate = candidate.plusDays(1);
         }
         return candidate;
+    }
+
+    private SimulationConfig currentConfig() {
+        return configRepository.findTopByOrderByIdAsc();
+    }
+
+    private boolean isPeriodSimulation(SimulationConfig config) {
+        return config != null && config.getScenario() == SimulationScenario.PERIOD_SIMULATION;
+    }
+
+    private LocalDateTime activeVisibilityStart(SimulationConfig config, LocalDateTime fallbackNow) {
+        if (!isPeriodSimulation(config)) {
+            return operationalDayStart(fallbackNow);
+        }
+        if (config.getEffectiveScenarioStartAt() != null) {
+            return config.getEffectiveScenarioStartAt();
+        }
+        if (config.getScenarioStartAt() != null) {
+            return config.getScenarioStartAt();
+        }
+        return operationalDayStart(fallbackNow);
     }
 
     private boolean isAtRisk(Shipment shipment, LocalDateTime now) {

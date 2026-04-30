@@ -3,6 +3,7 @@ package com.tasfb2b.repository;
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Flight;
 import com.tasfb2b.model.FlightStatus;
+import com.tasfb2b.repository.projection.RouteNetworkEdgeRow;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -37,12 +38,54 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
 
     List<Flight> findByStatusAndScheduledDepartureLessThanEqual(FlightStatus status, LocalDateTime cutoff);
 
+    List<Flight> findByStatusAndScheduledDepartureGreaterThanAndScheduledDepartureLessThanEqual(
+            FlightStatus status,
+            LocalDateTime fromExclusive,
+            LocalDateTime toInclusive
+    );
+
     List<Flight> findByStatusAndScheduledArrivalLessThanEqual(FlightStatus status, LocalDateTime cutoff);
+
+    List<Flight> findByStatusAndScheduledArrivalGreaterThanAndScheduledArrivalLessThanEqual(
+            FlightStatus status,
+            LocalDateTime fromExclusive,
+            LocalDateTime toInclusive
+    );
+
+    @Query("""
+            SELECT f.id FROM Flight f
+            WHERE f.status = 'SCHEDULED'
+              AND f.scheduledDeparture <= :horizon
+              AND f.scheduledArrival > :horizon
+              AND EXISTS (
+                    SELECT ts.id FROM TravelStop ts
+                    WHERE ts.flight = f
+                      AND ts.stopStatus = 'PENDING'
+              )
+            """)
+    List<Long> findRecoverableScheduledFlightIds(@Param("horizon") LocalDateTime horizon);
+
+    @Query("""
+            SELECT f.id FROM Flight f
+            WHERE f.status = 'IN_FLIGHT'
+              AND f.scheduledArrival <= :horizon
+            """)
+    List<Long> findCompletedInFlightIds(@Param("horizon") LocalDateTime horizon);
+
+    long countByStatus(FlightStatus status);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE Flight f
+            SET f.status = :status
+            WHERE f.id IN :flightIds
+            """)
+    int updateStatusByIds(@Param("flightIds") List<Long> flightIds, @Param("status") FlightStatus status);
 
     @Query("""
             SELECT f FROM Flight f
             WHERE f.status = 'SCHEDULED'
-              AND f.currentLoad < f.maxCapacity
+              AND (f.currentLoad + COALESCE(f.reservedLoad, 0)) < f.maxCapacity
               AND f.scheduledDeparture >= :from
               AND f.scheduledDeparture < :to
             ORDER BY f.scheduledDeparture ASC
@@ -79,8 +122,12 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
     List<Flight> findTemplateFlightsWithinWindow(@Param("templateFrom") LocalDateTime templateFrom,
                                                  @Param("templateTo") LocalDateTime templateTo);
 
-    /** Cantidad de vuelos en estado dado (sin cargar entidades). */
-    long countByStatus(FlightStatus status);
+    @Query("""
+            SELECT COALESCE(AVG((f.currentLoad * 100.0) / NULLIF(f.maxCapacity, 0)), 0.0)
+            FROM Flight f
+            WHERE f.maxCapacity > 0
+            """)
+    double averageLoadPct();
 
     /** Cantidad de vuelos activos en un instante dado (en vuelo). */
     @Query("""
@@ -109,6 +156,7 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
               AND f.scheduledArrival > :now
               AND f.scheduledDeparture >= :dayStart
               AND f.scheduledDeparture < :dayEnd
+              AND f.status = 'IN_FLIGHT'
               AND f.status <> 'CANCELLED'
             ORDER BY f.scheduledDeparture ASC
             """)
@@ -123,12 +171,72 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
               AND f.scheduledArrival > :now
               AND f.scheduledDeparture >= :dayStart
               AND f.scheduledDeparture < :dayEnd
+              AND f.status = 'IN_FLIGHT'
               AND f.status <> 'CANCELLED'
               AND f.currentLoad > 0
             """)
     long countLoadedActiveFlightsAtWithinDay(@Param("now") LocalDateTime now,
                                              @Param("dayStart") LocalDateTime dayStart,
                                              @Param("dayEnd") LocalDateTime dayEnd);
+
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :from
+              AND f.status = 'IN_FLIGHT'
+              AND f.status <> 'CANCELLED'
+            ORDER BY f.scheduledDeparture ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findActiveFlightsSince(@Param("now") LocalDateTime now,
+                                        @Param("from") LocalDateTime from);
+
+    @Query("""
+            SELECT COUNT(f) FROM Flight f
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :from
+              AND f.status = 'IN_FLIGHT'
+              AND f.status <> 'CANCELLED'
+            """)
+    long countActiveFlightsSince(@Param("now") LocalDateTime now,
+                                 @Param("from") LocalDateTime from);
+
+    @Query("""
+            SELECT COUNT(DISTINCT f) FROM Flight f
+            JOIN TravelStop ts ON ts.flight = f
+            WHERE f.status = 'IN_FLIGHT'
+              AND ts.shipment.registrationDate >= :from
+              AND ts.shipment.registrationDate < :to
+            """)
+    long countInFlightByShipmentRegistrationBetween(@Param("from") LocalDateTime from,
+                                                    @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT COUNT(f) FROM Flight f
+            WHERE f.originAirport = :airport
+              AND f.status = 'SCHEDULED'
+              AND f.scheduledDeparture >= :dayStart
+              AND f.scheduledDeparture < :dayEnd
+            """)
+    long countScheduledDeparturesByOriginAndWindow(@Param("airport") Airport airport,
+                                                   @Param("dayStart") LocalDateTime dayStart,
+                                                   @Param("dayEnd") LocalDateTime dayEnd);
+
+    @Query("""
+            SELECT COUNT(f) FROM Flight f
+            WHERE (f.originAirport = :airport OR f.destinationAirport = :airport)
+              AND f.status = 'IN_FLIGHT'
+              AND f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :dayStart
+              AND f.scheduledDeparture < :dayEnd
+            """)
+    long countInFlightByAirportAtWithinDay(@Param("airport") Airport airport,
+                                           @Param("now") LocalDateTime now,
+                                           @Param("dayStart") LocalDateTime dayStart,
+                                           @Param("dayEnd") LocalDateTime dayEnd);
 
     /** Vuelos saliendo desde un aeropuerto en un rango horario. */
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
@@ -141,7 +249,7 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
     @Query("""
             SELECT f FROM Flight f
             WHERE f.status = 'SCHEDULED'
-              AND f.currentLoad < f.maxCapacity
+              AND (f.currentLoad + COALESCE(f.reservedLoad, 0)) < f.maxCapacity
               AND f.originAirport IN :origins
               AND f.scheduledDeparture >= :from
               AND f.scheduledDeparture < :to
@@ -175,7 +283,7 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
     @Query("""
             SELECT f FROM Flight f
             WHERE f.status = 'SCHEDULED'
-              AND f.currentLoad < f.maxCapacity
+              AND (f.currentLoad + COALESCE(f.reservedLoad, 0)) < f.maxCapacity
             ORDER BY f.scheduledDeparture ASC
             """)
     List<Flight> findFlightsWithAvailableCapacity();
@@ -185,7 +293,7 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
             SELECT f FROM Flight f
             WHERE f.isInterContinental = true
               AND f.status = 'SCHEDULED'
-              AND f.currentLoad < f.maxCapacity
+              AND (f.currentLoad + COALESCE(f.reservedLoad, 0)) < f.maxCapacity
             """)
     List<Flight> findInterContinentalWithCapacity();
 
@@ -216,12 +324,63 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     List<Flight> findByAirport(@Param("airport") Airport airport);
 
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.originAirport = :airport
+              AND f.scheduledDeparture >= :dayStart
+              AND f.scheduledDeparture < :dayEnd
+            ORDER BY f.scheduledDeparture ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findUpcomingDeparturesByOriginAndWindow(@Param("airport") Airport airport,
+                                                         @Param("dayStart") LocalDateTime dayStart,
+                                                         @Param("dayEnd") LocalDateTime dayEnd);
+
+    @Query(value = """
+            SELECT
+              o.icao_code AS originIcao,
+              o.latitude AS originLatitude,
+              o.longitude AS originLongitude,
+              d.icao_code AS destinationIcao,
+              d.latitude AS destinationLatitude,
+              d.longitude AS destinationLongitude,
+              SUM(CASE WHEN f.status = 'SCHEDULED' THEN 1 ELSE 0 END) AS scheduledCount,
+              SUM(CASE WHEN f.status = 'IN_FLIGHT' THEN 1 ELSE 0 END) AS inFlightCount,
+              SUM(CASE WHEN f.status = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelledCount
+            FROM flight f
+            JOIN airport o ON o.id = f.origin_airport_id
+            JOIN airport d ON d.id = f.destination_airport_id
+            GROUP BY o.icao_code, o.latitude, o.longitude, d.icao_code, d.latitude, d.longitude
+            """, nativeQuery = true)
+    List<RouteNetworkEdgeRow> aggregateRouteNetwork();
+
     /** Earliest scheduled departure of a loaded flight. */
     @Query("SELECT MIN(f.scheduledDeparture) FROM Flight f WHERE f.status = 'SCHEDULED' AND f.currentLoad > 0")
     LocalDateTime findMinScheduledDeparture();
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional
-    @Query(value = "UPDATE flight SET status = 'SCHEDULED', current_load = 0 WHERE status <> 'SCHEDULED' OR current_load <> 0", nativeQuery = true)
+    @Query(value = "UPDATE flight SET status = 'SCHEDULED', current_load = 0, reserved_load = 0 WHERE status <> 'SCHEDULED' OR current_load <> 0 OR reserved_load <> 0", nativeQuery = true)
     int resetOperationalStateFast();
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = """
+            UPDATE flight
+            SET reserved_load = COALESCE(reserved_load, 0) + :delta
+            WHERE id = :flightId
+              AND :delta >= 0
+              AND (current_load + COALESCE(reserved_load, 0) + :delta) <= max_capacity
+            """, nativeQuery = true)
+    int reserveCapacityIfAvailable(@Param("flightId") Long flightId, @Param("delta") int delta);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = """
+            UPDATE flight
+            SET reserved_load = GREATEST(0, COALESCE(reserved_load, 0) - :delta)
+            WHERE id = :flightId
+              AND :delta >= 0
+            """, nativeQuery = true)
+    int releaseReservedCapacity(@Param("flightId") Long flightId, @Param("delta") int delta);
 }

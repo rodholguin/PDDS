@@ -17,6 +17,8 @@ import com.tasfb2b.service.FutureDemandProjectionService;
 import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
+import com.tasfb2b.service.PeriodSimulationBootstrapService;
+import com.tasfb2b.service.SimulationAsyncOperationsService;
 import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
@@ -60,9 +62,11 @@ public class SimulationController {
     private final OperationalBootstrapService operationalBootstrapService;
     private final SimulationExportService simulationExportService;
     private final SimulationEngineService simulationEngineService;
+    private final SimulationAsyncOperationsService simulationAsyncOperationsService;
     private final AlgorithmProfileService algorithmProfileService;
     private final FlightScheduleService flightScheduleService;
     private final FutureDemandProjectionService futureDemandProjectionService;
+    private final PeriodSimulationBootstrapService periodSimulationBootstrapService;
 
     public SimulationController(
             SimulationConfigRepository configRepository,
@@ -74,9 +78,11 @@ public class SimulationController {
             OperationalBootstrapService operationalBootstrapService,
             SimulationExportService simulationExportService,
             SimulationEngineService simulationEngineService,
+            SimulationAsyncOperationsService simulationAsyncOperationsService,
             AlgorithmProfileService algorithmProfileService,
             FlightScheduleService flightScheduleService,
-            FutureDemandProjectionService futureDemandProjectionService
+            FutureDemandProjectionService futureDemandProjectionService,
+            PeriodSimulationBootstrapService periodSimulationBootstrapService
     ) {
         this.configRepository = configRepository;
         this.routePlannerService = routePlannerService;
@@ -87,9 +93,11 @@ public class SimulationController {
         this.operationalBootstrapService = operationalBootstrapService;
         this.simulationExportService = simulationExportService;
         this.simulationEngineService = simulationEngineService;
+        this.simulationAsyncOperationsService = simulationAsyncOperationsService;
         this.algorithmProfileService = algorithmProfileService;
         this.flightScheduleService = flightScheduleService;
         this.futureDemandProjectionService = futureDemandProjectionService;
+        this.periodSimulationBootstrapService = periodSimulationBootstrapService;
     }
 
     @GetMapping("/state")
@@ -161,9 +169,13 @@ public class SimulationController {
 
         // Issue 7.2: resolve scenario/date mutations BEFORE flipping isRunning so that concurrent
         // ticks never observe running=true with stale scenarioStartAt/effectiveScenarioStartAt.
-        if (config.getStartedAt() == null) {
-            config.setStartedAt(LocalDateTime.now());
-        }
+        config.setStartedAt(LocalDateTime.now());
+
+        // Cuando una simulacion previa termino automaticamente, preservamos su estado final
+        // hasta que el operador inicie una nueva corrida. En ese momento limpiamos la operacion
+        // anterior antes de bootstrap/arranque para empezar desde un estado consistente.
+        runtimeService.resetOperationalData();
+
         LocalDateTime minDemand = shipmentRepository.findMinRegistrationDate();
         LocalDateTime maxDemand = shipmentRepository.findMaxRegistrationDate();
         LocalDateTime desiredStart = config.getScenarioStartAt();
@@ -204,6 +216,11 @@ public class SimulationController {
         if (desiredStart != null) {
             runtimeService.setSimulationTime(desiredStart);
             flightScheduleService.ensureFlightsForSimulationWindow(desiredStart);
+            if (periodSimulationBootstrapService.requiresBootstrap(config)) {
+                var bootstrap = periodSimulationBootstrapService.seedPeriod(config, desiredStart);
+                log.info("Bootstrap PERIOD_SIMULATION semilla completado: total={}, planned={}, failed={}, seedTarget={}, plannedThrough={}",
+                        bootstrap.totalShipments(), bootstrap.plannedShipments(), bootstrap.failedShipments(), bootstrap.seedTarget(), bootstrap.plannedThrough());
+            }
         }
 
         simulationEngineService.resetTickSequence();
@@ -234,39 +251,74 @@ public class SimulationController {
     @Operation(summary = "Detener simulación y reiniciar estado operativo")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> stop() {
-        runtimeService.prepareStop();
-        awaitTickDrain();
-        simulationEngineService.resetTickSequence();
-        runtimeService.resetOperationalData();
+        if (!runtimeService.beginControlTransition()) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Ya hay una transicion de control en curso"
+            ));
+        }
+        try {
+            runtimeService.prepareStop();
+            if (!awaitTickDrain()) {
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "No se pudo detener la simulacion porque aun hay un tick largo en progreso"
+                ));
+            }
+            simulationEngineService.resetTickSequence();
+            runtimeService.resetOperationalData();
 
-        return ResponseEntity.ok(Map.of(
-                "message", "Simulacion detenida y estado reiniciado",
-                "state", runtimeService.getState()
-        ));
+            return ResponseEntity.ok(Map.of(
+                    "message", "Simulacion detenida y estado reiniciado",
+                    "state", runtimeService.getState()
+            ));
+        } finally {
+            runtimeService.endControlTransition();
+        }
     }
 
     @PostMapping("/reset-to-initial")
     @Operation(summary = "Reiniciar simulacion a estado inicial manteniendo pedidos")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> resetToInitial() {
-        runtimeService.prepareStop();
-        awaitTickDrain();
-        simulationEngineService.resetTickSequence();
-        runtimeService.resetOperationalData();
-        return ResponseEntity.ok(Map.of(
-                "message", "Estado inicial restaurado",
-                "state", runtimeService.getState()
-        ));
+        if (!runtimeService.beginControlTransition()) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Ya hay una transicion de control en curso"
+            ));
+        }
+        try {
+            runtimeService.prepareStop();
+            if (!awaitTickDrain()) {
+                return ResponseEntity.status(409).body(Map.of(
+                        "error", "No se pudo reiniciar porque aun hay un tick largo en progreso"
+                ));
+            }
+            simulationEngineService.resetTickSequence();
+            runtimeService.resetOperationalData();
+            return ResponseEntity.ok(Map.of(
+                    "message", "Estado inicial restaurado",
+                    "state", runtimeService.getState()
+            ));
+        } finally {
+            runtimeService.endControlTransition();
+        }
     }
 
     @PostMapping("/reset-demand")
     @Operation(summary = "Borrar todos los envíos y reiniciar operación")
     public ResponseEntity<?> resetDemand() {
-        runtimeService.resetDemandKeepingNetwork();
-        return ResponseEntity.ok(Map.of(
-                "message", "Demanda limpiada y simulacion reiniciada",
-                "state", runtimeService.getState()
-        ));
+        if (!runtimeService.beginControlTransition()) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Ya hay una transicion de control en curso"
+            ));
+        }
+        try {
+            runtimeService.resetDemandKeepingNetwork();
+            return ResponseEntity.ok(Map.of(
+                    "message", "Demanda limpiada y simulacion reiniciada",
+                    "state", runtimeService.getState()
+            ));
+        } finally {
+            runtimeService.endControlTransition();
+        }
     }
 
     @PostMapping("/pause")
@@ -454,9 +506,12 @@ public class SimulationController {
                 : configRepository.save(SimulationConfig.builder().build());
     }
 
-    private void awaitTickDrain() {
-        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
-        while (simulationEngineService.isTickInProgress() && System.nanoTime() < deadline) {
+    private boolean awaitTickDrain() {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(90);
+        while ((simulationEngineService.isTickInProgress()
+                || simulationAsyncOperationsService.isPlanningInProgress()
+                || simulationAsyncOperationsService.isOverdueScanInProgress())
+                && System.nanoTime() < deadline) {
             try {
                 Thread.sleep(50);
             } catch (InterruptedException ignored) {
@@ -464,5 +519,6 @@ public class SimulationController {
                 break;
             }
         }
+        return !simulationEngineService.isTickInProgress();
     }
 }

@@ -44,6 +44,15 @@ public interface RouteOptimizer {
                                List<Airport> airports);
 
     /**
+     * Variante para cuando el servicio ya redujo el universo a vuelos candidatos.
+     */
+    default List<TravelStop> planRouteFromCandidates(Shipment shipment,
+                                                     List<Flight> candidateFlights,
+                                                     List<Airport> airports) {
+        return planRoute(shipment, candidateFlights, airports);
+    }
+
+    /**
      * Replanifica la ruta de un envío desde una parada fallida (vuelo cancelado
      * o aeropuerto saturado descubierto mid-route).
      *

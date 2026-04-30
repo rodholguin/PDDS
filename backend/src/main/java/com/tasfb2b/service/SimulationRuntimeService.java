@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Estado de ejecución de simulación en memoria para soporte UI.
@@ -48,6 +49,26 @@ public class SimulationRuntimeService {
     private static final String KEY_LAST_TICK = "lastTick";
     private static final String KEY_SIM_TIME = "simTime";
     private static final String KEY_RESETTING = "resetting";
+    private static final String KEY_BOOTSTRAPPING = "bootstrapping";
+    private static final String KEY_BOOTSTRAP_TOTAL = "bootstrapTotal";
+    private static final String KEY_BOOTSTRAP_PLANNED = "bootstrapPlanned";
+    private static final String KEY_BOOTSTRAP_STARTED_AT = "bootstrapStartedAt";
+    private static final String KEY_BOOTSTRAP_FINISHED_AT = "bootstrapFinishedAt";
+    private static final String KEY_BOOTSTRAP_MESSAGE = "bootstrapMessage";
+    private static final String KEY_PERIOD_PLANNING_ACTIVE = "periodPlanningActive";
+    private static final String KEY_PERIOD_PLANNING_SEED_TARGET = "periodPlanningSeedTarget";
+    private static final String KEY_PERIOD_PLANNED_THROUGH = "periodPlannedThrough";
+    private static final String KEY_PERIOD_PLANNING_BACKLOG = "periodPlanningBacklog";
+    private static final String KEY_PERIOD_PLANNING_BATCH_COUNT = "periodPlanningBatchCount";
+    private static final String KEY_PERIOD_PLANNING_LAST_BATCH_PLANNED = "periodPlanningLastBatchPlanned";
+    private static final String KEY_PERIOD_PLANNING_LAST_BATCH_FAILED = "periodPlanningLastBatchFailed";
+    private static final String KEY_PERIOD_PLANNING_LAST_BATCH_ELAPSED_MS = "periodPlanningLastBatchElapsedMs";
+    private static final String KEY_PERIOD_PLANNING_LAST_BATCH_AT = "periodPlanningLastBatchAt";
+    private static final String KEY_PERIOD_TICK_WAIT_COUNT = "periodTickWaitCount";
+    private static final String KEY_PERIOD_TICK_LAST_ELAPSED_MS = "periodTickLastElapsedMs";
+    private static final String KEY_PERIOD_TICK_LAST_WAIT_AT = "periodTickLastWaitAt";
+    private static final String KEY_PERIOD_TICK_LAST_WAIT_HORIZON = "periodTickLastWaitHorizon";
+    private static final String KEY_PERIOD_TICK_LAST_WAIT_PLANNED_THROUGH = "periodTickLastWaitPlannedThrough";
 
     private final SimulationConfigRepository configRepository;
     private final ShipmentRepository shipmentRepository;
@@ -63,6 +84,7 @@ public class SimulationRuntimeService {
 
     private final Map<String, Object> runtime = new ConcurrentHashMap<>();
     private final AtomicInteger defaultSpeed = new AtomicInteger(1);
+    private final AtomicBoolean controlTransitionInProgress = new AtomicBoolean(false);
 
     public SimulationRuntimeService(
             SimulationConfigRepository configRepository,
@@ -121,13 +143,34 @@ public class SimulationRuntimeService {
                 config.getPrimaryAlgorithm(),
                 config.getSecondaryAlgorithm(),
                 Boolean.TRUE.equals(config.getIsRunning()),
+                isBootstrapping(),
                 isPaused(),
                 currentSpeed(),
                 timeMode(config),
                 simulationSecondsPerTick(config),
+                tickIntervalMs(config),
                 effectiveSpeed(config),
                 replannings(),
                 injectedEvents(),
+                bootstrapTotalShipments(),
+                bootstrapPlannedShipments(),
+                bootstrapStartedAt().orElse(null),
+                bootstrapFinishedAt().orElse(null),
+                bootstrapMessage(),
+                isPeriodPlanningActive(),
+                periodPlanningSeedTarget().orElse(null),
+                periodPlannedThrough().orElse(null),
+                periodPlanningBacklog(),
+                periodPlanningBatchCount(),
+                periodPlanningLastBatchPlanned(),
+                periodPlanningLastBatchFailed(),
+                periodPlanningLastBatchElapsedMs(),
+                periodPlanningLastBatchAt().orElse(null),
+                periodTickWaitCount(),
+                periodTickLastElapsedMs(),
+                periodTickLastWaitAt().orElse(null),
+                periodTickLastWaitHorizon().orElse(null),
+                periodTickLastWaitPlannedThrough().orElse(null),
                 config.getStartedAt(),
                 simulatedNow,
                 lastTickAt().orElse(config.getRuntimeLastTickAt()),
@@ -182,6 +225,181 @@ public class SimulationRuntimeService {
         return Boolean.TRUE.equals(runtime.getOrDefault(KEY_RESETTING, Boolean.FALSE));
     }
 
+    public boolean isBootstrapping() {
+        return Boolean.TRUE.equals(runtime.getOrDefault(KEY_BOOTSTRAPPING, Boolean.FALSE));
+    }
+
+    public void markBootstrapStarted(long totalShipments, String message) {
+        runtime.put(KEY_BOOTSTRAPPING, Boolean.TRUE);
+        runtime.put(KEY_BOOTSTRAP_TOTAL, Math.max(0L, totalShipments));
+        runtime.put(KEY_BOOTSTRAP_PLANNED, 0L);
+        runtime.put(KEY_BOOTSTRAP_STARTED_AT, LocalDateTime.now());
+        runtime.remove(KEY_BOOTSTRAP_FINISHED_AT);
+        runtime.put(KEY_BOOTSTRAP_MESSAGE, message == null ? "Preparando simulacion de periodo" : message);
+    }
+
+    public void updateBootstrapProgress(long plannedShipments, String message) {
+        runtime.put(KEY_BOOTSTRAP_PLANNED, Math.max(0L, plannedShipments));
+        if (message != null && !message.isBlank()) {
+            runtime.put(KEY_BOOTSTRAP_MESSAGE, message);
+        }
+    }
+
+    public void markBootstrapCompleted(String message) {
+        runtime.put(KEY_BOOTSTRAPPING, Boolean.FALSE);
+        runtime.put(KEY_BOOTSTRAP_FINISHED_AT, LocalDateTime.now());
+        runtime.put(KEY_BOOTSTRAP_MESSAGE, message == null ? "Bootstrap completado" : message);
+    }
+
+    public void markBootstrapFailed(String message) {
+        runtime.put(KEY_BOOTSTRAPPING, Boolean.FALSE);
+        runtime.put(KEY_BOOTSTRAP_FINISHED_AT, LocalDateTime.now());
+        runtime.put(KEY_BOOTSTRAP_MESSAGE, message == null ? "Bootstrap fallido" : message);
+    }
+
+    public long bootstrapTotalShipments() {
+        return ((Number) runtime.getOrDefault(KEY_BOOTSTRAP_TOTAL, 0L)).longValue();
+    }
+
+    public long bootstrapPlannedShipments() {
+        return ((Number) runtime.getOrDefault(KEY_BOOTSTRAP_PLANNED, 0L)).longValue();
+    }
+
+    public Optional<LocalDateTime> bootstrapStartedAt() {
+        Object value = runtime.get(KEY_BOOTSTRAP_STARTED_AT);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public Optional<LocalDateTime> bootstrapFinishedAt() {
+        Object value = runtime.get(KEY_BOOTSTRAP_FINISHED_AT);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public String bootstrapMessage() {
+        Object value = runtime.get(KEY_BOOTSTRAP_MESSAGE);
+        return value instanceof String text ? text : null;
+    }
+
+    public void markPeriodPlanningActive(LocalDateTime seedTarget, long backlog, String message) {
+        runtime.put(KEY_PERIOD_PLANNING_ACTIVE, Boolean.TRUE);
+        if (seedTarget != null) {
+            runtime.put(KEY_PERIOD_PLANNING_SEED_TARGET, seedTarget);
+        } else {
+            runtime.remove(KEY_PERIOD_PLANNING_SEED_TARGET);
+        }
+        runtime.put(KEY_PERIOD_PLANNING_BACKLOG, Math.max(0L, backlog));
+        if (message != null && !message.isBlank()) {
+            runtime.put(KEY_BOOTSTRAP_MESSAGE, message);
+        }
+    }
+
+    public void updatePeriodPlanningProgress(LocalDateTime plannedThrough, long backlog, String message) {
+        if (plannedThrough != null) {
+            runtime.put(KEY_PERIOD_PLANNED_THROUGH, plannedThrough);
+        }
+        runtime.put(KEY_PERIOD_PLANNING_BACKLOG, Math.max(0L, backlog));
+        runtime.put(KEY_PERIOD_PLANNING_ACTIVE, backlog > 0L);
+        if (message != null && !message.isBlank()) {
+            runtime.put(KEY_BOOTSTRAP_MESSAGE, message);
+        }
+        if (backlog <= 0L) {
+            runtime.put(KEY_BOOTSTRAP_FINISHED_AT, LocalDateTime.now());
+        }
+    }
+
+    public void recordPeriodPlanningBatch(long planned, long failed, long elapsedMs) {
+        runtime.put(KEY_PERIOD_PLANNING_BATCH_COUNT, periodPlanningBatchCount() + 1L);
+        runtime.put(KEY_PERIOD_PLANNING_LAST_BATCH_PLANNED, Math.max(0L, planned));
+        runtime.put(KEY_PERIOD_PLANNING_LAST_BATCH_FAILED, Math.max(0L, failed));
+        runtime.put(KEY_PERIOD_PLANNING_LAST_BATCH_ELAPSED_MS, Math.max(0L, elapsedMs));
+        runtime.put(KEY_PERIOD_PLANNING_LAST_BATCH_AT, LocalDateTime.now());
+    }
+
+    public boolean isPeriodPlanningActive() {
+        return Boolean.TRUE.equals(runtime.getOrDefault(KEY_PERIOD_PLANNING_ACTIVE, Boolean.FALSE));
+    }
+
+    public Optional<LocalDateTime> periodPlanningSeedTarget() {
+        Object value = runtime.get(KEY_PERIOD_PLANNING_SEED_TARGET);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public Optional<LocalDateTime> periodPlannedThrough() {
+        Object value = runtime.get(KEY_PERIOD_PLANNED_THROUGH);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public long periodPlanningBacklog() {
+        return ((Number) runtime.getOrDefault(KEY_PERIOD_PLANNING_BACKLOG, 0L)).longValue();
+    }
+
+    public long periodPlanningBatchCount() {
+        return ((Number) runtime.getOrDefault(KEY_PERIOD_PLANNING_BATCH_COUNT, 0L)).longValue();
+    }
+
+    public long periodPlanningLastBatchPlanned() {
+        return ((Number) runtime.getOrDefault(KEY_PERIOD_PLANNING_LAST_BATCH_PLANNED, 0L)).longValue();
+    }
+
+    public long periodPlanningLastBatchFailed() {
+        return ((Number) runtime.getOrDefault(KEY_PERIOD_PLANNING_LAST_BATCH_FAILED, 0L)).longValue();
+    }
+
+    public long periodPlanningLastBatchElapsedMs() {
+        return ((Number) runtime.getOrDefault(KEY_PERIOD_PLANNING_LAST_BATCH_ELAPSED_MS, 0L)).longValue();
+    }
+
+    public Optional<LocalDateTime> periodPlanningLastBatchAt() {
+        Object value = runtime.get(KEY_PERIOD_PLANNING_LAST_BATCH_AT);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public void recordPeriodTickWait(LocalDateTime horizon, LocalDateTime plannedThrough) {
+        runtime.put(KEY_PERIOD_TICK_WAIT_COUNT, periodTickWaitCount() + 1L);
+        runtime.put(KEY_PERIOD_TICK_LAST_WAIT_AT, LocalDateTime.now());
+        if (horizon != null) {
+            runtime.put(KEY_PERIOD_TICK_LAST_WAIT_HORIZON, horizon);
+        }
+        if (plannedThrough != null) {
+            runtime.put(KEY_PERIOD_TICK_LAST_WAIT_PLANNED_THROUGH, plannedThrough);
+        }
+    }
+
+    public void recordTickElapsed(long elapsedMs) {
+        runtime.put(KEY_PERIOD_TICK_LAST_ELAPSED_MS, Math.max(0L, elapsedMs));
+    }
+
+    public long periodTickWaitCount() {
+        return ((Number) runtime.getOrDefault(KEY_PERIOD_TICK_WAIT_COUNT, 0L)).longValue();
+    }
+
+    public long periodTickLastElapsedMs() {
+        return ((Number) runtime.getOrDefault(KEY_PERIOD_TICK_LAST_ELAPSED_MS, 0L)).longValue();
+    }
+
+    public Optional<LocalDateTime> periodTickLastWaitAt() {
+        Object value = runtime.get(KEY_PERIOD_TICK_LAST_WAIT_AT);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public Optional<LocalDateTime> periodTickLastWaitHorizon() {
+        Object value = runtime.get(KEY_PERIOD_TICK_LAST_WAIT_HORIZON);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public Optional<LocalDateTime> periodTickLastWaitPlannedThrough() {
+        Object value = runtime.get(KEY_PERIOD_TICK_LAST_WAIT_PLANNED_THROUGH);
+        return value instanceof LocalDateTime localDateTime ? Optional.of(localDateTime) : Optional.empty();
+    }
+
+    public boolean beginControlTransition() {
+        return controlTransitionInProgress.compareAndSet(false, true);
+    }
+
+    public void endControlTransition() {
+        controlTransitionInProgress.set(false);
+    }
+
     @Transactional
     public void stopSimulationOnly() {
         SimulationConfig config = getConfig();
@@ -212,6 +430,7 @@ public class SimulationRuntimeService {
             for (Flight flight : flights) {
                 flight.setStatus(FlightStatus.SCHEDULED);
                 flight.setCurrentLoad(0);
+                flight.setReservedLoad(0);
             }
             flightRepository.saveAll(flights);
 
@@ -327,6 +546,30 @@ public class SimulationRuntimeService {
         runtime.put(KEY_REPLANS, 0L);
         runtime.put(KEY_EVENTS, 0L);
         runtime.remove(KEY_SIM_TIME);
+        clearBootstrapState();
+    }
+
+    private void clearBootstrapState() {
+        runtime.put(KEY_BOOTSTRAPPING, Boolean.FALSE);
+        runtime.remove(KEY_BOOTSTRAP_TOTAL);
+        runtime.remove(KEY_BOOTSTRAP_PLANNED);
+        runtime.remove(KEY_BOOTSTRAP_STARTED_AT);
+        runtime.remove(KEY_BOOTSTRAP_FINISHED_AT);
+        runtime.remove(KEY_BOOTSTRAP_MESSAGE);
+        runtime.remove(KEY_PERIOD_PLANNING_ACTIVE);
+        runtime.remove(KEY_PERIOD_PLANNING_SEED_TARGET);
+        runtime.remove(KEY_PERIOD_PLANNED_THROUGH);
+        runtime.remove(KEY_PERIOD_PLANNING_BACKLOG);
+        runtime.remove(KEY_PERIOD_PLANNING_BATCH_COUNT);
+        runtime.remove(KEY_PERIOD_PLANNING_LAST_BATCH_PLANNED);
+        runtime.remove(KEY_PERIOD_PLANNING_LAST_BATCH_FAILED);
+        runtime.remove(KEY_PERIOD_PLANNING_LAST_BATCH_ELAPSED_MS);
+        runtime.remove(KEY_PERIOD_PLANNING_LAST_BATCH_AT);
+        runtime.remove(KEY_PERIOD_TICK_WAIT_COUNT);
+        runtime.remove(KEY_PERIOD_TICK_LAST_ELAPSED_MS);
+        runtime.remove(KEY_PERIOD_TICK_LAST_WAIT_AT);
+        runtime.remove(KEY_PERIOD_TICK_LAST_WAIT_HORIZON);
+        runtime.remove(KEY_PERIOD_TICK_LAST_WAIT_PLANNED_THROUGH);
     }
 
     public void markTick(LocalDateTime tickAt) {
@@ -396,7 +639,7 @@ public class SimulationRuntimeService {
     }
 
     public void setSpeed(int speed) {
-        runtime.put(KEY_SPEED, speed);
+        runtime.put(KEY_SPEED, Math.max(1, Math.min(20, speed)));
         runtime.put(KEY_LAST_TICK, LocalDateTime.now());
     }
 
@@ -438,19 +681,43 @@ public class SimulationRuntimeService {
 
     @Transactional(readOnly = true)
     public SimulationKpisDto computeKpis() {
-        long delivered = shipmentRepository.countDeliveredTotal();
-        long deliveredOnTime = shipmentRepository.countDeliveredOnTimeTotal();
-        long active = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
-        long critical = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
-        long delayed = shipmentRepository.countByStatus(ShipmentStatus.DELAYED);
+        SimulationConfig config = getConfig();
+        LocalDateTime from = effectiveScenarioStart(config);
+        LocalDateTime to = from != null && config.getSimulationDays() != null
+                ? from.plusDays(Math.max(1, config.getSimulationDays()))
+                : null;
+
+        long delivered;
+        long deliveredOnTime;
+        long active;
+        long critical;
+        long delayed;
+
+        if (from != null && to != null) {
+            delivered = shipmentRepository.countDeliveredBetween(from, to);
+            deliveredOnTime = shipmentRepository.countDeliveredOnTimeBetween(from, to);
+            long pending = shipmentRepository.countByStatusAndRegistrationDateBetween(ShipmentStatus.PENDING, from, to);
+            long inRoute = shipmentRepository.countByStatusAndRegistrationDateBetween(ShipmentStatus.IN_ROUTE, from, to);
+            long delayedCount = shipmentRepository.countByStatusAndRegistrationDateBetween(ShipmentStatus.DELAYED, from, to);
+            long criticalCount = shipmentRepository.countByStatusAndRegistrationDateBetween(ShipmentStatus.CRITICAL, from, to);
+            active = pending + inRoute;
+            delayed = delayedCount;
+            critical = delayedCount + criticalCount;
+        } else {
+            delivered = shipmentRepository.countDeliveredTotal();
+            deliveredOnTime = shipmentRepository.countDeliveredOnTimeTotal();
+            active = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
+            critical = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
+            delayed = shipmentRepository.countByStatus(ShipmentStatus.DELAYED);
+        }
 
         double deliveredPct = delivered == 0 ? 0.0 : (deliveredOnTime * 100.0) / delivered;
         double avgFlightLoad = flightRepository.count() == 0
                 ? 0.0
-                : flightRepository.findAll().stream().mapToDouble(Flight::getLoadPct).average().orElse(0.0);
+                : flightRepository.averageLoadPct();
         double avgNodeLoad = airportRepository.count() == 0
                 ? 0.0
-                : airportRepository.findAll().stream().mapToDouble(Airport::getOccupancyPct).average().orElse(0.0);
+                : airportRepository.averageOccupancyPct();
 
         return new SimulationKpisDto(
                 deliveredPct,
@@ -573,6 +840,16 @@ public class SimulationRuntimeService {
         return Math.max(1, currentSpeed()) * 60L;
     }
 
+    public long tickIntervalMs(SimulationConfig config) {
+        if (config == null || config.getScenario() == null || config.getScenario() == com.tasfb2b.model.SimulationScenario.DAY_TO_DAY) {
+            return 1_000L;
+        }
+        if (config.getScenario() == com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION) {
+            return 500L;
+        }
+        return 1_000L;
+    }
+
     public SimulationTimeModeDto timeMode(SimulationConfig config) {
         return simulationSecondsPerTick(config) == 1L
                 ? SimulationTimeModeDto.REAL_TIME
@@ -602,12 +879,16 @@ public class SimulationRuntimeService {
             return base;
         }
 
-        long elapsedWholeSeconds = Math.max(0L, java.time.Duration.between(lastTickAt, LocalDateTime.now()).getSeconds());
-        if (elapsedWholeSeconds <= 0L) {
+        long elapsedMillis = Math.max(0L, java.time.Duration.between(lastTickAt, LocalDateTime.now()).toMillis());
+        if (elapsedMillis <= 0L) {
             return base;
         }
 
-        long projectedSeconds = elapsedWholeSeconds * simulationSecondsPerTick(config);
+        double simSecondsPerRealSecond = (double) simulationSecondsPerTick(config) * 1_000d / (double) tickIntervalMs(config);
+        long projectedSeconds = (long) Math.floor((elapsedMillis / 1_000d) * simSecondsPerRealSecond);
+        if (projectedSeconds <= 0L) {
+            return base;
+        }
         return base.plusSeconds(projectedSeconds);
     }
 

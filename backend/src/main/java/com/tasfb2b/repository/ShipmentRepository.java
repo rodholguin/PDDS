@@ -124,6 +124,39 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                                        @Param("from") LocalDateTime from,
                                        @Param("to") LocalDateTime to);
 
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status <> 'DELIVERED'
+              AND (s.originAirport = :airport OR s.destinationAirport = :airport)
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            """)
+    long countStoredByAirportWithinDay(@Param("airport") Airport airport,
+                                       @Param("from") LocalDateTime from,
+                                       @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE', 'CRITICAL', 'DELAYED')
+              AND s.destinationAirport = :airport
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            """)
+    long countInboundByAirportWithinDay(@Param("airport") Airport airport,
+                                        @Param("from") LocalDateTime from,
+                                        @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status IN ('PENDING', 'IN_ROUTE', 'CRITICAL', 'DELAYED')
+              AND s.originAirport = :airport
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            """)
+    long countOutboundByAirportWithinDay(@Param("airport") Airport airport,
+                                         @Param("from") LocalDateTime from,
+                                         @Param("to") LocalDateTime to);
+
     /** Envíos con riesgo de incumplimiento (ETA > deadline o vencido sin entregar). */
     @Query("""
             SELECT DISTINCT s FROM Shipment s
@@ -199,6 +232,27 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
 
     @Query("""
             SELECT s FROM Shipment s
+            WHERE s.status = 'DELIVERED'
+              AND (:airline IS NULL OR UPPER(s.airlineName) = :airline)
+              AND (:originIcao IS NULL OR UPPER(s.originAirport.icaoCode) = :originIcao)
+              AND (:destinationIcao IS NULL OR UPPER(s.destinationAirport.icaoCode) = :destinationIcao)
+              AND (:code IS NULL OR UPPER(s.shipmentCode) LIKE :code)
+              AND s.deliveredAt >= :dateFrom
+              AND s.deliveredAt < :dateTo
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> searchDeliveredShipmentsPageOnDate(
+            @Param("airline") String airline,
+            @Param("originIcao") String originIcao,
+            @Param("destinationIcao") String destinationIcao,
+            @Param("code") String code,
+            @Param("dateFrom") LocalDateTime dateFrom,
+            @Param("dateTo") LocalDateTime dateTo,
+            Pageable pageable
+    );
+
+    @Query("""
+            SELECT s FROM Shipment s
             WHERE (:airline IS NULL OR UPPER(s.airlineName) = :airline)
               AND (:originIcao IS NULL OR UPPER(s.originAirport.icaoCode) = :originIcao)
               AND (:destinationIcao IS NULL OR UPPER(s.destinationAirport.icaoCode) = :destinationIcao)
@@ -212,6 +266,25 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             @Param("originIcao") String originIcao,
             @Param("destinationIcao") String destinationIcao,
             @Param("status") ShipmentStatus status,
+            @Param("code") String code,
+            @Param("dateFrom") LocalDateTime dateFrom,
+            Pageable pageable
+    );
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status = 'DELIVERED'
+              AND (:airline IS NULL OR UPPER(s.airlineName) = :airline)
+              AND (:originIcao IS NULL OR UPPER(s.originAirport.icaoCode) = :originIcao)
+              AND (:destinationIcao IS NULL OR UPPER(s.destinationAirport.icaoCode) = :destinationIcao)
+              AND (:code IS NULL OR UPPER(s.shipmentCode) LIKE :code)
+              AND s.deliveredAt >= :dateFrom
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> searchDeliveredShipmentsPageFromDate(
+            @Param("airline") String airline,
+            @Param("originIcao") String originIcao,
+            @Param("destinationIcao") String destinationIcao,
             @Param("code") String code,
             @Param("dateFrom") LocalDateTime dateFrom,
             Pageable pageable
@@ -260,6 +333,69 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                                                   @Param("to") LocalDateTime to,
                                                   Pageable pageable);
 
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status IN ('IN_ROUTE', 'DELAYED', 'CRITICAL')
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findVisibleForMapWithinDay(@Param("from") LocalDateTime from,
+                                              @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status IN ('IN_ROUTE', 'DELAYED', 'CRITICAL')
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            """)
+    long countVisibleForMapWithinDay(@Param("from") LocalDateTime from,
+                                     @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status IN ('IN_ROUTE', 'DELAYED', 'CRITICAL')
+              AND s.registrationDate >= :from
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findVisibleForMapSince(@Param("from") LocalDateTime from);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status = 'IN_ROUTE'
+              AND s.registrationDate >= :from
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findInRouteSince(@Param("from") LocalDateTime from);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status = 'IN_ROUTE'
+              AND s.registrationDate >= :from
+              AND s.registrationDate < :to
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findInRouteWithinDay(@Param("from") LocalDateTime from,
+                                        @Param("to") LocalDateTime to);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status IN ('IN_ROUTE', 'DELAYED', 'CRITICAL')
+              AND s.registrationDate >= :from
+            """)
+    long countVisibleForMapSince(@Param("from") LocalDateTime from);
+
+    @Query("""
+            SELECT COUNT(s) FROM Shipment s
+            WHERE s.status = 'IN_ROUTE'
+              AND s.registrationDate >= :from
+            """)
+    long countInRouteSince(@Param("from") LocalDateTime from);
+
     /**
      * Envíos sin movimiento en un umbral de horas: todos sus stops siguen PENDING
      * y el registro es anterior al umbral.
@@ -306,6 +442,8 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
 
     long countByStatusIn(List<ShipmentStatus> statuses);
 
+    long countByStatusAndRegistrationDateBetween(ShipmentStatus status, LocalDateTime from, LocalDateTime to);
+
     boolean existsByStatusNot(ShipmentStatus status);
 
     @Query(value = """
@@ -339,6 +477,65 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     List<Shipment> findPendingWithoutRouteForPlanningInWindow(@Param("windowStart") LocalDateTime windowStart,
                                                               @Param("horizon") LocalDateTime horizon,
                                                               @Param("batchSize") int batchSize);
+
+    @Query(value = """
+            SELECT COUNT(*)
+            FROM shipment s
+            WHERE s.status = 'PENDING'
+              AND s.registration_date >= :windowStart
+              AND s.registration_date < :windowEnd
+              AND NOT EXISTS (
+                    SELECT 1 FROM travel_stop ts
+                    WHERE ts.shipment_id = s.id
+              )
+            """, nativeQuery = true)
+    long countPendingWithoutRouteForPlanningInWindow(@Param("windowStart") LocalDateTime windowStart,
+                                                     @Param("windowEnd") LocalDateTime windowEnd);
+
+    @Query(value = """
+            SELECT s.*
+            FROM shipment s
+            WHERE s.status = 'PENDING'
+              AND s.registration_date >= :periodStart
+              AND s.registration_date < :periodEnd
+              AND NOT EXISTS (
+                    SELECT 1 FROM travel_stop ts
+                    WHERE ts.shipment_id = s.id
+              )
+            ORDER BY s.registration_date ASC, s.id ASC
+            LIMIT :batchSize
+            """, nativeQuery = true)
+    List<Shipment> findPendingWithoutRouteForPlanningInPeriod(@Param("periodStart") LocalDateTime periodStart,
+                                                              @Param("periodEnd") LocalDateTime periodEnd,
+                                                              @Param("batchSize") int batchSize);
+
+    @Query(value = """
+            SELECT COUNT(*)
+            FROM shipment s
+            WHERE s.status = 'PENDING'
+              AND s.registration_date >= :periodStart
+              AND s.registration_date < :periodEnd
+              AND NOT EXISTS (
+                    SELECT 1 FROM travel_stop ts
+                    WHERE ts.shipment_id = s.id
+              )
+            """, nativeQuery = true)
+    long countPendingWithoutRouteForPlanningInPeriod(@Param("periodStart") LocalDateTime periodStart,
+                                                     @Param("periodEnd") LocalDateTime periodEnd);
+
+    @Query(value = """
+            SELECT MIN(s.registration_date)
+            FROM shipment s
+            WHERE s.status = 'PENDING'
+              AND s.registration_date >= :periodStart
+              AND s.registration_date < :periodEnd
+              AND NOT EXISTS (
+                    SELECT 1 FROM travel_stop ts
+                    WHERE ts.shipment_id = s.id
+              )
+            """, nativeQuery = true)
+    LocalDateTime findEarliestUnplannedRegistrationInPeriod(@Param("periodStart") LocalDateTime periodStart,
+                                                            @Param("periodEnd") LocalDateTime periodEnd);
 
     @Query("""
             SELECT COUNT(s) FROM Shipment s
@@ -428,6 +625,35 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
               )
             """)
     int markActiveAsDelayedBefore(@Param("now") LocalDateTime now);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status = 'DELAYED'
+              AND s.deadline IS NOT NULL
+              AND s.deadline < :now
+            ORDER BY s.deadline ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findDelayedOverdueShipments(@Param("now") LocalDateTime now, Pageable pageable);
+
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.status = 'DELAYED'
+              AND s.deadline IS NOT NULL
+              AND s.deadline < :now
+              AND NOT EXISTS (
+                    SELECT a.id FROM OperationalAlert a
+                    WHERE a.shipment = s
+                      AND a.type = :type
+                      AND a.status IN :statuses
+              )
+            ORDER BY s.deadline ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findDelayedOverdueShipmentsWithoutActiveAlert(@Param("now") LocalDateTime now,
+                                                                 @Param("type") String type,
+                                                                 @Param("statuses") List<com.tasfb2b.model.OperationalAlertStatus> statuses,
+                                                                 Pageable pageable);
 
     @Query(value = """
             SELECT

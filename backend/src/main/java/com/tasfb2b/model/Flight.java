@@ -59,6 +59,11 @@ public class Flight {
     @Builder.Default
     private Integer currentLoad = 0;
 
+    /** Capacidad reservada por planificación futura aún no despachada. */
+    @Column(name = "reserved_load")
+    @Builder.Default
+    private Integer reservedLoad = 0;
+
     @Column(nullable = false)
     private LocalDateTime scheduledDeparture;
 
@@ -98,12 +103,20 @@ public class Flight {
 
     @Transient
     public int getAvailableCapacity() {
-        return Math.max(0, (maxCapacity == null ? 0 : maxCapacity) - currentLoad);
+        int liveLoad = currentLoad == null ? 0 : currentLoad;
+        int reserved = reservedLoad == null ? 0 : reservedLoad;
+        return Math.max(0, (maxCapacity == null ? 0 : maxCapacity) - Math.max(0, liveLoad + reserved));
     }
 
     @Transient
     public double getLoadPct() {
         if (maxCapacity == null || maxCapacity == 0) return 0.0;
-        return Math.min(100.0, ((double) currentLoad / maxCapacity) * 100.0);
+        return Math.min(100.0, ((double) (currentLoad == null ? 0 : currentLoad) / maxCapacity) * 100.0);
+    }
+
+    @Transient
+    public double getReservedLoadPct() {
+        if (maxCapacity == null || maxCapacity == 0) return 0.0;
+        return Math.min(100.0, ((double) (reservedLoad == null ? 0 : reservedLoad) / maxCapacity) * 100.0);
     }
 }

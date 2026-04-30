@@ -16,8 +16,10 @@ import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.algorithm.AntColonyOptimization;
+import com.tasfb2b.service.algorithm.FastRoutePlanning;
 import com.tasfb2b.service.algorithm.GeneticAlgorithm;
 import com.tasfb2b.service.algorithm.OptimizationResult;
+import com.tasfb2b.service.algorithm.RoutePlanningSupport;
 import com.tasfb2b.service.algorithm.RouteOptimizer;
 import com.tasfb2b.service.algorithm.SimulatedAnnealingOptimization;
 import org.springframework.stereotype.Service;
@@ -27,11 +29,9 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 @Transactional
@@ -80,6 +80,7 @@ public class RoutePlannerService {
         return planShipment(shipment, algorithmName,
                 flightScheduleService.availableFlightsForShipment(shipment.getRegistrationDate()),
                 airportRepository.findAll(),
+                true,
                 true);
     }
 
@@ -88,14 +89,99 @@ public class RoutePlannerService {
                                          List<Flight> availableFlights,
                                          List<Airport> airports,
                                          boolean persistFlightLoadImmediately) {
+        return planShipment(shipment, algorithmName, availableFlights, airports, persistFlightLoadImmediately, true);
+    }
+
+    public List<TravelStop> planShipment(Shipment shipment,
+                                         String algorithmName,
+                                         List<Flight> availableFlights,
+                                         List<Airport> airports,
+                                         boolean persistFlightLoadImmediately,
+                                         boolean recordPlanningAudit) {
+        return planShipment(shipment, algorithmName, availableFlights, airports, persistFlightLoadImmediately, recordPlanningAudit, false);
+    }
+
+    public List<TravelStop> planShipment(Shipment shipment,
+                                         String algorithmName,
+                                         List<Flight> availableFlights,
+                                         List<Airport> airports,
+                                         boolean persistFlightLoadImmediately,
+                                         boolean recordPlanningAudit,
+                                         boolean fastPlanningMode) {
+        List<Flight> eligibleFlights = RoutePlanningSupport.eligiblePlanningFlights(shipment, availableFlights);
+        PlanningContext planning = fastPlanningMode
+                ? prepareBootstrapPlanningContext(shipment, eligibleFlights)
+                : preparePlanningContext(
+                        shipment,
+                        eligibleFlights,
+                        RoutePlanningSupport.planningCandidatesFromEligible(shipment, eligibleFlights)
+                );
+        return planShipment(shipment, algorithmName, airports, persistFlightLoadImmediately, recordPlanningAudit, fastPlanningMode, planning);
+    }
+
+    public List<TravelStop> planShipment(Shipment shipment,
+                                         String algorithmName,
+                                         RoutePlanningSupport.PlanningFlightIndex flightIndex,
+                                         List<Airport> airports,
+                                         boolean persistFlightLoadImmediately,
+                                         boolean recordPlanningAudit,
+                                         boolean fastPlanningMode) {
+        PlanningContext planning = fastPlanningMode
+                ? prepareBootstrapPlanningContext(shipment, flightIndex)
+                : preparePlanningContext(shipment, flightIndex);
+        return planShipment(shipment, algorithmName, airports, persistFlightLoadImmediately, recordPlanningAudit, fastPlanningMode, planning);
+    }
+
+    public PlannedShipment classifyAndPlanShipment(Shipment shipment,
+                                                   String algorithmName,
+                                                   List<Airport> airports,
+                                                   boolean persistFlightLoadImmediately,
+                                                   boolean recordPlanningAudit,
+                                                   boolean fastPlanningMode,
+                                                   List<Flight> availableFlights) {
+        List<Flight> eligibleFlights = RoutePlanningSupport.eligiblePlanningFlights(shipment, availableFlights);
+        PlanningContext planning = fastPlanningMode
+                ? prepareBootstrapPlanningContext(shipment, eligibleFlights)
+                : preparePlanningContext(
+                        shipment,
+                        eligibleFlights,
+                        RoutePlanningSupport.planningCandidatesFromEligible(shipment, eligibleFlights)
+                );
+        List<TravelStop> stops = planShipment(
+                shipment,
+                algorithmName,
+                airports,
+                persistFlightLoadImmediately,
+                recordPlanningAudit,
+                fastPlanningMode,
+                planning
+        );
+        return new PlannedShipment(planning.difficulty(), stops);
+    }
+
+    private List<TravelStop> planShipment(Shipment shipment,
+                                          String algorithmName,
+                                          List<Airport> airports,
+                                          boolean persistFlightLoadImmediately,
+                                          boolean recordPlanningAudit,
+                                          boolean fastPlanningMode,
+                                          PlanningContext planning) {
         RouteOptimizer optimizer = resolveOptimizer(algorithmName);
-        List<Flight> eligibleFlights = candidateFlightsForShipment(shipment, eligibleFlightsForShipment(shipment, availableFlights));
 
-        List<TravelStop> directStops = buildDirectCandidate(shipment, eligibleFlights);
-        List<TravelStop> multiHopStops = optimizer.planRoute(shipment, eligibleFlights, airports);
-
-        CandidatePlan selected = selectBestCandidate(shipment, directStops, multiHopStops);
-        List<TravelStop> stops = selected.stops();
+        List<TravelStop> stops;
+        CandidatePlan selected;
+        if (fastPlanningMode) {
+            selected = selectBootstrapCandidate(shipment, planning);
+            stops = selected.stops();
+        } else {
+            CandidatePlan gaCandidate = planning.fastPathCandidate() != null
+                    ? new CandidatePlan("MULTI_HOP_SKIPPED", List.of(), Double.POSITIVE_INFINITY, null, null)
+                    : evaluateCandidate(shipment, "MULTI_HOP", optimizer.planRouteFromCandidates(shipment, planning.candidateFlights(), airports));
+            selected = planning.fastPathCandidate() != null
+                    ? planning.fastPathCandidate()
+                    : selectBestCandidate(planning.directCandidate(), gaCandidate);
+            stops = selected.stops();
+        }
 
         if (stops.isEmpty()) {
             shipment.setStatus(ShipmentStatus.CRITICAL);
@@ -114,13 +200,15 @@ public class RoutePlannerService {
         shipment.setProgressPercentage(0.0);
         shipmentRepository.save(shipment);
 
-        shipmentAuditService.log(
-                shipment,
-                ShipmentAuditType.ROUTE_PLANNED,
-                buildPlanningMessage(algorithmName, selected),
-                shipment.getOriginAirport(),
-                null
-        );
+        if (recordPlanningAudit) {
+            shipmentAuditService.log(
+                    shipment,
+                    ShipmentAuditType.ROUTE_PLANNED,
+                    buildPlanningMessage(algorithmName, selected),
+                    shipment.getOriginAirport(),
+                    null
+            );
+        }
 
         return stops;
     }
@@ -141,10 +229,14 @@ public class RoutePlannerService {
                                          List<Flight> availableFlights,
                                          List<Airport> airports) {
         RouteOptimizer optimizer = resolveOptimizer(algorithmName);
-        List<Flight> eligibleFlights = candidateFlightsForShipment(shipment, eligibleFlightsForShipment(shipment, availableFlights));
-        List<TravelStop> directStops = buildDirectCandidate(shipment, eligibleFlights);
-        List<TravelStop> multiHopStops = optimizer.planRoute(shipment, eligibleFlights, airports);
-        return selectBestCandidate(shipment, directStops, multiHopStops).stops();
+        List<Flight> eligibleFlights = RoutePlanningSupport.eligiblePlanningFlights(shipment, availableFlights);
+        List<Flight> candidateFlights = RoutePlanningSupport.planningCandidatesFromEligible(shipment, eligibleFlights);
+        PlanningContext planning = preparePlanningContext(shipment, eligibleFlights, candidateFlights);
+        if (planning.fastPathCandidate() != null) {
+            return planning.fastPathCandidate().stops();
+        }
+        CandidatePlan gaCandidate = evaluateCandidate(shipment, "MULTI_HOP", optimizer.planRouteFromCandidates(shipment, candidateFlights, airports));
+        return selectBestCandidate(planning.directCandidate(), gaCandidate).stops();
     }
 
     public List<TravelStop> replanShipment(Long shipmentId) {
@@ -204,12 +296,18 @@ public class RoutePlannerService {
         return newStops;
     }
 
-    @Transactional(readOnly = true)
     public List<Flight> availableFlightsForWindow(LocalDateTime fromInclusive, LocalDateTime toExclusive) {
         LocalDateTime from = fromInclusive == null ? LocalDateTime.now() : fromInclusive;
         LocalDateTime to = toExclusive == null || !toExclusive.isAfter(from) ? from.plusDays(3) : toExclusive;
         flightScheduleService.ensureFlightsForWindow(from, to);
         return flightRepository.findSchedulableFlightsBetween(from, to);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Flight> schedulableFlightsForExistingWindow(LocalDateTime fromInclusive, LocalDateTime toExclusive) {
+        LocalDateTime from = fromInclusive == null ? LocalDateTime.now() : fromInclusive;
+        LocalDateTime to = toExclusive == null || !toExclusive.isAfter(from) ? from.plusDays(3) : toExclusive;
+        return flightScheduleService.schedulableFlightsWithinWindow(from, to);
     }
 
     @Transactional(readOnly = true)
@@ -499,106 +597,62 @@ public class RoutePlannerService {
 
     private void allocateFlightLoads(Shipment shipment, List<TravelStop> stops, boolean persistImmediately) {
         int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
-        java.util.Set<Flight> touched = new java.util.HashSet<>();
+        java.util.Map<Long, Integer> deltasByFlightId = new java.util.LinkedHashMap<>();
         for (TravelStop stop : stops) {
             Flight flight = stop.getFlight();
             if (flight == null) continue;
-            flight.setCurrentLoad(Math.min(flight.getMaxCapacity(), flight.getCurrentLoad() + luggage));
-            touched.add(flight);
+            if (persistImmediately) {
+                if (flight.getId() != null) {
+                    deltasByFlightId.merge(flight.getId(), luggage, Integer::sum);
+                }
+            } else {
+                flight.setReservedLoad(Math.min(flight.getMaxCapacity(), flight.getReservedLoad() + luggage));
+            }
         }
 
-        if (persistImmediately && !touched.isEmpty()) {
-            flightRepository.saveAll(touched);
+        if (persistImmediately) {
+            for (Map.Entry<Long, Integer> entry : deltasByFlightId.entrySet()) {
+                int updated = flightRepository.reserveCapacityIfAvailable(entry.getKey(), entry.getValue());
+                if (updated <= 0) {
+                    throw new IllegalStateException("Capacidad insuficiente al reservar vuelo " + entry.getKey());
+                }
+            }
         }
     }
 
     private void releaseFlightLoads(Shipment shipment, List<TravelStop> stops, boolean persistImmediately) {
         int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
-        java.util.Set<Flight> touched = new java.util.HashSet<>();
+        java.util.Map<Long, Integer> deltasByFlightId = new java.util.LinkedHashMap<>();
         for (TravelStop stop : stops) {
             Flight flight = stop.getFlight();
             if (flight == null) continue;
-            flight.setCurrentLoad(Math.max(0, flight.getCurrentLoad() - luggage));
-            touched.add(flight);
+            if (persistImmediately) {
+                if (flight.getId() != null) {
+                    deltasByFlightId.merge(flight.getId(), luggage, Integer::sum);
+                }
+            } else {
+                flight.setReservedLoad(Math.max(0, flight.getReservedLoad() - luggage));
+            }
         }
 
-        if (persistImmediately && !touched.isEmpty()) {
-            flightRepository.saveAll(touched);
+        if (persistImmediately) {
+            for (Map.Entry<Long, Integer> entry : deltasByFlightId.entrySet()) {
+                flightRepository.releaseReservedCapacity(entry.getKey(), entry.getValue());
+            }
         }
     }
 
-    private List<Flight> eligibleFlightsForShipment(Shipment shipment, List<Flight> flights) {
+    private List<TravelStop> buildDirectCandidate(Shipment shipment, Map<Long, List<Flight>> eligibleFlightsByOrigin) {
         LocalDateTime registration = shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate();
-        int requiredLuggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
-
-        return flights.stream()
-                .filter(flight -> flight.getStatus() == com.tasfb2b.model.FlightStatus.SCHEDULED)
-                .filter(flight -> flight.getCurrentLoad() < flight.getMaxCapacity())
-                .filter(flight -> (flight.getMaxCapacity() - flight.getCurrentLoad()) >= requiredLuggage)
-                .filter(flight -> flight.getScheduledDeparture() != null)
-                .filter(flight -> !flight.getScheduledDeparture().isBefore(registration))
-                .toList();
-    }
-
-    private List<Flight> candidateFlightsForShipment(Shipment shipment, List<Flight> eligibleFlights) {
-        if (eligibleFlights.isEmpty()) {
-            return eligibleFlights;
-        }
-
         Long originId = shipment.getOriginAirport() == null ? null : shipment.getOriginAirport().getId();
         Long destinationId = shipment.getDestinationAirport() == null ? null : shipment.getDestinationAirport().getId();
         if (originId == null || destinationId == null) {
-            return eligibleFlights;
+            return List.of();
         }
 
-        List<Flight> firstLegs = eligibleFlights.stream()
-                .filter(flight -> flight.getOriginAirport().getId().equals(originId))
-                .toList();
-        if (firstLegs.isEmpty()) {
-            return eligibleFlights;
-        }
-
-        Set<Long> hubIds = new HashSet<>();
-        for (Flight first : firstLegs) {
-            hubIds.add(first.getDestinationAirport().getId());
-        }
-
-        Set<Long> selectedFlightIds = new HashSet<>();
-        List<Flight> reduced = new java.util.ArrayList<>();
-
-        for (Flight flight : firstLegs) {
-            if (selectedFlightIds.add(flight.getId())) {
-                reduced.add(flight);
-            }
-        }
-        for (Flight flight : eligibleFlights) {
-            if (flight.getOriginAirport().getId().equals(originId)
-                    && flight.getDestinationAirport().getId().equals(destinationId)
-                    && selectedFlightIds.add(flight.getId())) {
-                reduced.add(flight);
-            }
-        }
-        for (Flight flight : eligibleFlights) {
-            if (hubIds.contains(flight.getOriginAirport().getId())
-                    && flight.getDestinationAirport().getId().equals(destinationId)
-                    && selectedFlightIds.add(flight.getId())) {
-                reduced.add(flight);
-            }
-        }
-
-        List<Flight> base = reduced.isEmpty() ? eligibleFlights : reduced;
-        return base.stream()
-                .sorted(Comparator.comparing(Flight::getScheduledDeparture, Comparator.nullsLast(LocalDateTime::compareTo)))
-                .limit(120)
-                .toList();
-    }
-
-    private List<TravelStop> buildDirectCandidate(Shipment shipment, List<Flight> eligibleFlights) {
-        LocalDateTime registration = shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate();
-
-        return eligibleFlights.stream()
-                .filter(flight -> flight.getOriginAirport().getId().equals(shipment.getOriginAirport().getId()))
-                .filter(flight -> flight.getDestinationAirport().getId().equals(shipment.getDestinationAirport().getId()))
+        return eligibleFlightsByOrigin.getOrDefault(originId, List.of()).stream()
+                .filter(flight -> flight.getDestinationAirport() != null)
+                .filter(flight -> destinationId.equals(flight.getDestinationAirport().getId()))
                 .sorted(Comparator.comparing(Flight::getScheduledArrival, Comparator.nullsLast(LocalDateTime::compareTo)))
                 .findFirst()
                 .map(flight -> List.of(
@@ -622,12 +676,175 @@ public class RoutePlannerService {
                 .orElse(List.of());
     }
 
-    private CandidatePlan selectBestCandidate(Shipment shipment,
-                                              List<TravelStop> directStops,
-                                              List<TravelStop> multiHopStops) {
-        CandidatePlan direct = evaluateCandidate(shipment, "DIRECT", directStops);
-        CandidatePlan multi = evaluateCandidate(shipment, "MULTI_HOP", multiHopStops);
+    private CandidatePlan buildDominantOneHopCandidate(Shipment shipment, Map<Long, List<Flight>> eligibleFlightsByOrigin) {
+        if (shipment == null || eligibleFlightsByOrigin == null || eligibleFlightsByOrigin.isEmpty()) {
+            return new CandidatePlan("ONE_HOP", List.of(), Double.POSITIVE_INFINITY, null, null);
+        }
 
+        LocalDateTime registration = shipment.getRegistrationDate() == null ? LocalDateTime.now() : shipment.getRegistrationDate();
+        Long originId = shipment.getOriginAirport() == null ? null : shipment.getOriginAirport().getId();
+        Long destinationId = shipment.getDestinationAirport() == null ? null : shipment.getDestinationAirport().getId();
+        if (originId == null || destinationId == null) {
+            return new CandidatePlan("ONE_HOP", List.of(), Double.POSITIVE_INFINITY, null, null);
+        }
+
+        List<Flight> firstLegs = eligibleFlightsByOrigin.getOrDefault(originId, List.of()).stream()
+                .limit(16)
+                .toList();
+
+        CandidatePlan best = new CandidatePlan("ONE_HOP", List.of(), Double.POSITIVE_INFINITY, null, null);
+        CandidatePlan second = new CandidatePlan("ONE_HOP_ALT", List.of(), Double.POSITIVE_INFINITY, null, null);
+        for (Flight first : firstLegs) {
+            if (first.getDestinationAirport() == null || first.getDestinationAirport().getId() == null) {
+                continue;
+            }
+            LocalDateTime minDeparture = first.getScheduledArrival() == null ? registration : first.getScheduledArrival().plusMinutes(30);
+            List<Flight> secondLegs = eligibleFlightsByOrigin.getOrDefault(first.getDestinationAirport().getId(), List.of()).stream()
+                    .filter(flight -> flight.getDestinationAirport() != null)
+                    .filter(flight -> destinationId.equals(flight.getDestinationAirport().getId()))
+                    .filter(flight -> flight.getScheduledDeparture() != null && !flight.getScheduledDeparture().isBefore(minDeparture))
+                    .limit(4)
+                    .toList();
+            for (Flight secondLeg : secondLegs) {
+                CandidatePlan candidate = evaluateCandidate(shipment, "ONE_HOP", toStops(shipment, registration, List.of(first, secondLeg)));
+                if (candidate.score() < best.score()) {
+                    second = best;
+                    best = candidate;
+                } else if (candidate.score() < second.score()) {
+                    second = candidate;
+                }
+            }
+        }
+
+        if (best.stops().isEmpty()) {
+            return best;
+        }
+        return new CandidatePlan(best.strategy(), best.stops(), best.score(), best.etaHours(),
+                Double.isFinite(second.score()) ? second.etaHours() : null);
+    }
+
+    public ShipmentDifficulty classifyShipmentDifficulty(Shipment shipment, List<Flight> availableFlights) {
+        List<Flight> eligibleFlights = RoutePlanningSupport.eligiblePlanningFlights(shipment, availableFlights);
+        List<Flight> candidateFlights = RoutePlanningSupport.planningCandidatesFromEligible(shipment, eligibleFlights);
+        PlanningContext planning = preparePlanningContext(shipment, eligibleFlights, candidateFlights);
+        return planning.difficulty();
+    }
+
+    private PlanningContext preparePlanningContext(Shipment shipment,
+                                                   RoutePlanningSupport.PlanningFlightIndex flightIndex) {
+        List<Flight> eligibleFlights = RoutePlanningSupport.eligiblePlanningFlightsFromIndex(shipment, flightIndex);
+        List<Flight> candidateFlights = RoutePlanningSupport.planningCandidatesFromIndex(shipment, flightIndex);
+        return preparePlanningContext(shipment, eligibleFlights, candidateFlights);
+    }
+
+    private PlanningContext preparePlanningContext(Shipment shipment,
+                                                   List<Flight> eligibleFlights,
+                                                   List<Flight> candidateFlights) {
+        Map<Long, List<Flight>> eligibleFlightsByOrigin = RoutePlanningSupport.planningIndexByOrigin(eligibleFlights);
+        CandidatePlan directCandidate = evaluateCandidate(shipment, "DIRECT", buildDirectCandidate(shipment, eligibleFlightsByOrigin));
+        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, eligibleFlightsByOrigin);
+        CandidatePlan fastPathCandidate = chooseFastPathCandidate(directCandidate, oneHopCandidate);
+        return new PlanningContext(eligibleFlights, candidateFlights, directCandidate, oneHopCandidate, fastPathCandidate, difficultyFor(candidateFlights.size(), fastPathCandidate));
+    }
+
+    private PlanningContext prepareBootstrapPlanningContext(Shipment shipment,
+                                                           List<Flight> eligibleFlights) {
+        Map<Long, List<Flight>> eligibleFlightsByOrigin = RoutePlanningSupport.planningIndexByOrigin(eligibleFlights);
+        CandidatePlan directCandidate = evaluateCandidate(shipment, "DIRECT", buildDirectCandidate(shipment, eligibleFlightsByOrigin));
+        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, eligibleFlightsByOrigin);
+        CandidatePlan fastPathCandidate = chooseFastPathCandidate(directCandidate, oneHopCandidate);
+        List<Flight> candidateFlights = directCandidate.stops().isEmpty() && oneHopCandidate.stops().isEmpty()
+                ? RoutePlanningSupport.planningCandidatesFromEligible(shipment, eligibleFlights)
+                : List.of();
+        return new PlanningContext(
+                eligibleFlights,
+                candidateFlights,
+                directCandidate,
+                oneHopCandidate,
+                fastPathCandidate,
+                difficultyFor(candidateFlights.size(), fastPathCandidate)
+        );
+    }
+
+    private PlanningContext prepareBootstrapPlanningContext(Shipment shipment,
+                                                           RoutePlanningSupport.PlanningFlightIndex flightIndex) {
+        List<Flight> eligibleFlights = RoutePlanningSupport.eligiblePlanningFlightsFromIndex(shipment, flightIndex);
+        Map<Long, List<Flight>> eligibleFlightsByOrigin = RoutePlanningSupport.planningIndexByOrigin(eligibleFlights);
+        CandidatePlan directCandidate = evaluateCandidate(shipment, "DIRECT", buildDirectCandidate(shipment, eligibleFlightsByOrigin));
+        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, eligibleFlightsByOrigin);
+        CandidatePlan fastPathCandidate = chooseFastPathCandidate(directCandidate, oneHopCandidate);
+        List<Flight> candidateFlights = directCandidate.stops().isEmpty() && oneHopCandidate.stops().isEmpty()
+                ? RoutePlanningSupport.planningCandidatesFromIndex(shipment, flightIndex)
+                : List.of();
+        return new PlanningContext(
+                eligibleFlights,
+                candidateFlights,
+                directCandidate,
+                oneHopCandidate,
+                fastPathCandidate,
+                difficultyFor(candidateFlights.size(), fastPathCandidate)
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public String activeAlgorithmName() {
+        return getActiveAlgorithmName();
+    }
+
+    private CandidatePlan selectBootstrapCandidate(Shipment shipment,
+                                                   PlanningContext planning) {
+        CandidatePlan bestCheapCandidate = selectBestCandidate(planning.directCandidate(), planning.oneHopCandidate());
+        if (!bestCheapCandidate.stops().isEmpty()) {
+            return bestCheapCandidate;
+        }
+        List<TravelStop> stops = FastRoutePlanning.planBestEffort(shipment, planning.candidateFlights());
+        CandidatePlan bootstrapCandidate = evaluateCandidate(shipment, "FAST_BOOTSTRAP", stops);
+        return selectBestCandidate(bestCheapCandidate, bootstrapCandidate);
+    }
+
+    private ShipmentDifficulty difficultyFor(int candidateCount, CandidatePlan fastPathCandidate) {
+        if (fastPathCandidate != null) {
+            return fastPathCandidate.stops().size() == 2 ? ShipmentDifficulty.TRIVIAL_DIRECT : ShipmentDifficulty.TRIVIAL_ONE_HOP;
+        }
+        if (candidateCount <= 16) {
+            return ShipmentDifficulty.LIGHT_GA;
+        }
+        return candidateCount <= 48 ? ShipmentDifficulty.STANDARD_GA : ShipmentDifficulty.COMPLEX_GA;
+    }
+
+    private CandidatePlan chooseFastPathCandidate(CandidatePlan direct, CandidatePlan oneHop) {
+        if (isStrongFastPath(direct)) {
+            return direct;
+        }
+        if (isDominantOneHop(oneHop)) {
+            return oneHop;
+        }
+        return null;
+    }
+
+    private boolean isStrongFastPath(CandidatePlan candidate) {
+        return candidate != null
+                && !candidate.stops().isEmpty()
+                && candidate.stops().size() == 2
+                && candidate.score() <= 12.0
+                && candidate.alternativeEtaHours() == null;
+    }
+
+    private boolean isDominantOneHop(CandidatePlan candidate) {
+        if (candidate == null || candidate.stops().isEmpty() || candidate.stops().size() != 3) {
+            return false;
+        }
+        if (candidate.etaHours() == null) {
+            return false;
+        }
+        if (candidate.alternativeEtaHours() == null) {
+            return candidate.score() <= 20.0;
+        }
+        return candidate.score() <= 24.0 && (candidate.alternativeEtaHours() - candidate.etaHours()) >= 4.0;
+    }
+
+    private CandidatePlan selectBestCandidate(CandidatePlan direct,
+                                              CandidatePlan multi) {
         if (direct.stops().isEmpty() && multi.stops().isEmpty()) {
             return direct;
         }
@@ -637,6 +854,49 @@ public class RoutePlannerService {
         return direct.score() <= multi.score()
                 ? new CandidatePlan(direct.strategy(), direct.stops(), direct.score(), direct.etaHours(), multi.etaHours())
                 : new CandidatePlan(multi.strategy(), multi.stops(), multi.score(), multi.etaHours(), direct.etaHours());
+    }
+
+    private List<TravelStop> toStops(Shipment shipment, LocalDateTime registration, List<Flight> route) {
+        List<TravelStop> stops = new java.util.ArrayList<>();
+        stops.add(TravelStop.builder()
+                .shipment(shipment)
+                .airport(shipment.getOriginAirport())
+                .flight(null)
+                .stopOrder(0)
+                .scheduledArrival(registration)
+                .stopStatus(StopStatus.PENDING)
+                .build());
+        for (int i = 0; i < route.size(); i++) {
+            Flight flight = route.get(i);
+            stops.add(TravelStop.builder()
+                    .shipment(shipment)
+                    .airport(flight.getDestinationAirport())
+                    .flight(flight)
+                    .stopOrder(i + 1)
+                    .scheduledArrival(flight.getScheduledArrival())
+                    .stopStatus(StopStatus.PENDING)
+                    .build());
+        }
+        return stops;
+    }
+
+    private record PlanningContext(
+            List<Flight> eligibleFlights,
+            List<Flight> candidateFlights,
+            CandidatePlan directCandidate,
+            CandidatePlan oneHopCandidate,
+            CandidatePlan fastPathCandidate,
+            ShipmentDifficulty difficulty
+    ) {}
+
+    public record PlannedShipment(ShipmentDifficulty difficulty, List<TravelStop> stops) {}
+
+    public enum ShipmentDifficulty {
+        TRIVIAL_DIRECT,
+        TRIVIAL_ONE_HOP,
+        LIGHT_GA,
+        STANDARD_GA,
+        COMPLEX_GA
     }
 
     private CandidatePlan evaluateCandidate(Shipment shipment, String strategy, List<TravelStop> stops) {

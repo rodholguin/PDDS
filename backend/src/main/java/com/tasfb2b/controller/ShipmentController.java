@@ -88,7 +88,8 @@ public class ShipmentController {
         }
 
         Page<Shipment> page;
-        if (currentOnly && dateFrom != null && dateTo != null) {
+        boolean deliveredStatus = status == ShipmentStatus.DELIVERED;
+        if (currentOnly && dateFrom != null && dateTo != null && !deliveredStatus) {
             page = shipmentRepository.searchVisibleForOperationalDay(
                     normalizeUpper(airline),
                     normalizeUpper(origin),
@@ -100,7 +101,26 @@ public class ShipmentController {
                     pageable
             );
         } else if (hasAdvancedFilters || dateFrom != null) {
-            if (dateFrom != null && dateTo != null) {
+            if (deliveredStatus && dateFrom != null && dateTo != null) {
+                page = shipmentRepository.searchDeliveredShipmentsPageOnDate(
+                        normalizeUpper(airline),
+                        normalizeUpper(origin),
+                        normalizeUpper(destination),
+                        normalizeLikeUpper(code),
+                        dateFrom,
+                        dateTo,
+                        pageable
+                );
+            } else if (deliveredStatus && dateFrom != null) {
+                page = shipmentRepository.searchDeliveredShipmentsPageFromDate(
+                        normalizeUpper(airline),
+                        normalizeUpper(origin),
+                        normalizeUpper(destination),
+                        normalizeLikeUpper(code),
+                        dateFrom,
+                        pageable
+                );
+            } else if (dateFrom != null && dateTo != null) {
                 page = shipmentRepository.searchShipmentsPageOnDate(
                         normalizeUpper(airline),
                         normalizeUpper(origin),

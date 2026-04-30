@@ -22,15 +22,6 @@ function ShipmentIcon() {
   );
 }
 
-function SimulationIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M4 4v16l14-8L4 4z" />
-      <path d="M20 5v14" />
-    </svg>
-  );
-}
-
 function ReportIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -76,7 +67,6 @@ const NAV_MAIN = [
 
 const NAV_OPERATIONS = [
   { href: '/flights', label: 'Vuelos', Icon: FlightIcon },
-  { href: '/simulation', label: 'Simulacion', Icon: SimulationIcon },
   { href: '/reports', label: 'Reportes', Icon: ReportIcon },
 ];
 

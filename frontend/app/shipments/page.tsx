@@ -135,6 +135,7 @@ export default function ShipmentsPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [planningEvents, setPlanningEvents] = useState<ShipmentPlanningEvent[] | null>(null);
   const createDateDirtyRef = useRef(false);
+  const dateDirtyRef = useRef(false);
 
   const dateInitialized = useRef(false);
   const simActive = Boolean(sim?.running || sim?.paused);
@@ -152,7 +153,7 @@ export default function ShipmentsPage() {
   useEffect(() => {
     if (!simLoaded || !simActive) return;
     const nextDate = todaySimDate(sim);
-    if (nextDate) setDate(nextDate);
+    if (nextDate && !dateDirtyRef.current) setDate(nextDate);
     if (!createDateDirtyRef.current) {
       setCreateForm((prev) => ({ ...prev, registrationDate: registrationDefault(sim) }));
     }
@@ -177,10 +178,14 @@ export default function ShipmentsPage() {
             origin: origin || undefined,
             destination: destination || undefined,
             date: date || undefined,
-            currentOnly: simActive,
+            currentOnly: simActive && status !== 'DELIVERED',
             page: targetPage,
             size: PAGE_SIZE,
-            sort: simActive ? 'registrationDate,asc' : 'registrationDate,desc',
+            sort: status === 'DELIVERED'
+              ? 'deliveredAt,desc'
+              : simActive
+                ? 'registrationDate,asc'
+                : 'registrationDate,desc',
           });
       setRows(result.content);
       setPage(result.number);
@@ -352,7 +357,7 @@ export default function ShipmentsPage() {
               <option value="DELAYED">Atrasados</option>
               <option value="DELIVERED">Entregados</option>
             </select>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="shipments-search" style={{ width: 170 }} />
+            <input type="date" value={date} onChange={(e) => { dateDirtyRef.current = true; setDate(e.target.value); }} className="shipments-search" style={{ width: 170 }} />
             <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="Código" className="shipments-search" style={{ width: 150 }} />
             <input value={origin} onChange={(e) => setOrigin(e.target.value.toUpperCase())} placeholder="Origen ICAO" className="shipments-search" style={{ width: 140 }} />
             <input value={destination} onChange={(e) => setDestination(e.target.value.toUpperCase())} placeholder="Destino ICAO" className="shipments-search" style={{ width: 140 }} />

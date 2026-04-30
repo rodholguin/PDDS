@@ -25,12 +25,12 @@ import type {
   SystemStatus,
 } from './types';
 
-const SIM_POLL_MS = 2_000;
-const MAP_POLL_MS = 3_000;
-const OVERVIEW_POLL_MS = 6_000;
-const SYSTEM_POLL_MS = 15_000;
+const SIM_POLL_MS = 1_000;
+const MAP_POLL_MS = 1_000;
+const OVERVIEW_POLL_MS = 1_000;
+const SYSTEM_POLL_MS = 5_000;
 const AIRPORTS_POLL_MS = 30_000;
-const UPCOMING_POLL_MS = 10_000;
+const UPCOMING_POLL_MS = 2_000;
 
 function toIsoDate(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -43,6 +43,16 @@ function shiftIsoDate(date: string, deltaDays: number): string {
   const value = new Date(`${date}T00:00:00Z`);
   value.setUTCDate(value.getUTCDate() + deltaDays);
   return value.toISOString().slice(0, 10);
+}
+
+function periodEndMs(state: SimulationState | null): number | null {
+  if (!state?.effectiveScenarioStartAt || state.scenario !== 'PERIOD_SIMULATION') {
+    return null;
+  }
+  const start = new Date(state.effectiveScenarioStartAt).getTime();
+  if (Number.isNaN(start)) return null;
+  const days = Math.max(1, state.simulationDays || 1);
+  return start + days * 24 * 60 * 60 * 1000;
 }
 
 interface SimulationCtx {
@@ -282,25 +292,29 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
     const simMs = new Date(sim.simulatedNow).getTime();
     if (Number.isNaN(simMs)) return;
-    const factor = Math.max(1, sim.simulationSecondsPerTick ?? 1);
+    const maxSimMs = periodEndMs(sim);
+    const boundedSimMs = maxSimMs == null ? simMs : Math.min(simMs, maxSimMs);
+    const tickIntervalMs = Math.max(1, sim.tickIntervalMs ?? 1_000);
     const wallNow = Date.now();
+    const factor = Math.max(1, sim.simulationSecondsPerTick ?? 1) * (1_000 / tickIntervalMs);
     const current = clockAnchorRef.current;
 
     if (!current || current.secondsPerRealSecond !== factor) {
-      clockAnchorRef.current = { simMs, wallMs: wallNow, secondsPerRealSecond: factor };
-      setSimulatedNowMs(simMs);
+      clockAnchorRef.current = { simMs: boundedSimMs, wallMs: wallNow, secondsPerRealSecond: factor };
+      setSimulatedNowMs(boundedSimMs);
       return;
     }
 
     const extrapolated = current.simMs + (wallNow - current.wallMs) * factor;
-    const driftMs = Math.abs(simMs - extrapolated);
+    const boundedExtrapolated = maxSimMs == null ? extrapolated : Math.min(extrapolated, maxSimMs);
+    const driftMs = Math.abs(boundedSimMs - boundedExtrapolated);
     // Tolerance = one poll's worth of simulated time ± 1.5 s guard
     const tolerance = Math.max(1_500, factor * 1_500);
     if (driftMs > tolerance) {
-      clockAnchorRef.current = { simMs, wallMs: wallNow, secondsPerRealSecond: factor };
-      setSimulatedNowMs(simMs);
+      clockAnchorRef.current = { simMs: boundedSimMs, wallMs: wallNow, secondsPerRealSecond: factor };
+      setSimulatedNowMs(boundedSimMs);
     }
-  }, [sim?.running, sim?.paused, sim?.simulatedNow, sim?.simulationSecondsPerTick]);
+  }, [sim?.running, sim?.paused, sim?.simulatedNow, sim?.simulationSecondsPerTick, sim?.tickIntervalMs]);
 
   useEffect(() => {
     if (!sim?.running || sim?.paused) return;
@@ -309,7 +323,9 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       if (!anchor) return;
       const elapsedMs = Date.now() - anchor.wallMs;
       const projected = anchor.simMs + elapsedMs * anchor.secondsPerRealSecond;
-      setSimulatedNowMs(projected);
+      const maxSimMs = periodEndMs(simRef.current);
+      const boundedProjected = maxSimMs == null ? projected : Math.min(projected, maxSimMs);
+      setSimulatedNowMs(boundedProjected);
     }, 250);
     return () => clearInterval(interval);
   }, [sim?.running, sim?.paused]);

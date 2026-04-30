@@ -33,10 +33,6 @@ public class SimulationEngineService {
 
     private static final Logger log = LoggerFactory.getLogger(SimulationEngineService.class);
 
-    private static final int ROUTE_PLANNING_BATCH_DAY_TO_DAY = 4;
-    private static final int ROUTE_PLANNING_BATCH_PERIOD = 1;
-    private static final int ROUTE_PLANNING_BATCH_COLLAPSE = 4;
-
     private final SimulationConfigRepository simulationConfigRepository;
     private final FlightRepository flightRepository;
     private final ShipmentRepository shipmentRepository;
@@ -44,11 +40,9 @@ public class SimulationEngineService {
     private final AirportRepository airportRepository;
     private final ShipmentAuditService shipmentAuditService;
     private final SimulationRuntimeService runtimeService;
-    private final RoutePlannerService routePlannerService;
-    private final FlightScheduleService flightScheduleService;
-    private final OperationalAlertService operationalAlertService;
     private final TransactionTemplate transactionTemplate;
     private final AtomicLong tickSequence = new AtomicLong();
+    private final AtomicLong nextEligibleTickAtMs = new AtomicLong(0L);
     private final java.util.concurrent.atomic.AtomicBoolean tickInProgress = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public SimulationEngineService(
@@ -59,9 +53,6 @@ public class SimulationEngineService {
             AirportRepository airportRepository,
             ShipmentAuditService shipmentAuditService,
             SimulationRuntimeService runtimeService,
-            RoutePlannerService routePlannerService,
-            FlightScheduleService flightScheduleService,
-            OperationalAlertService operationalAlertService,
             TransactionTemplate transactionTemplate
     ) {
         this.simulationConfigRepository = simulationConfigRepository;
@@ -71,13 +62,10 @@ public class SimulationEngineService {
         this.airportRepository = airportRepository;
         this.shipmentAuditService = shipmentAuditService;
         this.runtimeService = runtimeService;
-        this.routePlannerService = routePlannerService;
-        this.flightScheduleService = flightScheduleService;
-        this.operationalAlertService = operationalAlertService;
         this.transactionTemplate = transactionTemplate;
     }
 
-    @Scheduled(fixedDelay = 1_000)
+    @Scheduled(fixedDelay = 250)
     public void tick() {
         try {
             runTickIfEligible();
@@ -102,7 +90,8 @@ public class SimulationEngineService {
 
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime lastTick = runtimeService.lastTickAt().orElse(null);
-        if (lastTick != null && Duration.between(lastTick, now).toMillis() < 1500) {
+        long staleThresholdMs = Math.max(runtimeService.tickIntervalMs(config) * 3L, 1_500L);
+        if (lastTick != null && Duration.between(lastTick, now).toMillis() < staleThresholdMs) {
             return;
         }
 
@@ -123,11 +112,20 @@ public class SimulationEngineService {
                 return;
             }
 
-            long startedAt = System.currentTimeMillis();
+            LocalDateTime now = LocalDateTime.now();
+            long tickIntervalMs = runtimeService.tickIntervalMs(config);
+            long nowMs = System.currentTimeMillis();
+            long nextEligibleAt = nextEligibleTickAtMs.get();
+            if (nextEligibleAt > nowMs) {
+                return;
+            }
+            nextEligibleTickAtMs.set(nowMs + tickIntervalMs);
+
+            long startedAt = nowMs;
             transactionTemplate.executeWithoutResult(status -> executeTick(config));
             long elapsedMs = System.currentTimeMillis() - startedAt;
-            if (elapsedMs > 1_000L) {
-                log.warn("Tick de simulación tardó {} ms en escenario {}", elapsedMs, config.getScenario());
+            if (elapsedMs > tickIntervalMs) {
+                log.warn("Tick de simulación tardó {} ms en escenario {} (intervalo objetivo={} ms)", elapsedMs, config.getScenario(), tickIntervalMs);
             }
         } finally {
             tickInProgress.set(false);
@@ -140,6 +138,7 @@ public class SimulationEngineService {
 
     public void resetTickSequence() {
         tickSequence.set(0L);
+        nextEligibleTickAtMs.set(0L);
     }
 
     private void executeTick(SimulationConfig config) {
@@ -147,134 +146,128 @@ public class SimulationEngineService {
         LocalDateTime simulatedNow = runtimeService.currentSimulationTime().orElseGet(() -> resolveInitialSimulationTime(now));
         long secondsAdvance = runtimeService.simulationSecondsPerTick(config);
         LocalDateTime horizon = simulatedNow.plusSeconds(secondsAdvance);
-
-        planPendingShipments(config, horizon);
-        activateFlights(horizon);
-        closeFlightsAndAdvanceStops(horizon);
-        markOverdueShipments(horizon);
-
-        runtimeService.setSimulationTime(horizon);
-        runtimeService.markTick(horizon);
-    }
-
-    private void planPendingShipments(SimulationConfig config, LocalDateTime horizon) {
-        long tickNumber = tickSequence.incrementAndGet();
-        if (!shouldPlanOnTick(config == null ? null : config.getScenario(), tickNumber)) {
-            return;
-        }
-
-        int batchSize = planningBatchForScenario(config == null ? null : config.getScenario());
-        LocalDateTime windowStart = horizon.toLocalDate().atStartOfDay();
-        List<Shipment> pending = shipmentRepository.findPendingWithoutRouteForPlanningInWindow(windowStart, horizon, batchSize);
-        if (pending.isEmpty()) {
-            pending = shipmentRepository.findPendingWithoutRouteForPlanning(horizon, batchSize);
-        }
-        if (pending.isEmpty()) {
-            return;
-        }
-
-        var airports = airportRepository.findAll();
-        var availableFlights = flightScheduleService.availableFlightsForShipment(horizon.minusDays(1));
-
-        for (Shipment shipment : pending) {
-            try {
-                routePlannerService.planShipment(
-                        shipment,
-                        "Genetic Algorithm",
-                        availableFlights,
-                        airports,
-                        true
-                );
-            } catch (Exception ex) {
-                log.debug("No se pudo planificar envio {} en tick: {}", shipment.getId(), ex.getMessage());
+        LocalDateTime periodEnd = resolvePeriodEnd(config);
+        LocalDateTime effectiveHorizon = periodEnd != null && horizon.isAfter(periodEnd) ? periodEnd : horizon;
+        LocalDateTime planningHorizon = effectiveHorizon;
+        if (config.getScenario() == SimulationScenario.PERIOD_SIMULATION) {
+            LocalDateTime plannedThrough = runtimeService.periodPlannedThrough().orElse(null);
+            if (plannedThrough != null && plannedThrough.isBefore(effectiveHorizon)) {
+                runtimeService.recordPeriodTickWait(effectiveHorizon, plannedThrough);
+                log.info("Tick de periodo en espera: horizon={} plannedThrough={}", effectiveHorizon, plannedThrough);
+                return;
             }
         }
+
+        long tickStartedAt = System.nanoTime();
+        reconcileFlightStates(effectiveHorizon);
+        long afterReconcile = System.nanoTime();
+        activateFlights(simulatedNow, effectiveHorizon);
+        long afterActivate = System.nanoTime();
+        closeFlightsAndAdvanceStops(simulatedNow, effectiveHorizon);
+        long afterClose = System.nanoTime();
+
+        runtimeService.setSimulationTime(effectiveHorizon);
+        long afterSetTime = System.nanoTime();
+        runtimeService.markTick(effectiveHorizon);
+        long afterMarkTick = System.nanoTime();
+
+        long totalTickMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(afterMarkTick - tickStartedAt);
+        runtimeService.recordTickElapsed(totalTickMs);
+        long targetTickMs = runtimeService.tickIntervalMs(config);
+        if (totalTickMs > targetTickMs) {
+            log.warn(
+                "Tick breakdown escenario={} total={} ms reconcile={} ms plan={} ms activate={} ms close={} ms overdue={} ms setTime={} ms markTick={} ms",
+                config == null ? null : config.getScenario(),
+                totalTickMs,
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(afterReconcile - tickStartedAt),
+                0L,
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(afterActivate - afterReconcile),
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(afterClose - afterActivate),
+                0L,
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(afterSetTime - afterClose),
+                java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(afterMarkTick - afterSetTime)
+            );
+        }
+
+        if (periodEnd != null && !effectiveHorizon.isBefore(periodEnd)) {
+            runtimeService.stopSimulationOnly();
+            log.info("Simulacion de periodo finalizada automaticamente en {}", effectiveHorizon);
+        }
     }
 
-    private int planningBatchForScenario(SimulationScenario scenario) {
-        if (scenario == SimulationScenario.PERIOD_SIMULATION) {
-            return ROUTE_PLANNING_BATCH_PERIOD;
+    private void reconcileFlightStates(LocalDateTime horizon) {
+        List<Long> recoverableScheduledIds = flightRepository.findRecoverableScheduledFlightIds(horizon);
+        if (!recoverableScheduledIds.isEmpty()) {
+            flightRepository.updateStatusByIds(recoverableScheduledIds, FlightStatus.IN_FLIGHT);
         }
-        if (scenario == SimulationScenario.COLLAPSE_TEST) {
-            return ROUTE_PLANNING_BATCH_COLLAPSE;
-        }
-        return ROUTE_PLANNING_BATCH_DAY_TO_DAY;
     }
 
-    private boolean shouldPlanOnTick(SimulationScenario scenario, long tickNumber) {
-        long cadence;
-        if (scenario == SimulationScenario.PERIOD_SIMULATION) {
-            cadence = 12L;
-        } else if (scenario == SimulationScenario.COLLAPSE_TEST) {
-            cadence = 2L;
-        } else {
-            cadence = 1L;
+    private void activateFlights(LocalDateTime simulatedNow, LocalDateTime horizon) {
+        List<TravelStop> pendingStops = travelStopRepository.findPendingStopsForActivation(simulatedNow, horizon);
+        if (pendingStops.isEmpty()) {
+            return;
         }
-        return tickNumber % cadence == 1L;
-    }
 
-    private void activateFlights(LocalDateTime horizon) {
-        List<Flight> eligibleFlights = flightRepository
-                .findByStatusAndScheduledDepartureLessThanEqual(FlightStatus.SCHEDULED, horizon)
-                .stream()
-                .filter(flight -> flight.getScheduledArrival() == null || flight.getScheduledArrival().isAfter(horizon))
-                .toList();
-
-        List<TravelStop> pendingStops = eligibleFlights.isEmpty()
-                ? List.of()
-                : travelStopRepository.findByFlightInAndStopStatus(eligibleFlights, StopStatus.PENDING);
+        java.util.Map<Long, Flight> flightsById = pendingStops.stream()
+                .map(TravelStop::getFlight)
+                .collect(java.util.stream.Collectors.toMap(Flight::getId, flight -> flight, (first, second) -> first, java.util.LinkedHashMap::new));
         java.util.Map<Long, List<TravelStop>> pendingStopsByFlightId = pendingStops.stream()
                 .collect(java.util.stream.Collectors.groupingBy(stop -> stop.getFlight().getId()));
-        java.util.Map<Long, List<TravelStop>> allStopsByShipmentId = pendingStops.isEmpty()
-                ? java.util.Map.of()
-                : travelStopRepository.findByShipmentInOrderByShipmentIdAscStopOrderAsc(
-                                pendingStops.stream().map(TravelStop::getShipment).distinct().toList())
-                        .stream()
-                        .collect(java.util.stream.Collectors.groupingBy(stop -> stop.getShipment().getId()));
+        java.util.List<TravelStop> allStops = travelStopRepository.findByShipmentInOrderByShipmentIdAscStopOrderAsc(
+                pendingStops.stream().map(TravelStop::getShipment).distinct().toList());
+        java.util.Map<Long, TravelStop> originStopByShipmentId = new java.util.HashMap<>();
+        java.util.Map<String, TravelStop> stopByShipmentAndOrder = new java.util.HashMap<>();
+        for (TravelStop candidate : allStops) {
+            Long shipmentId = candidate.getShipment() == null ? null : candidate.getShipment().getId();
+            if (shipmentId == null) {
+                continue;
+            }
+            if (candidate.getStopOrder() != null && candidate.getStopOrder() == 0) {
+                originStopByShipmentId.put(shipmentId, candidate);
+            }
+            if (candidate.getStopOrder() != null) {
+                stopByShipmentAndOrder.put(shipmentId + ":" + candidate.getStopOrder(), candidate);
+            }
+        }
 
-        List<Flight> toStart = eligibleFlights.stream()
-                .filter(flight -> !pendingStopsByFlightId.getOrDefault(flight.getId(), List.of()).isEmpty())
-                .toList();
+        List<Flight> toStart = new java.util.ArrayList<>(flightsById.values());
 
         for (Flight flight : toStart) {
             flight.setStatus(FlightStatus.IN_FLIGHT);
-            flightRepository.save(flight);
 
             List<TravelStop> stops = pendingStopsByFlightId.getOrDefault(flight.getId(), List.of());
 
             for (TravelStop stop : stops) {
-                List<TravelStop> allStops = allStopsByShipmentId.getOrDefault(stop.getShipment().getId(), List.of());
-                allStops.stream()
-                        .filter(s -> s.getStopOrder() == 0 && s.getStopStatus() == StopStatus.PENDING)
-                        .forEach(originStop -> {
-                            originStop.setStopStatus(StopStatus.COMPLETED);
-                            originStop.setActualArrival(flight.getScheduledDeparture() != null ? flight.getScheduledDeparture() : horizon);
-                            travelStopRepository.save(originStop);
-                        });
+                Shipment shipment = stop.getShipment();
+                Long shipmentId = shipment == null ? null : shipment.getId();
+                if (shipmentId == null) {
+                    continue;
+                }
+                TravelStop originStop = originStopByShipmentId.get(shipmentId);
+                if (originStop != null && originStop.getStopStatus() == StopStatus.PENDING) {
+                    originStop.setStopStatus(StopStatus.COMPLETED);
+                    originStop.setActualArrival(flight.getScheduledDeparture() != null ? flight.getScheduledDeparture() : horizon);
+                }
 
                 stop.setStopStatus(StopStatus.IN_TRANSIT);
-                travelStopRepository.save(stop);
 
-                Shipment shipment = stop.getShipment();
+                int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
+                flight.setReservedLoad(Math.max(0, flight.getReservedLoad() - luggage));
+                flight.setCurrentLoad(Math.min(flight.getMaxCapacity(), flight.getCurrentLoad() + luggage));
 
                 // Issue 7.1: release storage at the intermediate hub the shipment is departing from.
                 // stopOrder >= 2 means the previous stop was a transit airport that received this
                 // luggage (storage was incremented on arrival in closeFlightsAndAdvanceStops).
                 if (stop.getStopOrder() != null && stop.getStopOrder() >= 2) {
-                    TravelStop previousHub = allStops.stream()
-                            .filter(s -> s.getStopOrder() != null && s.getStopOrder() == stop.getStopOrder() - 1)
-                            .findFirst()
-                            .orElse(null);
+                    TravelStop previousHub = stopByShipmentAndOrder.get(shipmentId + ":" + (stop.getStopOrder() - 1));
                     if (previousHub != null && previousHub.getAirport() != null) {
                         Airport hub = previousHub.getAirport();
                         int newLoad = Math.max(0, hub.getCurrentStorageLoad() - shipment.getLuggageCount());
                         hub.setCurrentStorageLoad(newLoad);
-                        airportRepository.save(hub);
                     }
                 }
 
                 shipment.setStatus(ShipmentStatus.IN_ROUTE);
-                shipmentRepository.save(shipment);
 
                 audit(shipment, ShipmentAuditType.DEPARTED,
                         "Vuelo " + flight.getFlightCode() + " en curso hacia " + stop.getAirport().getIcaoCode(),
@@ -283,9 +276,13 @@ public class SimulationEngineService {
         }
     }
 
-    private void closeFlightsAndAdvanceStops(LocalDateTime horizon) {
+    private void closeFlightsAndAdvanceStops(LocalDateTime simulatedNow, LocalDateTime horizon) {
         List<Flight> toComplete = flightRepository
-                .findByStatusAndScheduledArrivalLessThanEqual(FlightStatus.IN_FLIGHT, horizon);
+                .findByStatusAndScheduledArrivalGreaterThanAndScheduledArrivalLessThanEqual(
+                        FlightStatus.IN_FLIGHT,
+                        simulatedNow,
+                        horizon
+                );
 
         List<TravelStop> impactedStops = toComplete.isEmpty()
                 ? List.of()
@@ -301,22 +298,21 @@ public class SimulationEngineService {
 
         for (Flight flight : toComplete) {
             flight.setStatus(FlightStatus.COMPLETED);
-            flightRepository.save(flight);
 
             List<TravelStop> impacted = impactedByFlightId.getOrDefault(flight.getId(), List.of());
 
             for (TravelStop stop : impacted) {
                 Shipment shipment = stop.getShipment();
+                int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
+                flight.setCurrentLoad(Math.max(0, flight.getCurrentLoad() - luggage));
                 stop.setStopStatus(StopStatus.COMPLETED);
                 stop.setActualArrival(horizon);
-                travelStopRepository.save(stop);
 
                 Airport airport = stop.getAirport();
                 airport.setCurrentStorageLoad(Math.min(
                         airport.getMaxStorageCapacity(),
                         airport.getCurrentStorageLoad() + shipment.getLuggageCount()
                 ));
-                airportRepository.save(airport);
 
                 audit(shipment, ShipmentAuditType.ARRIVED,
                         "Arribo a " + airport.getIcaoCode() + " mediante " + flight.getFlightCode(),
@@ -328,40 +324,23 @@ public class SimulationEngineService {
                     shipment.setStatus(ShipmentStatus.DELIVERED);
                     shipment.setDeliveredAt(horizon);
                     shipment.setProgressPercentage(100.0);
-                    shipmentRepository.save(shipment);
 
                     // Issue 7.1: release destination storage — shipment handed to receiver,
                     // no longer occupying the airport's warehouse.
                     int destLoad = Math.max(0, airport.getCurrentStorageLoad() - shipment.getLuggageCount());
                     airport.setCurrentStorageLoad(destLoad);
-                    airportRepository.save(airport);
 
                     audit(shipment, ShipmentAuditType.DELIVERED,
                             "Envio entregado en destino", airport, flight.getFlightCode());
                 } else {
+                    shipment.setStatus(ShipmentStatus.PENDING);
                     double progress = allStops.isEmpty()
                             ? 0.0
                             : (allStops.stream().filter(s -> s.getStopStatus() == StopStatus.COMPLETED).count() * 100.0) / allStops.size();
                     shipment.setProgressPercentage(progress);
-                    shipmentRepository.save(shipment);
                 }
             }
         }
-    }
-
-    private void markOverdueShipments(LocalDateTime now) {
-        int marked = shipmentRepository.markActiveAsDelayedBefore(now);
-        if (marked <= 0) {
-            return;
-        }
-        shipmentRepository.findByStatus(ShipmentStatus.DELAYED).stream()
-                .filter(shipment -> shipment.getDeadline() != null && shipment.getDeadline().isBefore(now))
-                .limit(Math.max(10, marked))
-                .forEach(shipment -> operationalAlertService.ensureShipmentAlert(
-                        shipment,
-                        "OVERDUE_SHIPMENT",
-                        "El envío excedió su plazo operativo y quedó marcado como delayed"
-                ));
     }
 
     private void audit(Shipment shipment,
@@ -395,4 +374,20 @@ public class SimulationEngineService {
         LocalDateTime min = shipmentRepository.findMinRegistrationDate();
         return min == null ? fallbackNow : min;
     }
+
+    private LocalDateTime resolvePeriodEnd(SimulationConfig config) {
+        if (config == null || config.getScenario() != SimulationScenario.PERIOD_SIMULATION) {
+            return null;
+        }
+        LocalDateTime start = config.getEffectiveScenarioStartAt();
+        if (start == null) {
+            start = config.getScenarioStartAt();
+        }
+        if (start == null) {
+            return null;
+        }
+        int days = config.getSimulationDays() == null ? 5 : Math.max(1, config.getSimulationDays());
+        return start.plusDays(days);
+    }
+
 }

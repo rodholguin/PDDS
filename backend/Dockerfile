@@ -26,5 +26,7 @@ COPY --from=builder --chown=spring:spring /app/target/*.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", \
   "-XX:+UseContainerSupport", \
+  "-Xms512m", \
+  "-Xmx2048m", \
   "-XX:MaxRAMPercentage=75.0", \
   "-jar", "app.jar"]

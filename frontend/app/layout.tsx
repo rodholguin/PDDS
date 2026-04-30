@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import Sidebar from '@/components/Sidebar';
+import { SimulationProvider } from '@/lib/SimulationContext';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './globals.css';
 
@@ -18,11 +19,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="app-shell">
         <Sidebar />
 
-        <div className="content-shell">
-          <main className="content-main">
-            {children}
-          </main>
-        </div>
+        <SimulationProvider>
+          <div className="content-shell">
+            <main className="content-main">
+              {children}
+            </main>
+          </div>
+        </SimulationProvider>
       </body>
     </html>
   );

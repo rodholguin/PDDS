@@ -57,22 +57,22 @@ public class CollapseMonitorService {
         SimulationConfig config = getConfig();
         if (!Boolean.TRUE.equals(config.getIsRunning())) return;
 
-        double avgLoad = computeSystemLoad();
-        List<Airport> bottlenecks = getBottleneckAirports();
-        double hoursLeft = estimateTimeToCollapse();
+        List<Airport> airports = airportRepository.findAll();
+        double avgLoad = computeSystemLoad(airports);
+        List<Airport> bottlenecks = getBottleneckAirports(airports, config.getWarningThresholdPct());
+        double hoursLeft = estimateTimeToCollapse(airports);
         cachedSnapshot = new Snapshot(avgLoad, bottlenecks, hoursLeft, LocalDateTime.now());
 
-        log.info("[CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: {} | "
-               + "Tiempo estimado al colapso: {:.1f}h",
-               avgLoad, bottlenecks.size(), hoursLeft);
+        log.info("[CollapseMonitor] Carga promedio: {}% | Cuellos de botella: {} | Tiempo estimado al colapso: {}h",
+                formatDouble(avgLoad), bottlenecks.size(), formatHours(hoursLeft));
 
         if (!bottlenecks.isEmpty()) {
             bottlenecks.forEach(a -> log.warn(
-                "[CollapseMonitor] ALERTA — {} ({}) al {:.1f}% de capacidad",
-                a.getIcaoCode(), a.getCity(), a.getOccupancyPct()));
+                "[CollapseMonitor] ALERTA - {} ({}) al {}% de capacidad",
+                a.getIcaoCode(), a.getCity(), formatDouble(a.getOccupancyPct())));
         }
 
-        if (hoursLeft < 2.0) {
+        if (shouldFlagCollapseImminent(config, hoursLeft, avgLoad, bottlenecks)) {
             log.error("[CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas");
             // TODO: Publicar evento de dominio CollapseImminentEvent para que
             //       RoutePlannerService active medidas de emergencia:
@@ -97,7 +97,10 @@ public class CollapseMonitorService {
      * @return porcentaje de ocupación global [0.0, 100.0]
      */
     public double computeSystemLoad() {
-        List<Airport> airports = airportRepository.findAll();
+        return computeSystemLoad(airportRepository.findAll());
+    }
+
+    private double computeSystemLoad(List<Airport> airports) {
         if (airports.isEmpty()) return 0.0;
 
         long totalLoad     = airports.stream().mapToLong(Airport::getCurrentStorageLoad).sum();
@@ -119,9 +122,11 @@ public class CollapseMonitorService {
      */
     public List<Airport> getBottleneckAirports() {
         SimulationConfig config = getConfig();
-        int warning = config.getWarningThresholdPct();
+        return getBottleneckAirports(airportRepository.findAll(), config.getWarningThresholdPct());
+    }
 
-        return airportRepository.findAll().stream()
+    private List<Airport> getBottleneckAirports(List<Airport> airports, int warning) {
+        return airports.stream()
                 .filter(a -> a.getOccupancyPct() >= warning)
                 .sorted((a, b) -> Double.compare(b.getOccupancyPct(), a.getOccupancyPct()))
                 .toList();
@@ -152,8 +157,13 @@ public class CollapseMonitorService {
      *         está estable (sin envíos activos o capacidad sobrada)
      */
     public Double estimateTimeToCollapse() {
-        List<Airport> airports = airportRepository.findAll();
+        return estimateTimeToCollapse(airportRepository.findAll());
+    }
+
+    private Double estimateTimeToCollapse(List<Airport> airports) {
         if (airports.isEmpty()) return Double.MAX_VALUE;
+
+        SimulationConfig config = getConfig();
 
         // Capacidad libre total (maletas)
         long freeCapacity = airports.stream()
@@ -162,14 +172,32 @@ public class CollapseMonitorService {
 
         if (freeCapacity <= 0) return 0.0; // ya colapsado
 
-        // Evita cargar todos los envíos activos en memoria para esta métrica.
-        long pendingLuggage = shipmentRepository.sumActiveLuggage();
+        long storedLuggage = airports.stream()
+                .mapToLong(a -> Math.max(0, a.getCurrentStorageLoad()))
+                .sum();
+        long inRouteShipments = shipmentRepository.countInRoute();
 
-        if (pendingLuggage == 0) return Double.MAX_VALUE;
+        // Si no hay presión real en nodos ni muchos envíos activos en vuelo, el sistema está estable.
+        if (storedLuggage == 0 && inRouteShipments == 0) {
+            return Double.MAX_VALUE;
+        }
 
-        // Tasa de llegada: asumimos que todas las maletas pendientes
-        // llegarán distribuidas en las próximas 24 horas
-        double arrivalsPerHour = pendingLuggage / 24.0;
+        long simulationDays = config == null || config.getSimulationDays() == null ? 5 : Math.max(1, config.getSimulationDays());
+        double horizonHours = Math.max(6.0, simulationDays * 24.0);
+
+        // Aproximamos presión futura usando principalmente el stock ya almacenado en nodos;
+        // los envíos actualmente en ruta aportan una fracción menor porque aún no presionan almacenes.
+        double effectiveQueuedLuggage = storedLuggage + (inRouteShipments * 0.35);
+
+        if (effectiveQueuedLuggage <= 0.0) {
+            return Double.MAX_VALUE;
+        }
+
+        double arrivalsPerHour = effectiveQueuedLuggage / horizonHours;
+
+        if (arrivalsPerHour <= 0.0) {
+            return Double.MAX_VALUE;
+        }
 
         double hoursToCollapse = freeCapacity / arrivalsPerHour;
 
@@ -194,7 +222,8 @@ public class CollapseMonitorService {
         double avgLoad = snapshot.avgLoadPct();
         List<Airport> necks = snapshot.bottlenecks();
         double hoursLeft = snapshot.hoursToCollapse();
-        boolean collapsed    = avgLoad >= 100.0 || necks.size() == airportRepository.count();
+        long airportCount = airportRepository.count();
+        boolean collapsed = avgLoad >= 100.0 || (airportCount > 0 && necks.size() == airportCount);
 
         return java.util.Map.of(
             "avgSystemLoadPct",   avgLoad,
@@ -209,10 +238,42 @@ public class CollapseMonitorService {
     public Snapshot snapshot() {
         Snapshot current = cachedSnapshot;
         if (Duration.between(current.computedAt(), LocalDateTime.now()).getSeconds() > 20) {
-            current = new Snapshot(computeSystemLoad(), getBottleneckAirports(), estimateTimeToCollapse(), LocalDateTime.now());
+            List<Airport> airports = airportRepository.findAll();
+            SimulationConfig config = getConfig();
+            current = new Snapshot(
+                    computeSystemLoad(airports),
+                    getBottleneckAirports(airports, config.getWarningThresholdPct()),
+                    estimateTimeToCollapse(airports),
+                    LocalDateTime.now()
+            );
             cachedSnapshot = current;
         }
         return current;
+    }
+
+    private boolean shouldFlagCollapseImminent(SimulationConfig config,
+                                               double hoursLeft,
+                                               double avgLoad,
+                                               List<Airport> bottlenecks) {
+        if (hoursLeft >= 2.0) {
+            return false;
+        }
+        if (avgLoad < 70.0 && bottlenecks.isEmpty()) {
+            return false;
+        }
+        LocalDateTime startedAt = config == null ? null : config.getStartedAt();
+        return startedAt == null || Duration.between(startedAt, LocalDateTime.now()).toMinutes() >= 5;
+    }
+
+    private String formatDouble(double value) {
+        return String.format(java.util.Locale.US, "%.1f", value);
+    }
+
+    private String formatHours(double hours) {
+        if (hours == Double.MAX_VALUE) {
+            return "stable";
+        }
+        return formatDouble(hours);
     }
 
     // ── Helper ───────────────────────────────────────────────────────────────

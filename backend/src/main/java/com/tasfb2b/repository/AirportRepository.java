@@ -27,4 +27,11 @@ public interface AirportRepository extends JpaRepository<Airport, Long> {
     @Transactional
     @Query(value = "UPDATE airport SET current_storage_load = 0 WHERE current_storage_load <> 0", nativeQuery = true)
     int resetStorageLoadFast();
+
+    @Query("""
+            SELECT COALESCE(AVG((a.currentStorageLoad * 100.0) / NULLIF(a.maxStorageCapacity, 0)), 0.0)
+            FROM Airport a
+            WHERE a.maxStorageCapacity > 0
+            """)
+    double averageOccupancyPct();
 }

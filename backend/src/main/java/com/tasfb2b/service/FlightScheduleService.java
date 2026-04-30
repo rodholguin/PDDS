@@ -133,14 +133,22 @@ public class FlightScheduleService {
     public void ensureFlightsForSimulationWindow(LocalDateTime anchor) {
         if (anchor == null) return;
         SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
-        int days = config == null || config.getSimulationDays() == null ? 3 : Math.max(1, Math.min(3, config.getSimulationDays()));
+        int days = config == null || config.getSimulationDays() == null ? 3 : Math.max(1, config.getSimulationDays());
         LocalDateTime from = anchor.toLocalDate().atStartOfDay();
-        LocalDateTime to = anchor.toLocalDate().plusDays(days).atStartOfDay();
+        LocalDateTime to = anchor.toLocalDate().plusDays(days + 3L).atStartOfDay();
         String key = from + "|" + to;
         if (ensuredWindows.putIfAbsent(key, LocalDateTime.now()) != null) {
             return;
         }
         ensureFlightsForWindow(from, to);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Flight> schedulableFlightsWithinWindow(LocalDateTime fromInclusive, LocalDateTime toExclusive) {
+        if (fromInclusive == null || toExclusive == null || !fromInclusive.isBefore(toExclusive)) {
+            return List.of();
+        }
+        return flightRepository.findSchedulableFlightsBetween(fromInclusive, toExclusive);
     }
 
     @Transactional(readOnly = true)
