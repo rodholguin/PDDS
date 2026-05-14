@@ -33,7 +33,6 @@ public class OperationalBootstrapService {
     private final FutureDemandProjectionService futureDemandProjectionService;
 
     @EventListener(ApplicationReadyEvent.class)
-    @Transactional
     public void bootstrap() {
         ensureSimulationConfig();
         ensureRealDatasetLoaded();
