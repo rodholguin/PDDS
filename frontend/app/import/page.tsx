@@ -177,9 +177,7 @@ export default function ImportPage() {
   async function handleProjectFutureDemand() {
     setProjectingFuture(true);
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const inThirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      await importApi.projectFutureDemand({ projectionStart: today, projectionEnd: inThirtyDays });
+      await importApi.projectFutureDemand({});
       await loadSummary();
       await loadLogs();
     } finally {
