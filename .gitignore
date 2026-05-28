@@ -1,0 +1,24 @@
+# IntelliJ
+.idea/
+*.iml
+
+# Env locales
+.env
+.env.*
+!.env.example
+
+# Claude Code local/personal settings
+.claude/settings.local.json
+
+# Maven / Java
+backend/target/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Envios
+datos/envios/

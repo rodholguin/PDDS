@@ -141,7 +141,11 @@ public class SimulationEngineService {
         nextEligibleTickAtMs.set(0L);
     }
 
-    private void executeTick(SimulationConfig config) {
+    public void executeHeadlessTick(SimulationConfig config) {
+        transactionTemplate.executeWithoutResult(status -> executeTick(config));
+    }
+
+    void executeTick(SimulationConfig config) {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime simulatedNow = runtimeService.currentSimulationTime().orElseGet(() -> resolveInitialSimulationTime(now));
         long secondsAdvance = runtimeService.simulationSecondsPerTick(config);

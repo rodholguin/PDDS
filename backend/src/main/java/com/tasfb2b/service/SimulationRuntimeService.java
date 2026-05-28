@@ -50,6 +50,7 @@ public class SimulationRuntimeService {
     private static final String KEY_SIM_TIME = "simTime";
     private static final String KEY_RESETTING = "resetting";
     private static final String KEY_BOOTSTRAPPING = "bootstrapping";
+    private static final String KEY_WARMING_UP = "warmingUp";
     private static final String KEY_BOOTSTRAP_TOTAL = "bootstrapTotal";
     private static final String KEY_BOOTSTRAP_PLANNED = "bootstrapPlanned";
     private static final String KEY_BOOTSTRAP_STARTED_AT = "bootstrapStartedAt";
@@ -226,7 +227,27 @@ public class SimulationRuntimeService {
     }
 
     public boolean isBootstrapping() {
-        return Boolean.TRUE.equals(runtime.getOrDefault(KEY_BOOTSTRAPPING, Boolean.FALSE));
+        return Boolean.TRUE.equals(runtime.getOrDefault(KEY_BOOTSTRAPPING, Boolean.FALSE))
+                || Boolean.TRUE.equals(runtime.getOrDefault(KEY_WARMING_UP, Boolean.FALSE));
+    }
+
+    public boolean isWarmingUp() {
+        return Boolean.TRUE.equals(runtime.getOrDefault(KEY_WARMING_UP, Boolean.FALSE));
+    }
+
+    public void markWarmupStarted(long totalShipments, String message) {
+        runtime.put(KEY_WARMING_UP, Boolean.TRUE);
+        runtime.put(KEY_BOOTSTRAP_TOTAL, Math.max(0L, totalShipments));
+        runtime.put(KEY_BOOTSTRAP_PLANNED, 0L);
+        runtime.put(KEY_BOOTSTRAP_STARTED_AT, LocalDateTime.now());
+        runtime.remove(KEY_BOOTSTRAP_FINISHED_AT);
+        runtime.put(KEY_BOOTSTRAP_MESSAGE, message == null ? "Preparando simulacion" : message);
+    }
+
+    public void markWarmupCompleted(String message) {
+        runtime.put(KEY_WARMING_UP, Boolean.FALSE);
+        runtime.put(KEY_BOOTSTRAP_FINISHED_AT, LocalDateTime.now());
+        runtime.put(KEY_BOOTSTRAP_MESSAGE, message == null ? "Warmup completado" : message);
     }
 
     public void markBootstrapStarted(long totalShipments, String message) {
@@ -551,6 +572,7 @@ public class SimulationRuntimeService {
 
     private void clearBootstrapState() {
         runtime.put(KEY_BOOTSTRAPPING, Boolean.FALSE);
+        runtime.put(KEY_WARMING_UP, Boolean.FALSE);
         runtime.remove(KEY_BOOTSTRAP_TOTAL);
         runtime.remove(KEY_BOOTSTRAP_PLANNED);
         runtime.remove(KEY_BOOTSTRAP_STARTED_AT);

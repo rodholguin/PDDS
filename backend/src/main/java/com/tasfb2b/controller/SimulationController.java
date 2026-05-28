@@ -18,6 +18,7 @@ import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.PeriodSimulationBootstrapService;
+import com.tasfb2b.service.WarmupService;
 import com.tasfb2b.service.SimulationAsyncOperationsService;
 import com.tasfb2b.service.SimulationEngineService;
 import com.tasfb2b.service.SimulationExportService;
@@ -67,6 +68,7 @@ public class SimulationController {
     private final FlightScheduleService flightScheduleService;
     private final FutureDemandProjectionService futureDemandProjectionService;
     private final PeriodSimulationBootstrapService periodSimulationBootstrapService;
+    private final WarmupService warmupService;
 
     public SimulationController(
             SimulationConfigRepository configRepository,
@@ -82,7 +84,8 @@ public class SimulationController {
             AlgorithmProfileService algorithmProfileService,
             FlightScheduleService flightScheduleService,
             FutureDemandProjectionService futureDemandProjectionService,
-            PeriodSimulationBootstrapService periodSimulationBootstrapService
+            PeriodSimulationBootstrapService periodSimulationBootstrapService,
+            WarmupService warmupService
     ) {
         this.configRepository = configRepository;
         this.routePlannerService = routePlannerService;
@@ -98,6 +101,7 @@ public class SimulationController {
         this.flightScheduleService = flightScheduleService;
         this.futureDemandProjectionService = futureDemandProjectionService;
         this.periodSimulationBootstrapService = periodSimulationBootstrapService;
+        this.warmupService = warmupService;
     }
 
     @GetMapping("/state")
@@ -215,6 +219,12 @@ public class SimulationController {
         config.setDateAdjustmentReason(adjustmentReason);
         if (desiredStart != null) {
             runtimeService.setSimulationTime(desiredStart);
+            if (warmupService.requiresWarmup(config, desiredStart)) {
+                var warmup = warmupService.runWarmup(config, desiredStart);
+                log.info("Warmup PERIOD_SIMULATION completado: total={} planned={} ticks={} from={} to={}",
+                        warmup.totalShipments(), warmup.plannedShipments(), warmup.ticksExecuted(),
+                        warmup.warmupFrom(), warmup.warmupTo());
+            }
             flightScheduleService.ensureFlightsForSimulationWindow(desiredStart);
             if (periodSimulationBootstrapService.requiresBootstrap(config)) {
                 var bootstrap = periodSimulationBootstrapService.seedPeriod(config, desiredStart);

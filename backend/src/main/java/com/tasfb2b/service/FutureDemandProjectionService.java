@@ -79,7 +79,8 @@ public class FutureDemandProjectionService {
         }
 
         if (projectionStart == null) {
-            projectionStart = historicalTo.plusDays(1);
+            LocalDate candidate = historicalTo.plusDays(1);
+            projectionStart = candidate.isBefore(LocalDate.now()) ? LocalDate.now() : candidate;
         }
         if (projectionEnd == null) {
             projectionEnd = DEFAULT_PROJECTION_END;
