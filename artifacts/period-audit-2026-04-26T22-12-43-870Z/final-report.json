@@ -1,0 +1,21 @@
+{
+  "startedAt": "2026-04-26T22:12:49.438774",
+  "finishedAt": "2026-04-26T23:18:35.641Z",
+  "samples": 125,
+  "issuesFound": 1,
+  "distinctIssues": [
+    "Envío PGAP-2029-06-18-374 tiene stopOrder no creciente en stop=0",
+    "Envío PGAP-2029-06-19-375 tiene stopOrder no creciente en stop=0",
+    "KPIs finales inconsistentes: active=1949320 vs pending+inRoute=200"
+  ],
+  "successSignals": [
+    "Progreso temporal sostenido: ratio=0.91 sobre esperado mínimo=0.85",
+    "Se observaron vuelos activos reales en backend/UI durante la corrida",
+    "Se observaron envíos operativos reales en el mapa durante la corrida",
+    "Los KPIs operativos reportaron vuelos activos durante la corrida",
+    "La red de rutas estuvo disponible en todas las muestras",
+    "La simulación terminó limpia por backend sin quedar corriendo ni pausada",
+    "Se validaron detalles completos de 12 envíos representativos del cierre"
+  ],
+  "artifactsDir": "C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\artifacts\\period-audit-2026-04-26T22-12-43-870Z"
+}

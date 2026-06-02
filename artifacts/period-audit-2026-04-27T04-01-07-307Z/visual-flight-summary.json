@@ -1,0 +1,19 @@
+{
+  "startedAt": "2026-04-27T04:01:09.026Z",
+  "references": [
+    {
+      "flightId": 21866646,
+      "flightCode": "FP0450R2029-06-16"
+    }
+  ],
+  "flights": [
+    {
+      "flightId": 21866646,
+      "flightCode": "FP0450R2029-06-16",
+      "maxJumpPx": 25.51,
+      "maxDivergencePx": 10.39,
+      "lastUiProgress": 0.981
+    }
+  ],
+  "anomalyCount": 1
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "timestamp": "2026-04-26T16:20:58.650Z",
+    "issues": [
+      "Progreso temporal insuficiente: ratio=-0.25 por debajo del mínimo=0.85",
+      "No se observaron vuelos activos reales durante la corrida",
+      "No se observaron envíos operativos reales durante la corrida",
+      "Los KPIs operativos no reportaron vuelos activos durante la corrida"
+    ]
+  }
+]

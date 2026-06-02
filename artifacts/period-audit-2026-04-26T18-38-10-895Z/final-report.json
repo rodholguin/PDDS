@@ -1,0 +1,18 @@
+{
+  "startedAt": "2026-04-26T18:38:17.017678",
+  "finishedAt": "2026-04-26T18:39:12.821Z",
+  "samples": 4,
+  "issuesFound": 3,
+  "distinctIssues": [
+    "Desfase próximos vuelos UI=0 backend=2",
+    "system.inFlightFlights=21 no coincide con map-live-flights=20",
+    "Progreso temporal insuficiente: ratio=0.78 por debajo del mínimo=0.85"
+  ],
+  "successSignals": [
+    "Se observaron vuelos activos reales en backend/UI durante la corrida",
+    "Se observaron envíos operativos reales en el mapa durante la corrida",
+    "Los KPIs operativos reportaron vuelos activos durante la corrida",
+    "La red de rutas estuvo disponible en todas las muestras"
+  ],
+  "artifactsDir": "C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\artifacts\\period-audit-2026-04-26T18-38-10-895Z"
+}

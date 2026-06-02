@@ -1,0 +1,9 @@
+[
+  "Progreso temporal sostenido: ratio=0.91 sobre esperado mínimo=0.85",
+  "Se observaron vuelos activos reales en backend/UI durante la corrida",
+  "Se observaron envíos operativos reales en el mapa durante la corrida",
+  "Los KPIs operativos reportaron vuelos activos durante la corrida",
+  "La red de rutas estuvo disponible en todas las muestras",
+  "La simulación terminó limpia por backend sin quedar corriendo ni pausada",
+  "Se validaron detalles completos de 12 envíos representativos del cierre"
+]

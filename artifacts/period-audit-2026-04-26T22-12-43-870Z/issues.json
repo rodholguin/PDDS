@@ -1,0 +1,10 @@
+[
+  {
+    "timestamp": "2026-04-26T23:18:35.638Z",
+    "issues": [
+      "Envío PGAP-2029-06-18-374 tiene stopOrder no creciente en stop=0",
+      "Envío PGAP-2029-06-19-375 tiene stopOrder no creciente en stop=0",
+      "KPIs finales inconsistentes: active=1949320 vs pending+inRoute=200"
+    ]
+  }
+]

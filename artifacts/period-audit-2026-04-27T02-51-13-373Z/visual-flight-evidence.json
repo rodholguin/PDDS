@@ -1,0 +1,140 @@
+[
+  {
+    "timestamp": "2026-04-27T03:00:24.801Z",
+    "simulatedNow": "2029-06-15T16:30:34",
+    "anomaly": "REFERENCE_SELECTION",
+    "severity": "info",
+    "references": [
+      {
+        "flightId": 21864893,
+        "flightCode": "FP1563R2029-06-15"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T03:00:24.801Z",
+    "simulatedNow": "2029-06-15T16:30:34",
+    "flightId": 21864893,
+    "flightCode": "FP1563R2029-06-15",
+    "uiPosition": {
+      "latitude": null,
+      "longitude": null,
+      "x": null,
+      "y": null
+    },
+    "backendPosition": {
+      "latitude": -29.238521,
+      "longitude": -45.160691,
+      "x": null,
+      "y": null
+    },
+    "anomaly": "UNJUSTIFIED_DISAPPEARANCE",
+    "severity": "high",
+    "progress": 0.08849557522123876
+  },
+  {
+    "timestamp": "2026-04-27T03:00:33.394Z",
+    "simulatedNow": "2029-06-15T16:47:03",
+    "flightId": 21864893,
+    "flightCode": "FP1563R2029-06-15",
+    "uiPosition": {
+      "latitude": null,
+      "longitude": null,
+      "x": null,
+      "y": null
+    },
+    "backendPosition": {
+      "latitude": -19.096953,
+      "longitude": -26.283837,
+      "x": null,
+      "y": null
+    },
+    "anomaly": "UNJUSTIFIED_DISAPPEARANCE",
+    "severity": "high",
+    "progress": 0.23893805309734448
+  },
+  {
+    "timestamp": "2026-04-27T03:00:41.883Z",
+    "simulatedNow": "2029-06-15T17:03:25",
+    "flightId": 21864893,
+    "flightCode": "FP1563R2029-06-15",
+    "uiPosition": {
+      "latitude": null,
+      "longitude": null,
+      "x": null,
+      "y": null
+    },
+    "backendPosition": {
+      "latitude": -8.942943,
+      "longitude": -8.517387,
+      "x": null,
+      "y": null
+    },
+    "anomaly": "UNJUSTIFIED_DISAPPEARANCE",
+    "severity": "high",
+    "progress": 0.38053097345132686
+  },
+  {
+    "timestamp": "2026-04-27T03:00:50.284Z",
+    "simulatedNow": "2029-06-15T17:19:28",
+    "flightId": 21864893,
+    "flightCode": "FP1563R2029-06-15",
+    "uiPosition": {
+      "latitude": null,
+      "longitude": null,
+      "x": null,
+      "y": null
+    },
+    "backendPosition": {
+      "latitude": 1.501562,
+      "longitude": 9.249063,
+      "x": null,
+      "y": null
+    },
+    "anomaly": "UNJUSTIFIED_DISAPPEARANCE",
+    "severity": "high",
+    "progress": 0.5221238938053093
+  },
+  {
+    "timestamp": "2026-04-27T03:00:59.492Z",
+    "simulatedNow": "2029-06-15T17:37:06",
+    "flightId": 21864893,
+    "flightCode": "FP1563R2029-06-15",
+    "uiPosition": {
+      "latitude": null,
+      "longitude": null,
+      "x": null,
+      "y": null
+    },
+    "backendPosition": {
+      "latitude": 13.175419,
+      "longitude": 29.23632,
+      "x": null,
+      "y": null
+    },
+    "anomaly": "UNJUSTIFIED_DISAPPEARANCE",
+    "severity": "high",
+    "progress": 0.6814159292035401
+  },
+  {
+    "timestamp": "2026-04-27T03:01:07.905Z",
+    "simulatedNow": "2029-06-15T17:53:17",
+    "flightId": 21864893,
+    "flightCode": "FP1563R2029-06-15",
+    "uiPosition": {
+      "latitude": null,
+      "longitude": null,
+      "x": null,
+      "y": null
+    },
+    "backendPosition": {
+      "latitude": 23.120055,
+      "longitude": 47.00277,
+      "x": null,
+      "y": null
+    },
+    "anomaly": "UNJUSTIFIED_DISAPPEARANCE",
+    "severity": "high",
+    "progress": 0.8230088495575225
+  }
+]

@@ -60,6 +60,7 @@ function FlightsPageContent() {
   const [detail, setDetail] = useState<FlightDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
+  const [cancelInfo, setCancelInfo] = useState<string | null>(null);
   const userTouchedDateRef = useRef(false);
 
   // Default date = sim's current day until the user edits it explicitly.
@@ -172,7 +173,12 @@ function FlightsPageContent() {
     if (!detail) return;
     try {
       setCancelLoading(true);
-      await flightsApi.cancel(detail.flight.id);
+      setCancelInfo(null);
+      const res = await flightsApi.cancel(detail.flight.id);
+      setCancelInfo(
+        `Vuelo ${res.flightCode} cancelado · ${res.replanned}/${res.affectedShipments} equipajes replanificados` +
+        (res.failedToReplan ? ` · ${res.failedToReplan} sin nueva ruta` : ''),
+      );
       await load(page);
       if (selectedId) {
         setDetail(await flightsApi.getById(selectedId));
@@ -328,6 +334,9 @@ function FlightsPageContent() {
                   {cancelLoading ? 'Cancelando...' : 'Cancelar vuelo'}
                 </button>
               </div>
+              {cancelInfo ? (
+                <p style={{ margin: '8px 0 0', fontSize: 12, color: '#fca5a5' }}>{cancelInfo}</p>
+              ) : null}
 
               <div style={{ marginTop: 16 }}>
                 <p style={{ margin: 0, fontWeight: 600, color: '#c9d4f0', fontSize: 13 }}>Envíos asignados</p>

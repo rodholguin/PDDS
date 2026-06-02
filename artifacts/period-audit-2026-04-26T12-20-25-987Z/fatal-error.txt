@@ -1,0 +1,4 @@
+Error: No se pudo ajustar velocidad: {"ok":false,"status":400,"body":{"status":400,"timestamp":"2026-04-26T12:20:36.919483303","message":"Validación fallida: La velocidad maxima es 20x","error":"Bad Request"}}
+    at configureAndStart (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:259:24)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async main (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:291:17)

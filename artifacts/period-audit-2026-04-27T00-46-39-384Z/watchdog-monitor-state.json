@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-04-27T01:52:10.373Z",
+  "processAlive": false,
+  "stateOk": true,
+  "running": false,
+  "paused": false,
+  "simulatedNow": "2029-06-20T00:00:00",
+  "lastTickAt": "2026-04-27T01:51:30.323329182",
+  "lastTickAdvanced": false,
+  "simulatedNowAdvanced": false,
+  "samplesSize": 12042933,
+  "samplesGrowing": true,
+  "issuesSize": 156,
+  "issuesGrowing": true,
+  "issuesCount": 1,
+  "finalExists": true,
+  "watchdogExists": false,
+  "fatalExists": false,
+  "stateError": null
+}

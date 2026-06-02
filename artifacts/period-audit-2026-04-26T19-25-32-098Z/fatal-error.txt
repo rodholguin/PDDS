@@ -1,0 +1,4 @@
+Error: Backend no quedó inactivo tras stop: null
+    at waitForBackendIdle (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:99:9)
+    at async configureAndStart (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:359:3)
+    at async main (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:422:17)

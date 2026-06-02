@@ -1,0 +1,33 @@
+[
+  {
+    "timestamp": "2026-04-27T03:31:43.220Z",
+    "issues": [
+      "UI no muestra simulación corriendo mientras backend indica running=true"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T03:31:51.512Z",
+    "issues": [
+      "UI no muestra simulación corriendo mientras backend indica running=true"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T03:31:59.769Z",
+    "issues": [
+      "UI no muestra simulación corriendo mientras backend indica running=true"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T03:32:07.860Z",
+    "issues": [
+      "UI no muestra simulación corriendo mientras backend indica running=true"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T03:35:41.004Z",
+    "issues": [
+      "Desfase vuelos visibles UI=89 backend=82",
+      "Desfase marcadores de aviones UI=89 backend=82"
+    ]
+  }
+]

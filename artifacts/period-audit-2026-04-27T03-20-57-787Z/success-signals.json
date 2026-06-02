@@ -1,0 +1,9 @@
+[
+  "Progreso temporal sostenido: ratio=1.04 sobre esperado mínimo=0.85",
+  "Se observaron vuelos activos reales en backend/UI durante la corrida",
+  "Se observó inventario operativo de envíos planificables, pero la corrida terminó antes de evidenciar movimiento en el mapa",
+  "Los KPIs operativos reportaron vuelos activos durante la corrida",
+  "La red de rutas estuvo disponible en todas las muestras",
+  "Se monitorearon 1 vuelos de referencia para consistencia visual",
+  "Movimiento visual de aviones sin snap-backs, teleports o freezes relevantes en la muestra monitoreada"
+]

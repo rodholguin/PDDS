@@ -1,0 +1,20 @@
+{
+  "runtime": [
+    "Simulación detenida · Simulación período",
+    "Demanda futura: Lista",
+    "Inicio efectivo: 16/6/2029",
+    "Modo de tiempo: 1 min simulados = 0.5 s real"
+  ],
+  "cards": {
+    "visibleFlights": "0",
+    "nextFlights": "0",
+    "visibleShipments": "0",
+    "sla": "100.0%",
+    "criticalNodes": "0",
+    "alerts": null,
+    "collapseRisk": null,
+    "clock": "16/06/2029, 00:00:00"
+  },
+  "flightMarkerButtons": 0,
+  "body": "R\n\nTasf.B2B\n\nPRINCIPAL\n\nInicio\nEnvios\nImportar\n\nOPERACIONES\n\nVuelos\nReportes\nER\n\nEsteban Ramirez\n\nOperador Logistico\n\nCentro de simulación\n\nConfigura escenarios, ejecuta y monitorea la operación en tiempo real\n\nIniciar\nReanudar\nPausar\nDetener\n1x\n5x\n10x\n20x\n◀\n\nEscenario y parámetros\n\nParámetros de simulación, sin algoritmos.\n\nEscenario\nOperación día a día\nSimulación período\nPrueba de colapso\nDuración (días)\n3 días\n5 días\n7 días\nFecha del escenario\nUmbral normal %\nUmbral alerta %\nGuardar configuración\n\nEstado runtime\n\nSimulación detenida · Simulación período\n\nDemanda futura: Lista\n\nInicio efectivo: 16/6/2029\n\nModo de tiempo: 1 min simulados = 0.5 s real\n\nMapa\nSatelital\nMapLibre\n\nVuelos visibles\n\n0\n\nPróximos vuelos\n\n0\n\nEnvíos operativos\n\n0\n\nSLA actual\n\n100.0%\n\nNodos críticos\n\n0\n\nEnvíos en riesgo\n\n0\n\nReloj simulado\n\n16/06/2029, 00:00:00\n\n1 min simulados = 0.5 s real\n\nAlertas activas\n\nSin alertas operativas pendientes."
+}

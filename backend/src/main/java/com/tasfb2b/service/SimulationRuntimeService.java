@@ -117,6 +117,23 @@ public class SimulationRuntimeService {
     public SimulationStateDto getState() {
         SimulationConfig config = getConfig();
         LocalDateTime simulatedNow = projectedSimulationTime(config);
+        // CLAMP del reloj de DISPLAY a la frontera de planificacion (escenarios plan-ahead). El reloj REAL
+        // nunca rebasa plannedThrough (el guard del tick lo impide), pero la extrapolacion para UI fluida SI
+        // se disparaba meses adelante a alta velocidad → la vista de vuelos (GET /api/flights usa este
+        // simulatedNow) consultaba un dia AUN NO MATERIALIZADO y devolvia vacio ("desaparecian todos los
+        // vuelos al cambiar de dia"). Solo afecta el valor MOSTRADO; no toca el reloj del motor/planificador.
+        if (config.getScenario() == com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION
+                || config.getScenario() == com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST) {
+            LocalDateTime plannedThrough = periodPlannedThrough().orElse(null);
+            if (plannedThrough != null && simulatedNow != null && simulatedNow.isAfter(plannedThrough)) {
+                simulatedNow = plannedThrough;
+            }
+        }
+        LocalDateTime collapseAt = config.getCollapseDetectedAtSim();
+        LocalDateTime collapseStart = effectiveScenarioStart(config);
+        Long collapseSurvivalSeconds = (collapseAt != null && collapseStart != null)
+                ? Math.max(0L, java.time.Duration.between(collapseStart, collapseAt).getSeconds())
+                : null;
         return new SimulationStateDto(
                 config.getId(),
                 config.getScenario(),
@@ -130,6 +147,12 @@ public class SimulationRuntimeService {
                 valueOr(config.getInterNodeCapacity(), 800),
                 valueOr(config.getNormalThresholdPct(), 70),
                 valueOr(config.getWarningThresholdPct(), 90),
+                valueOr(config.getSlaWarnPct(), 90),
+                valueOr(config.getSlaCritPct(), 75),
+                valueOr(config.getRiskShipmentsWarnPct(), 10),
+                valueOr(config.getRiskShipmentsCritPct(), 25),
+                valueOr(config.getCriticalNodesWarnPct(), 10),
+                valueOr(config.getCriticalNodesCritPct(), 25),
                 config.getScenarioStartAt(),
                 config.getRequestedScenarioStartAt(),
                 effectiveScenarioStart(config),
@@ -175,19 +198,19 @@ public class SimulationRuntimeService {
                 config.getStartedAt(),
                 simulatedNow,
                 lastTickAt().orElse(config.getRuntimeLastTickAt()),
-                LocalDateTime.now()
+                LocalDateTime.now(),
+                collapseAt,
+                config.getCollapseShipmentCode(),
+                collapseSurvivalSeconds
         );
     }
 
     public void markStarted() {
         runtime.put(KEY_PAUSED, Boolean.FALSE);
         runtime.putIfAbsent(KEY_SPEED, defaultSpeed.get());
-        // Always re-anchor to the configured scenario start when present.
+        // Re-anclar al inicio de escenario configurado; si no, al primer envío importado.
         SimulationConfig config = getConfig();
         LocalDateTime initial = config.getScenarioStartAt();
-        if (initial == null && config.getProjectedFrom() != null) {
-            initial = config.getProjectedFrom().atStartOfDay();
-        }
         if (initial == null) {
             initial = shipmentRepository.findMinRegistrationDate();
         }
@@ -447,19 +470,11 @@ public class SimulationRuntimeService {
         try {
             resetRuntimeState();
 
-            var flights = flightRepository.findAll();
-            for (Flight flight : flights) {
-                flight.setStatus(FlightStatus.SCHEDULED);
-                flight.setCurrentLoad(0);
-                flight.setReservedLoad(0);
-            }
-            flightRepository.saveAll(flights);
-
-            var airports = airportRepository.findAll();
-            for (Airport airport : airports) {
-                airport.setCurrentStorageLoad(0);
-            }
-            airportRepository.saveAll(airports);
+            // Reset por BULK QUERY (sin cargar entidades). Tras una corrida puede haber MILLONES de clones
+            // de vuelos materializados; el viejo findAll()+saveAll los cargaba TODOS al heap y lo reventaba
+            // (OutOfMemoryError). Reutilizamos los resets rapidos nativos (los mismos de resetOperationalData).
+            flightRepository.resetOperationalStateFast();
+            airportRepository.resetStorageLoadFast();
 
             clearOperationalDataWithRetry();
         } finally {
@@ -661,7 +676,7 @@ public class SimulationRuntimeService {
     }
 
     public void setSpeed(int speed) {
-        runtime.put(KEY_SPEED, Math.max(1, Math.min(20, speed)));
+        runtime.put(KEY_SPEED, Math.max(1, Math.min(5000, speed)));
         runtime.put(KEY_LAST_TICK, LocalDateTime.now());
     }
 
@@ -888,6 +903,34 @@ public class SimulationRuntimeService {
         if (config.getScenarioStartAt() != null) return config.getScenarioStartAt();
         if (config.getProjectedFrom() != null) return config.getProjectedFrom().atStartOfDay();
         return null;
+    }
+
+    /**
+     * Fin de la ventana del escenario (único punto de verdad para motor, planner y bootstrap).
+     * Todos los escenarios usan la MISMA planificación "por adelantado"; solo cambia el parámetro de fin:
+     * <ul>
+     *   <li>PERIOD_SIMULATION: inicio + simulationDays.</li>
+     *   <li>COLLAPSE_TEST: hasta el último envío importado (fin de datos); el colapso lo detiene antes.</li>
+     *   <li>DAY_TO_DAY: null (operación continua / live, sin fin fijo).</li>
+     * </ul>
+     */
+    public LocalDateTime resolveScenarioEnd(SimulationConfig config) {
+        if (config == null || config.getScenario() == null) {
+            return null;
+        }
+        return switch (config.getScenario()) {
+            case PERIOD_SIMULATION -> {
+                LocalDateTime start = effectiveScenarioStart(config);
+                if (start == null) yield null;
+                int days = config.getSimulationDays() == null ? 5 : Math.max(1, config.getSimulationDays());
+                yield start.plusDays(days);
+            }
+            case COLLAPSE_TEST -> {
+                LocalDateTime maxReg = shipmentRepository.findMaxRegistrationDate();
+                yield maxReg == null ? null : maxReg.plusDays(3);
+            }
+            default -> null;
+        };
     }
 
     private LocalDateTime projectedSimulationTime(SimulationConfig config) {

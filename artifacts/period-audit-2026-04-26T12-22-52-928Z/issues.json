@@ -1,0 +1,17 @@
+[
+  {
+    "timestamp": "2026-04-26T12:55:34.395Z",
+    "issues": [
+      "Fallos consecutivos de backend: 1",
+      "state: status=0 error=fetch failed",
+      "overview: status=0 error=fetch failed",
+      "system: status=0 error=fetch failed",
+      "alerts: status=0 error=fetch failed",
+      "mapFlights: status=0 error=fetch failed",
+      "mapShipments: status=0 error=fetch failed",
+      "collapseRisk: status=0 error=fetch failed",
+      "routes: status=0 error=fetch failed",
+      "nodeOpkc: status=0 error=fetch failed"
+    ]
+  }
+]

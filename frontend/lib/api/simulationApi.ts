@@ -19,6 +19,12 @@ export interface SimConfigUpdate {
   interNodeCapacity?: number;
   normalThresholdPct?: number;
   warningThresholdPct?: number;
+  slaWarnPct?: number;
+  slaCritPct?: number;
+  riskShipmentsWarnPct?: number;
+  riskShipmentsCritPct?: number;
+  criticalNodesWarnPct?: number;
+  criticalNodesCritPct?: number;
   scenarioStartDate?: string;
   primaryAlgorithm?: AlgorithmType;
   secondaryAlgorithm?: AlgorithmType;

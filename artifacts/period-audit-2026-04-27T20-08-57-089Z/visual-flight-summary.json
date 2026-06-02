@@ -1,0 +1,41 @@
+{
+  "startedAt": "2026-04-27T20:08:59.035Z",
+  "references": [
+    {
+      "flightId": 21868727,
+      "flightCode": "FP2531R2029-06-16"
+    },
+    {
+      "flightId": 21868166,
+      "flightCode": "FP1970R2029-06-16"
+    },
+    {
+      "flightId": 21867856,
+      "flightCode": "FP1660R2029-06-16"
+    }
+  ],
+  "flights": [
+    {
+      "flightId": 21868727,
+      "flightCode": "FP2531R2029-06-16",
+      "maxJumpPx": 29.32,
+      "maxDivergencePx": 0.46,
+      "lastUiProgress": 0.9189
+    },
+    {
+      "flightId": 21868166,
+      "flightCode": "FP1970R2029-06-16",
+      "maxJumpPx": 0,
+      "maxDivergencePx": 0.29,
+      "lastUiProgress": 0.8777
+    },
+    {
+      "flightId": 21867856,
+      "flightCode": "FP1660R2029-06-16",
+      "maxJumpPx": 43.67,
+      "maxDivergencePx": 0.34,
+      "lastUiProgress": 0.6867
+    }
+  ],
+  "anomalyCount": 1
+}

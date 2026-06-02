@@ -144,4 +144,54 @@ public class SimulationConfig {
 
     @Column(name = "runtime_last_tick_at")
     private LocalDateTime runtimeLastTickAt;
+
+    // ── Colapso (escenario COLLAPSE_TEST) ────────────────────────────────────
+    // El colapso es el instante (reloj simulado) en que el PRIMER envío no llega
+    // a tiempo. Se registra una sola vez por corrida y detiene la simulación.
+
+    /** Momento simulado del colapso = deadline del primer envío que incumple. */
+    @Column(name = "collapse_detected_at_sim")
+    private LocalDateTime collapseDetectedAtSim;
+
+    /** Id del primer envío que no llegó a tiempo. */
+    @Column(name = "collapse_shipment_id")
+    private Long collapseShipmentId;
+
+    /** Código del primer envío que no llegó a tiempo. */
+    @Column(name = "collapse_shipment_code", length = 30)
+    private String collapseShipmentCode;
+
+    // ── Umbrales del semáforo de KPIs de riesgo ──────────────────────────────
+    // Definidos en el front y persistidos aquí. Los KPIs de volumen (vuelos, envíos
+    // en ruta) son informativos; el semáforo solo aplica a estos KPIs de riesgo.
+
+    /** SLA (%): verde si cumplimiento ≥ este valor. */
+    @Column(name = "sla_warn_pct")
+    @Builder.Default
+    private Integer slaWarnPct = 90;
+
+    /** SLA (%): ámbar si cumplimiento ≥ este valor; rojo por debajo. */
+    @Column(name = "sla_crit_pct")
+    @Builder.Default
+    private Integer slaCritPct = 75;
+
+    /** Envíos en riesgo como % de los envíos activos: verde si ≤ este valor. */
+    @Column(name = "risk_shipments_warn_pct")
+    @Builder.Default
+    private Integer riskShipmentsWarnPct = 10;
+
+    /** Envíos en riesgo como % de los activos: ámbar si ≤ este valor; rojo por encima. */
+    @Column(name = "risk_shipments_crit_pct")
+    @Builder.Default
+    private Integer riskShipmentsCritPct = 25;
+
+    /** Nodos críticos como % del total de aeropuertos: verde si ≤ este valor. */
+    @Column(name = "critical_nodes_warn_pct")
+    @Builder.Default
+    private Integer criticalNodesWarnPct = 10;
+
+    /** Nodos críticos como % del total: ámbar si ≤ este valor; rojo por encima. */
+    @Column(name = "critical_nodes_crit_pct")
+    @Builder.Default
+    private Integer criticalNodesCritPct = 25;
 }

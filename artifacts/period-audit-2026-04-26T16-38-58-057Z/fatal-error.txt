@@ -1,0 +1,2 @@
+TypeError: Cannot read properties of undefined (reading 'body')
+    at main (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:445:44)

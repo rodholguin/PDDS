@@ -189,11 +189,11 @@ public class DashboardController {
         LocalDateTime yesterdayStart = todayStart.minusDays(1);
         LocalDateTime visibleFrom = activeVisibilityStart(config, now);
 
-        long activeFlights = isPeriodSimulation(config)
+        long activeFlights = isPlanAheadScenario(config)
                 ? flightRepository.countActiveFlightsSince(now, visibleFrom)
                 : flightRepository.countLoadedActiveFlightsAtWithinDay(now, todayStart, tomorrow);
         long nextScheduledFlights = Math.min(25L, flightRepository.countLoadedScheduledFlightsBetween(now, tomorrow));
-        long inRoute = isPeriodSimulation(config)
+        long inRoute = isPlanAheadScenario(config)
                 ? shipmentRepository.countInRouteSince(visibleFrom)
                 : shipmentRepository.countVisibleForMapWithinDay(todayStart, tomorrow);
         long totalToday = shipmentRepository.countByRegistrationDateBetween(todayStart, tomorrow);
@@ -303,7 +303,7 @@ public class DashboardController {
         LocalDateTime now = effectiveNow();
         LocalDateTime visibleFrom = activeVisibilityStart(config, now);
 
-        List<Shipment> inRoute = isPeriodSimulation(config)
+        List<Shipment> inRoute = isPlanAheadScenario(config)
                 ? shipmentRepository.findInRouteSince(visibleFrom)
                 : shipmentRepository.findInRouteWithinDay(operationalDayStart(now), operationalDayStart(now).plusDays(1));
         if (limit == null || limit <= 0) {
@@ -365,7 +365,7 @@ public class DashboardController {
         SimulationConfig config = currentConfig();
         LocalDateTime now = effectiveNow();
         LocalDateTime visibleFrom = activeVisibilityStart(config, now);
-        List<Flight> active = (isPeriodSimulation(config)
+        List<Flight> active = (isPlanAheadScenario(config)
                 ? flightRepository.findActiveFlightsSince(now, visibleFrom)
                 : flightRepository.findActiveFlightsAtWithinDay(now, operationalDayStart(now), operationalDayStart(now).plusDays(1))).stream()
                 .filter(flight -> flight.getCurrentLoad() != null && flight.getCurrentLoad() > 0)
@@ -762,12 +762,18 @@ public class DashboardController {
         return configRepository.findTopByOrderByIdAsc();
     }
 
-    private boolean isPeriodSimulation(SimulationConfig config) {
-        return config != null && config.getScenario() == SimulationScenario.PERIOD_SIMULATION;
+    private boolean isPlanAheadScenario(SimulationConfig config) {
+        // PERIOD_SIMULATION y COLLAPSE_TEST son plan-ahead: los envíos viajan VARIOS días, así que el mapa
+        // y los KPIs deben mostrar lo que está EN RUTA ahora (lookback desde el inicio del escenario), NO
+        // acotado al día. Antes COLLAPSE caía a la rama "WithinDay" (filtra por registrationDate del día
+        // actual) → al cruzar medianoche los envíos registrados ayer y aún volando desaparecían del mapa.
+        return config != null
+                && (config.getScenario() == SimulationScenario.PERIOD_SIMULATION
+                    || config.getScenario() == SimulationScenario.COLLAPSE_TEST);
     }
 
     private LocalDateTime activeVisibilityStart(SimulationConfig config, LocalDateTime fallbackNow) {
-        if (!isPeriodSimulation(config)) {
+        if (!isPlanAheadScenario(config)) {
             return operationalDayStart(fallbackNow);
         }
         if (config.getEffectiveScenarioStartAt() != null) {

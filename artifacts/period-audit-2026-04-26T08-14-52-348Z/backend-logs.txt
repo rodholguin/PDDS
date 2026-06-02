@@ -1,0 +1,300 @@
+2026-04-26T11:12:56.829Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:13:27.179Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:13:27.179Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:13:31.956Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 66066 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:13:57.540Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:13:57.540Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:14:27.901Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:14:27.901Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:14:30.873Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 57915 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:14:58.232Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:14:58.232Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:15:28.574Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:15:28.575Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:15:42.961Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 71085 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:15:58.896Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:15:58.897Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:16:29.204Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:16:29.204Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:16:48.953Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 64990 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:16:59.542Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:16:59.543Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:17:29.905Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:17:29.905Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:17:55.054Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 65099 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:18:00.317Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:18:00.317Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:18:30.651Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:18:30.651Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:19:00.992Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:19:00.992Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:19:05.922Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 69866 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:19:31.329Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:19:31.330Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:20:01.673Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:20:01.673Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:20:08.082Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 61158 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:20:32.015Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:20:32.015Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:21:02.347Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:21:02.347Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:21:07.865Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 58781 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:21:32.665Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:21:32.666Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:22:03.156Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:22:03.157Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:22:20.868Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 72001 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:22:33.512Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:22:33.512Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:23:03.847Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:23:03.848Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:23:20.767Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 58894 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:23:34.196Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:23:34.197Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:24:04.525Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:24:04.525Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:24:34.867Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:24:34.867Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:24:40.231Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 78462 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:25:05.209Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:25:05.210Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:25:35.600Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:25:35.600Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:25:41.062Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 59828 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:26:05.920Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:26:05.921Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:26:36.269Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:26:36.269Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:26:44.189Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 62124 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:27:06.598Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:27:06.598Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:27:36.937Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:27:36.937Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:27:45.559Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 60367 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:28:07.253Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:28:07.253Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:28:37.577Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:28:37.577Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:28:53.515Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 66954 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:29:07.942Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:29:07.942Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:29:38.269Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:29:38.269Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:30:00.784Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 66267 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:30:08.615Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:30:08.615Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:30:38.950Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:30:38.950Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:31:08.346Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 66559 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:31:09.254Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:31:09.254Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:31:39.792Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:31:39.793Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:32:10.136Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:32:10.136Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:32:13.427Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 64079 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:32:40.482Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:32:40.483Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:33:10.891Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:33:10.891Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:33:15.349Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 60920 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:33:41.210Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:33:41.210Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:34:11.581Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:34:11.581Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:34:28.797Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 72446 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:34:41.927Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:34:41.927Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:35:12.245Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:35:12.245Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:35:42.607Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:35:42.608Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:35:43.694Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 73895 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:36:12.937Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:36:12.938Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:36:43.284Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:36:43.284Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:36:59.121Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 74424 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:37:13.621Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:37:13.621Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:37:43.967Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:37:43.968Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:38:11.459Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 71335 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:38:14.338Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:38:14.338Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:38:44.663Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:38:44.663Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:39:14.997Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:39:14.997Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:39:23.106Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 70645 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:39:45.328Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:39:45.328Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:40:15.664Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:40:15.665Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:40:34.198Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 70089 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:40:46.006Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:40:46.007Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:41:16.476Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:41:16.477Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:41:39.198Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 63998 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:41:46.831Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:41:46.831Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:42:17.153Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:42:17.154Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:42:47.458Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:42:47.459Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:42:58.454Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 78253 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:43:17.778Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:43:17.779Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:43:48.127Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:43:48.128Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:44:07.020Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 67564 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:44:18.452Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:44:18.452Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:44:48.814Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:44:48.815Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:45:19.137Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:45:19.138Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:45:22.955Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 74932 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:45:49.469Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:45:49.469Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:46:19.805Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:46:19.805Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:46:43.898Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 79942 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:46:50.149Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:46:50.150Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:47:20.475Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:47:20.475Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:47:50.800Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:47:50.800Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:47:52.635Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 67735 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:48:21.139Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:48:21.140Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:48:51.497Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:48:51.498Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:48:55.739Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 62102 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:49:21.820Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:49:21.820Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:49:52.146Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:49:52.147Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:49:58.207Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 61466 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:50:22.507Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:50:22.507Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:50:52.861Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:50:52.861Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:51:03.308Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 64098 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:51:23.210Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:51:23.211Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:51:53.568Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:51:53.569Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:52:11.254Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 66944 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:52:23.907Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:52:23.907Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:52:54.236Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:52:54.236Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:53:22.721Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.SimulationEngineService      : Tick de simulación tardó 70464 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:53:24.577Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:53:24.577Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:53:55.212Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:53:55.212Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:54:25.549Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:54:25.550Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:54:27.273Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.SimulationEngineService      : Tick de simulación tardó 63549 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:54:55.883Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:54:55.883Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:55:26.234Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:55:26.235Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:55:43.273Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.SimulationEngineService      : Tick de simulación tardó 74997 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:55:56.559Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:55:56.560Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:56:26.883Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:56:26.883Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:56:46.137Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 61860 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:56:57.226Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:56:57.227Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:57:27.530Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:57:27.530Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:57:52.436Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 65297 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:57:57.851Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:57:57.852Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:58:28.180Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:58:28.181Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:58:57.052Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 63612 ms en escenario PERIOD_SIMULATION
+2026-04-26T11:58:58.565Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:58:58.565Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:59:28.888Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:59:28.889Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T11:59:59.449Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T11:59:59.450Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:00:02.949Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 64895 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:00:29.788Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:00:29.788Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:01:00.133Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:01:00.134Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:01:11.021Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 67070 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:01:30.477Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:01:30.478Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:02:00.820Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:02:00.821Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:02:18.189Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 66166 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:02:31.178Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:02:31.179Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:03:01.502Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:03:01.502Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:03:21.608Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 62418 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:03:31.911Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:03:31.912Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:04:02.286Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:04:02.287Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:04:27.527Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 64917 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:04:32.611Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:04:32.611Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:05:02.919Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:05:02.919Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:05:33.264Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:05:33.265Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:05:45.510Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 76980 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:06:03.585Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:06:03.586Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:06:33.915Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:06:33.915Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:06:55.919Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 69406 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:07:04.271Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:07:04.272Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:07:34.599Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:07:34.600Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:08:04.929Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:08:04.930Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:08:06.950Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 70030 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:08:35.260Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:08:35.261Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:09:05.598Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:09:05.599Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:09:11.234Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 63282 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:09:35.970Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:09:35.970Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:10:06.274Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:10:06.274Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:10:20.479Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 68243 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:10:36.597Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:10:36.598Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:11:06.952Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:11:06.953Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:11:27.314Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 65833 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:11:37.285Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:11:37.286Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:12:07.633Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:12:07.634Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:12:38.001Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:12:38.002Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:12:43.469Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 75152 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:13:08.316Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:13:08.316Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:13:38.661Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:13:38.661Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:13:48.183Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 63712 ms en escenario PERIOD_SIMULATION
+2026-04-26T12:14:09.030Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:14:09.030Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:14:39.358Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T12:14:39.358Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T12:14:51.129Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 61945 ms en escenario PERIOD_SIMULATION

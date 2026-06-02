@@ -13,8 +13,11 @@ import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.SimulationEngineService;
+import com.tasfb2b.service.SimulationAsyncOperationsService;
 import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
+import com.tasfb2b.service.PeriodSimulationBootstrapService;
+import com.tasfb2b.service.WarmupService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -51,6 +54,9 @@ class SimulationControllerSpeedTest {
     @MockBean private AlgorithmProfileService algorithmProfileService;
     @MockBean private FlightScheduleService flightScheduleService;
     @MockBean private FutureDemandProjectionService futureDemandProjectionService;
+    @MockBean private SimulationAsyncOperationsService simulationAsyncOperationsService;
+    @MockBean private PeriodSimulationBootstrapService periodSimulationBootstrapService;
+    @MockBean private WarmupService warmupService;
     @MockBean private PlatformTransactionManager transactionManager;
 
     @Test
@@ -70,6 +76,12 @@ class SimulationControllerSpeedTest {
                 800,
                 70,
                 90,
+                90,
+                75,
+                10,
+                25,
+                10,
+                25,
                 null,
                 null,
                 null,
@@ -115,7 +127,10 @@ class SimulationControllerSpeedTest {
                 null,
                 null,
                 null,
-                java.time.LocalDateTime.now()
+                java.time.LocalDateTime.now(),
+                null,
+                null,
+                null
         ));
 
         mockMvc.perform(post("/api/simulation/speed")

@@ -1,0 +1,7 @@
+{
+  "status": "completed",
+  "attempt": 1,
+  "finishedAt": "2026-04-26T05:10:24.273Z",
+  "stdout": "{\n  \"startedAt\": \"2026-04-26T05:10:04.961751\",\n  \"finishedAt\": \"2026-04-26T05:10:23.664Z\",\n  \"samples\": 2,\n  \"issuesFound\": 0,\n  \"distinctIssues\": [],\n  \"artifactsDir\": \"C:\\\\Users\\\\papar\\\\OneDrive\\\\Documentos\\\\PDDS\\\\artifacts\\\\period-audit-2026-04-26T05-09-55-370Z\"\n}",
+  "auditDir": "C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\artifacts\\period-audit-2026-04-26T05-09-55-370Z"
+}

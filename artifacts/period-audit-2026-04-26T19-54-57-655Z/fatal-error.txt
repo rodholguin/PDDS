@@ -1,0 +1,3 @@
+ReferenceError: flightsCompleted is not defined
+    at evaluateFinalConsistency (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:809:30)
+    at main (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:1017:32)

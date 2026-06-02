@@ -1,0 +1,20 @@
+[
+  {
+    "timestamp": "2026-04-26T18:38:55.871Z",
+    "issues": [
+      "Desfase próximos vuelos UI=0 backend=2"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:39:11.636Z",
+    "issues": [
+      "system.inFlightFlights=21 no coincide con map-live-flights=20"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:39:12.817Z",
+    "issues": [
+      "Progreso temporal insuficiente: ratio=0.78 por debajo del mínimo=0.85"
+    ]
+  }
+]

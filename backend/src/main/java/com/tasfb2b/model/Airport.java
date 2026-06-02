@@ -37,7 +37,18 @@ public class Airport {
     private Continent continent;
 
     /**
-     * Capacidad máxima de almacenamiento (500–800 maletas según enunciado).
+     * Huso horario (offset GMT en horas, con signo; ej. -5 Bogotá, +2 Sofía), de la columna GMT
+     * del archivo de aeropuertos. Los horarios de vuelos del archivo están en hora LOCAL de cada
+     * aeropuerto; con este offset se convierten a UTC para calcular tránsitos reales.
+     */
+    @Column(name = "gmt_offset")
+    @Builder.Default
+    private Integer gmtOffset = 0;
+
+    /**
+     * Capacidad máxima de almacenamiento. El valor base proviene del archivo de aeropuertos,
+     * pero al iniciar/configurar la simulación se sobrescribe con la capacidad de nodo configurada
+     * (intraNodeCapacity + interNodeCapacity) de {@code SimulationConfig}.
      */
     @Column(nullable = false)
     private Integer maxStorageCapacity;

@@ -206,6 +206,12 @@ export interface SimulationState {
   interNodeCapacity: number;
   normalThresholdPct: number;
   warningThresholdPct: number;
+  slaWarnPct: number;
+  slaCritPct: number;
+  riskShipmentsWarnPct: number;
+  riskShipmentsCritPct: number;
+  criticalNodesWarnPct: number;
+  criticalNodesCritPct: number;
   scenarioStartAt: string | null;
   requestedScenarioStartAt: string | null;
   effectiveScenarioStartAt: string | null;
@@ -253,6 +259,9 @@ export interface SimulationState {
   simulatedNow: string | null;
   lastTickAt: string | null;
   updatedAt: string;
+  collapseDetectedAt: string | null;
+  collapseShipmentCode: string | null;
+  collapseSurvivalSeconds: number | null;
 }
 
 export interface SimulationKpis {

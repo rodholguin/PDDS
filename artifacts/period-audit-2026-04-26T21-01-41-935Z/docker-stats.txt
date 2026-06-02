@@ -1,0 +1,4 @@
+NAME               MEM USAGE / LIMIT     CPU %
+tasfb2b-frontend   89.34MiB / 7.429GiB   0.00%
+tasfb2b-backend    819.3MiB / 7.429GiB   66.59%
+tasfb2b-postgres   1.306GiB / 7.429GiB   646.66%

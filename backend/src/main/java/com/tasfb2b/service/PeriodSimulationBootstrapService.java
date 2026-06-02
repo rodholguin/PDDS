@@ -55,7 +55,9 @@ public class PeriodSimulationBootstrapService {
     }
 
     public boolean requiresBootstrap(SimulationConfig config) {
-        return config != null && config.getScenario() == SimulationScenario.PERIOD_SIMULATION;
+        return config != null
+                && (config.getScenario() == SimulationScenario.PERIOD_SIMULATION
+                    || config.getScenario() == SimulationScenario.COLLAPSE_TEST);
     }
 
     public BootstrapResult seedPeriod(SimulationConfig config, LocalDateTime periodStart) {
@@ -63,7 +65,10 @@ public class PeriodSimulationBootstrapService {
             return new BootstrapResult(0L, 0L, 0L, periodStart, periodStart);
         }
 
-        LocalDateTime periodEnd = periodStart.plusDays(Math.max(1, config.getSimulationDays() == null ? 5 : config.getSimulationDays()));
+        LocalDateTime periodEnd = runtimeService.resolveScenarioEnd(config);
+        if (periodEnd == null) {
+            periodEnd = periodStart.plusDays(Math.max(1, config.getSimulationDays() == null ? 5 : config.getSimulationDays()));
+        }
         LocalDateTime seedTarget = periodStart.plusHours(SEED_LEAD_HOURS).isAfter(periodEnd) ? periodEnd : periodStart.plusHours(SEED_LEAD_HOURS);
         long total = shipmentRepository.countPendingWithoutRouteForPlanningInPeriod(periodStart, seedTarget);
         runtimeService.markBootstrapStarted(total, "Preplanificando rutas del periodo");
@@ -71,7 +76,12 @@ public class PeriodSimulationBootstrapService {
                 "Semilla inicial del periodo en preparación");
 
         List<Airport> airports = routePlannerService.allAirports();
-        List<Flight> flights = routePlannerService.schedulableFlightsForExistingWindow(periodStart, periodEnd.plusDays(3));
+        // La semilla SOLO planifica envios registrados en [periodStart, seedTarget] (seedTarget = +6h), asi
+        // que basta cargar vuelos de esa ventana + holgura de transito. Antes cargaba [periodStart, periodEnd+3d]
+        // = TODO el periodo (en COLLAPSE periodEnd=fin de datos 2029); con millones de clones de vuelos
+        // acumulados de corridas previas eso reventaba el heap (OutOfMemoryError) al arrancar. El planner
+        // async ya carga por ventana de lote para el resto del periodo.
+        List<Flight> flights = routePlannerService.schedulableFlightsForExistingWindow(periodStart, seedTarget.plusDays(3));
         com.tasfb2b.service.algorithm.RoutePlanningSupport.PlanningFlightIndex flightIndex =
                 com.tasfb2b.service.algorithm.RoutePlanningSupport.buildPlanningFlightIndex(flights);
         long planned = 0L;

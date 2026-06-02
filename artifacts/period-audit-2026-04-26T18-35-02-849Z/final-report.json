@@ -1,0 +1,25 @@
+{
+  "startedAt": "2026-04-26T18:35:08.610223",
+  "finishedAt": "2026-04-26T18:36:22.173Z",
+  "samples": 4,
+  "issuesFound": 4,
+  "distinctIssues": [
+    "Desfase vuelos visibles UI=1 backend=0",
+    "Desfase marcadores de aviones UI=1 backend=0",
+    "Desfase próximos vuelos UI=1 backend=0",
+    "Desfase vuelos visibles UI=7 backend=5",
+    "Desfase marcadores de aviones UI=7 backend=5",
+    "Desfase próximos vuelos UI=22 backend=14",
+    "Desfase vuelos visibles UI=41 backend=37",
+    "Desfase marcadores de aviones UI=41 backend=37",
+    "Desfase envíos operativos UI=3 backend=2",
+    "Progreso temporal insuficiente: ratio=0.68 por debajo del mínimo=0.85"
+  ],
+  "successSignals": [
+    "Se observaron vuelos activos reales en backend/UI durante la corrida",
+    "Se observaron envíos operativos reales en el mapa durante la corrida",
+    "Los KPIs operativos reportaron vuelos activos durante la corrida",
+    "La red de rutas estuvo disponible en todas las muestras"
+  ],
+  "artifactsDir": "C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\artifacts\\period-audit-2026-04-26T18-35-02-849Z"
+}

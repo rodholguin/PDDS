@@ -66,7 +66,6 @@ import java.util.TreeMap;
 @Transactional
 public class DataImportService {
 
-    private static final int FULL_DATASET_ROUTE_PREPLAN_LIMIT = 0;
     private static final int FULL_DATASET_BATCH_SIZE = 1000;
     private static final long FULL_DATASET_SEQUENCE_BLOCK_SIZE = 5000L;
     private static final DateTimeFormatter CODE_DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -268,21 +267,17 @@ public class DataImportService {
                 : selectEnviosFiles(files, request == null ? null : request.includeOrigins(), seed, maxAirports);
 
         List<Airport> airportsSnapshot = airportRepository.findAll();
-        List<Flight> flightsSnapshot = flightRepository.findFlightsWithAvailableCapacity();
-        LocalDateTime flightWindowBase = flightsSnapshot.stream()
-                .map(flight -> flight.getScheduledDeparture())
-                .filter(java.util.Objects::nonNull)
-                .min(LocalDateTime::compareTo)
-                .orElse(null);
         HashMap<String, Airport> airportByIcao = new HashMap<>();
         for (Airport airport : airportsSnapshot) {
             airportByIcao.put(airport.getIcaoCode().toUpperCase(Locale.ROOT), airport);
         }
 
-        Set<Flight> touchedFlights = new HashSet<>();
-        List<Shipment> fullDatasetBuffer = new ArrayList<>();
-        long fullDatasetNextSequence = 0L;
-        long fullDatasetSequenceEnd = -1L;
+        // Importacion solo-almacenamiento: conservamos la fecha REAL de cada envio (2026-2029) y
+        // NO planificamos rutas aqui. La planificacion la hace la simulacion por ventanas temporales
+        // (ver SimulationAsyncOperationsService + FlightScheduleService.ensureFlightsForWindow).
+        List<Shipment> shipmentBuffer = new ArrayList<>();
+        long bufferedNextSequence = 0L;
+        long bufferedSequenceEnd = -1L;
         int requestedRows = 0;
         int importedRows = 0;
         int failedRows = 0;
@@ -291,6 +286,18 @@ public class DataImportService {
 
         java.util.function.Consumer<String> failureCounter = cause ->
                 failureByCause.merge(cause, 1, Integer::sum);
+
+        // REANUDACION (resume): si ya hay envios cargados de una importacion full previa interrumpida,
+        // contamos cuantos por origen para saltar esas lineas y continuar desde donde quedo (sin duplicar
+        // ni reiniciar desde cero). Permite apagar/encender la PC a mitad de una carga de ~9.5M.
+        java.util.Map<Long, Long> alreadyImportedByOrigin = new java.util.HashMap<>();
+        if (fullDataset) {
+            for (Object[] row : shipmentRepository.countGroupedByOriginAirportId()) {
+                if (row != null && row.length == 2 && row[0] != null && row[1] != null) {
+                    alreadyImportedByOrigin.put(((Number) row[0]).longValue(), ((Number) row[1]).longValue());
+                }
+            }
+        }
 
         for (Path file : selectedFiles) {
             Matcher nameMatcher = ENVIOS_FILE_PATTERN.matcher(file.getFileName().toString());
@@ -312,18 +319,24 @@ public class DataImportService {
                 continue;
             }
 
-            int processedInFile = 0;
-            for (String raw : lines) {
-                if (processedInFile >= maxPerAirport) break;
-                String line = sanitizeLine(raw);
-                if (line.isBlank()) continue;
+            // fullDataset: importar TODAS las lineas del archivo (dataset REAL completo, ~9.5M envios)
+            // para simular escenarios con la demanda real. La insercion es por lotes (FULL_DATASET_BATCH_SIZE)
+            // y el metodo corre sin transaccion envolvente (NOT_SUPPORTED) → la persistencia no acumula.
+            // Modo muestra: los archivos vienen ordenados por fecha; seleccionamos lineas distribuidas
+            // uniformemente en todo el rango (2026-2029) en lugar de las primeras maxPerAirport.
+            List<String> sampledLines = fullDataset ? lines : sampleLinesAcrossRange(lines, maxPerAirport);
 
+            // Resume: cuantos envios de este origen ya estaban cargados (corrida previa). Se saltan las
+            // primeras `resumeSkip` lineas validas; `acceptedForOrigin` cuenta las lineas-envio vistas.
+            long resumeSkip = fullDataset ? alreadyImportedByOrigin.getOrDefault(origin.getId(), 0L) : 0L;
+            long acceptedForOrigin = 0L;
+
+            for (String line : sampledLines) {
                 requestedRows++;
                 Matcher lineMatcher = ENVIOS_LINE_PATTERN.matcher(line);
                 if (!lineMatcher.matches()) {
                     failedRows++;
                     failureCounter.accept("PARSE_INVALID_FORMAT");
-                    processedInFile++;
                     continue;
                 }
 
@@ -339,26 +352,40 @@ public class DataImportService {
                     if (destination == null || destination.getId().equals(origin.getId())) {
                         failedRows++;
                         failureCounter.accept("DESTINATION_INVALID");
-                        processedInFile++;
                         continue;
                     }
 
+                    // Resume: esta es una linea-envio valida. Si su posicion ya fue cargada en una corrida
+                    // previa para este origen, saltarla (sin duplicar) y NO contarla en el balance de esta corrida.
+                    acceptedForOrigin++;
+                    if (acceptedForOrigin <= resumeSkip) {
+                        requestedRows--;
+                        continue;
+                    }
+
+                    // Fecha real del archivo (hora LOCAL del aeropuerto de origen) → UTC con el huso del
+                    // origen, para comparar deadline y llegadas de vuelos en el mismo marco (UTC).
+                    int originGmt = origin.getGmtOffset() == null ? 0 : origin.getGmtOffset();
                     LocalDateTime registrationDate = LocalDateTime.parse(
                             yyyymmdd + hh + mm,
                             DateTimeFormatter.ofPattern("yyyyMMddHHmm")
-                    );
+                    ).minusMinutes(originGmt * 60L);
 
-                    if (flightWindowBase != null) {
-                        registrationDate = registrationDate
-                                .withYear(flightWindowBase.getYear())
-                                .withMonth(flightWindowBase.getMonthValue())
-                                .withDayOfMonth(flightWindowBase.getDayOfMonth());
+                    String shipmentCode;
+                    if (fullDataset) {
+                        if (bufferedNextSequence > bufferedSequenceEnd) {
+                            ShipmentCodeRangeService.SequenceRange range = shipmentCodeRangeService.allocateRange(FULL_DATASET_SEQUENCE_BLOCK_SIZE);
+                            bufferedNextSequence = range.startInclusive();
+                            bufferedSequenceEnd = range.endInclusive();
+                        }
+                        shipmentCode = generateBufferedCode(bufferedNextSequence, registrationDate);
+                        bufferedNextSequence++;
+                    } else {
+                        shipmentCode = shipmentCodeService.nextCode(registrationDate);
                     }
 
                     Shipment shipment = Shipment.builder()
-                            .shipmentCode(fullDataset
-                                    ? null
-                                    : shipmentCodeService.nextCode(registrationDate))
+                            .shipmentCode(shipmentCode)
                             .airlineName("DATASET-" + clientId)
                             .originAirport(origin)
                             .destinationAirport(destination)
@@ -368,68 +395,30 @@ public class DataImportService {
                             .progressPercentage(0.0)
                             .build();
 
-                    if (!fullDataset || importedRows < FULL_DATASET_ROUTE_PREPLAN_LIMIT) {
-                        shipmentRepository.save(shipment);
-                        List<TravelStop> plannedStops = routePlannerService.planShipment(
-                                shipment,
-                                algorithm,
-                                flightsSnapshot,
-                                airportsSnapshot,
-                                false
-                        );
-
-                        if (plannedStops.isEmpty() || shipment.getStatus() == ShipmentStatus.CRITICAL) {
-                            failedRows++;
-                            failureCounter.accept("NO_FEASIBLE_ROUTE");
-                            processedInFile++;
-                            continue;
-                        }
-
-                        for (TravelStop stop : plannedStops) {
-                            if (stop.getFlight() != null) {
-                                touchedFlights.add(stop.getFlight());
-                            }
-                        }
-                    } else {
-                        if (fullDatasetNextSequence > fullDatasetSequenceEnd) {
-                            ShipmentCodeRangeService.SequenceRange range = shipmentCodeRangeService.allocateRange(FULL_DATASET_SEQUENCE_BLOCK_SIZE);
-                            fullDatasetNextSequence = range.startInclusive();
-                            fullDatasetSequenceEnd = range.endInclusive();
-                        }
-                        shipment.setShipmentCode(generateBufferedCode(fullDatasetNextSequence, registrationDate));
-                        fullDatasetNextSequence++;
-                        fullDatasetBuffer.add(shipment);
-                        if (fullDatasetBuffer.size() >= FULL_DATASET_BATCH_SIZE) {
-                            shipmentRepository.saveAll(fullDatasetBuffer);
-                            shipmentRepository.flush();
-                            fullDatasetBuffer.clear();
-                        }
+                    shipmentBuffer.add(shipment);
+                    if (shipmentBuffer.size() >= FULL_DATASET_BATCH_SIZE) {
+                        shipmentRepository.saveAll(shipmentBuffer);
+                        shipmentRepository.flush();
+                        shipmentBuffer.clear();
                     }
 
                     importedRows++;
-                    processedInFile++;
                 } catch (Exception ex) {
                     failedRows++;
                     failureCounter.accept("PROCESSING_EXCEPTION");
-                    processedInFile++;
                 }
             }
         }
 
-        if (!fullDatasetBuffer.isEmpty()) {
-            shipmentRepository.saveAll(fullDatasetBuffer);
+        if (!shipmentBuffer.isEmpty()) {
+            shipmentRepository.saveAll(shipmentBuffer);
             shipmentRepository.flush();
-            fullDatasetBuffer.clear();
+            shipmentBuffer.clear();
         }
 
         if (requestedRows != importedRows + failedRows) {
             failureByCause.merge("ACCOUNTING_MISMATCH", Math.max(0, requestedRows - (importedRows + failedRows)), Integer::sum);
         }
-
-        if (!touchedFlights.isEmpty()) {
-            flightRepository.saveAll(touchedFlights);
-        }
-        travelStopRepository.flush();
 
         StringBuilder details = new StringBuilder();
         details.append("processedFiles=").append(processedFiles)
@@ -658,6 +647,7 @@ public class DataImportService {
                     airport.setCity(row.city());
                     airport.setCountry(row.country());
                     airport.setContinent(row.continent());
+                    airport.setGmtOffset(row.gmtOffset());
                     airport.setMaxStorageCapacity(row.capacity());
                     airport.setLatitude(row.latitude());
                     airport.setLongitude(row.longitude());
@@ -715,8 +705,14 @@ public class DataImportService {
                     Airport destination = airportRepository.findByIcaoCode(destinationIcao)
                             .orElseThrow(() -> new IllegalArgumentException("Destino no encontrado: " + destinationIcao));
 
-                    LocalDateTime departure = baseDate.atStartOfDay().plusMinutes(departureMinutes);
-                    LocalDateTime arrival = baseDate.atStartOfDay().plusMinutes(arrivalMinutes);
+                    // Horas del archivo en hora LOCAL de cada aeropuerto → convertir a UTC con los husos
+                    // (utc = local - gmtOffset). Sin esto, los vuelos que cruzan husos hacia el oeste
+                    // (llegada local < salida local) se inflaban +1 día (tránsitos falsos de ~23h).
+                    int originGmt = origin.getGmtOffset() == null ? 0 : origin.getGmtOffset();
+                    int destGmt = destination.getGmtOffset() == null ? 0 : destination.getGmtOffset();
+                    LocalDateTime departure = baseDate.atStartOfDay().plusMinutes(departureMinutes - originGmt * 60L);
+                    LocalDateTime arrival = baseDate.atStartOfDay().plusMinutes(arrivalMinutes - destGmt * 60L);
+                    // +1 día solo si, ya en UTC, la llegada no es posterior a la salida (vuelo nocturno real).
                     if (!arrival.isAfter(departure)) {
                         arrival = arrival.plusDays(1);
                     }
@@ -762,6 +758,7 @@ public class DataImportService {
         String icao = prefixMatcher.group(2);
         String city = normalizeVisibleCity(prefixMatcher.group(3));
         String country = normalizeVisibleCountry(prefixMatcher.group(4));
+        int gmtOffset = Integer.parseInt(prefixMatcher.group(5));
         int capacity = Integer.parseInt(prefixMatcher.group(6));
 
         Matcher latMatcher = LAT_PATTERN.matcher(rawLine);
@@ -786,7 +783,7 @@ public class DataImportService {
         Continent continent = Optional.ofNullable(fallbackContinent)
                 .orElseThrow(() -> new IllegalArgumentException("Continente no detectado para fila"));
 
-        return new ParsedAirportRow(icao, city, country, continent, capacity, latitude, longitude);
+        return new ParsedAirportRow(icao, city, country, continent, gmtOffset, capacity, latitude, longitude);
     }
 
     private Path resolveDefaultPath(String... candidates) {
@@ -985,6 +982,32 @@ public class DataImportService {
         return shuffled.stream().limit(maxAirports).toList();
     }
 
+    /**
+     * Selecciona hasta {@code maxPerAirport} lineas validas distribuidas uniformemente a lo largo
+     * del archivo (ordenado por fecha ascendente). Asi una muestra acotada cubre todo el rango
+     * 2026-2029 en vez de concentrarse en los primeros dias. Si el archivo tiene menos lineas que
+     * el tope, devuelve todas (equivalente al comportamiento previo de tomar las primeras N).
+     */
+    private List<String> sampleLinesAcrossRange(List<String> rawLines, int maxPerAirport) {
+        List<String> validLines = new ArrayList<>();
+        for (String raw : rawLines) {
+            String line = sanitizeLine(raw);
+            if (!line.isBlank()) {
+                validLines.add(line);
+            }
+        }
+        int size = validLines.size();
+        if (maxPerAirport <= 0 || size <= maxPerAirport) {
+            return validLines;
+        }
+        List<String> sampled = new ArrayList<>(maxPerAirport);
+        for (int k = 0; k < maxPerAirport; k++) {
+            int idx = (int) ((long) k * size / maxPerAirport);
+            sampled.add(validLines.get(idx));
+        }
+        return sampled;
+    }
+
     private String activeAlgorithmName() {
         var config = simulationConfigRepository.findTopByOrderByIdAsc();
         if (config == null) return "Genetic Algorithm";
@@ -1053,6 +1076,7 @@ public class DataImportService {
             String city,
             String country,
             Continent continent,
+            int gmtOffset,
             int capacity,
             double latitude,
             double longitude

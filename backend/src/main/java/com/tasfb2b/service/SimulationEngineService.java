@@ -153,22 +153,35 @@ public class SimulationEngineService {
         LocalDateTime periodEnd = resolvePeriodEnd(config);
         LocalDateTime effectiveHorizon = periodEnd != null && horizon.isAfter(periodEnd) ? periodEnd : horizon;
         LocalDateTime planningHorizon = effectiveHorizon;
-        if (config.getScenario() == SimulationScenario.PERIOD_SIMULATION) {
+        // Plan-ahead guard (PERIOD_SIMULATION y COLLAPSE_TEST): el reloj no adelanta más allá de lo
+        // ya planificado (plannedThrough). Como los envíos inviables quedan CRITICAL (excluidos del
+        // conteo de "sin ruta"), no hay deadlock y el colapso refleja envíos que de verdad no llegan.
+        if (config.getScenario() == SimulationScenario.PERIOD_SIMULATION
+                || config.getScenario() == SimulationScenario.COLLAPSE_TEST) {
             LocalDateTime plannedThrough = runtimeService.periodPlannedThrough().orElse(null);
             if (plannedThrough != null && plannedThrough.isBefore(effectiveHorizon)) {
                 runtimeService.recordPeriodTickWait(effectiveHorizon, plannedThrough);
-                log.info("Tick de periodo en espera: horizon={} plannedThrough={}", effectiveHorizon, plannedThrough);
+                log.info("Tick plan-ahead en espera: escenario={} horizon={} plannedThrough={}", config.getScenario(), effectiveHorizon, plannedThrough);
                 return;
             }
         }
 
         long tickStartedAt = System.nanoTime();
-        reconcileFlightStates(effectiveHorizon);
+        reconcileFlightStates(simulatedNow, effectiveHorizon);
         long afterReconcile = System.nanoTime();
-        activateFlights(simulatedNow, effectiveHorizon);
+        // Procesar TODAS las piernas que caen dentro del salto de reloj. A alta velocidad un envío
+        // multi-tramo puede recorrer varias piernas en un mismo salto; cada iteración avanza una pierna
+        // (activa el tramo cuyo previo ya terminó + cierra los que arribaron). Se repite mientras haya
+        // progreso, con cota de seguridad para no bloquear el tick.
+        for (int legPass = 0; legPass < 50; legPass++) {
+            int activated = activateFlights(simulatedNow, effectiveHorizon);
+            int completed = closeFlightsAndAdvanceStops(simulatedNow, effectiveHorizon);
+            if (activated + completed == 0) {
+                break;
+            }
+        }
         long afterActivate = System.nanoTime();
-        closeFlightsAndAdvanceStops(simulatedNow, effectiveHorizon);
-        long afterClose = System.nanoTime();
+        long afterClose = afterActivate;
 
         runtimeService.setSimulationTime(effectiveHorizon);
         long afterSetTime = System.nanoTime();
@@ -193,24 +206,35 @@ public class SimulationEngineService {
             );
         }
 
+        // Colapso (COLLAPSE_TEST): si el primer envío ya no llega a tiempo, registrar y detener.
+        if (config.getScenario() == SimulationScenario.COLLAPSE_TEST
+                && config.getCollapseDetectedAtSim() == null
+                && detectCollapse(config, effectiveHorizon)) {
+            return;
+        }
+
         if (periodEnd != null && !effectiveHorizon.isBefore(periodEnd)) {
             runtimeService.stopSimulationOnly();
             log.info("Simulacion de periodo finalizada automaticamente en {}", effectiveHorizon);
         }
     }
 
-    private void reconcileFlightStates(LocalDateTime horizon) {
-        List<Long> recoverableScheduledIds = flightRepository.findRecoverableScheduledFlightIds(horizon);
+    private void reconcileFlightStates(LocalDateTime simulatedNow, LocalDateTime horizon) {
+        // Incluye vuelos que despegan Y aterrizan dentro del mismo salto de reloj (arrival > simulatedNow),
+        // no solo los que siguen volando al final; así a alta velocidad ningún vuelo corto queda sin
+        // procesar (se activa + completa en el mismo tick) y no se generan colapsos falsos.
+        List<Long> recoverableScheduledIds = flightRepository.findRecoverableScheduledFlightIds(simulatedNow, horizon);
         if (!recoverableScheduledIds.isEmpty()) {
             flightRepository.updateStatusByIds(recoverableScheduledIds, FlightStatus.IN_FLIGHT);
         }
     }
 
-    private void activateFlights(LocalDateTime simulatedNow, LocalDateTime horizon) {
+    private int activateFlights(LocalDateTime simulatedNow, LocalDateTime horizon) {
         List<TravelStop> pendingStops = travelStopRepository.findPendingStopsForActivation(simulatedNow, horizon);
         if (pendingStops.isEmpty()) {
-            return;
+            return 0;
         }
+        int activatedCount = 0;
 
         java.util.Map<Long, Flight> flightsById = pendingStops.stream()
                 .map(TravelStop::getFlight)
@@ -254,6 +278,7 @@ public class SimulationEngineService {
                 }
 
                 stop.setStopStatus(StopStatus.IN_TRANSIT);
+                activatedCount++;
 
                 int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
                 flight.setReservedLoad(Math.max(0, flight.getReservedLoad() - luggage));
@@ -278,15 +303,17 @@ public class SimulationEngineService {
                         stop.getAirport(), flight.getFlightCode());
             }
         }
+        return activatedCount;
     }
 
-    private void closeFlightsAndAdvanceStops(LocalDateTime simulatedNow, LocalDateTime horizon) {
+    private int closeFlightsAndAdvanceStops(LocalDateTime simulatedNow, LocalDateTime horizon) {
         List<Flight> toComplete = flightRepository
                 .findByStatusAndScheduledArrivalGreaterThanAndScheduledArrivalLessThanEqual(
                         FlightStatus.IN_FLIGHT,
                         simulatedNow,
                         horizon
                 );
+        int completedCount = 0;
 
         List<TravelStop> impactedStops = toComplete.isEmpty()
                 ? List.of()
@@ -310,7 +337,11 @@ public class SimulationEngineService {
                 int luggage = shipment.getLuggageCount() == null ? 0 : shipment.getLuggageCount();
                 flight.setCurrentLoad(Math.max(0, flight.getCurrentLoad() - luggage));
                 stop.setStopStatus(StopStatus.COMPLETED);
-                stop.setActualArrival(horizon);
+                completedCount++;
+                // Usar la llegada REAL del vuelo (no el fin del salto), clave a alta velocidad para
+                // no marcar tarde entregas que en realidad llegaron a tiempo dentro del salto.
+                LocalDateTime arrivalAt = flight.getScheduledArrival() != null ? flight.getScheduledArrival() : horizon;
+                stop.setActualArrival(arrivalAt);
 
                 Airport airport = stop.getAirport();
                 airport.setCurrentStorageLoad(Math.min(
@@ -326,7 +357,7 @@ public class SimulationEngineService {
                 boolean allDone = allStops.stream().allMatch(s -> s.getStopStatus() == StopStatus.COMPLETED);
                 if (allDone) {
                     shipment.setStatus(ShipmentStatus.DELIVERED);
-                    shipment.setDeliveredAt(horizon);
+                    shipment.setDeliveredAt(arrivalAt);
                     shipment.setProgressPercentage(100.0);
 
                     // Issue 7.1: release destination storage — shipment handed to receiver,
@@ -345,6 +376,7 @@ public class SimulationEngineService {
                 }
             }
         }
+        return completedCount;
     }
 
     private void audit(Shipment shipment,
@@ -362,14 +394,54 @@ public class SimulationEngineService {
                 : simulationConfigRepository.save(SimulationConfig.builder().build());
     }
 
+    /**
+     * Colapso = el primer envío que no llega a tiempo. Consulta acotada a 1 fila (índice
+     * idx_shipment_deadline), ejecutada solo en COLLAPSE_TEST y solo hasta detectarlo, por lo
+     * que no implica escanear los envíos en cada tick. Registra el instante de colapso
+     * (deadline del envío) y detiene la simulación.
+     *
+     * @return true si se detectó el colapso en este tick.
+     */
+    private boolean detectCollapse(SimulationConfig config, LocalDateTime horizon) {
+        // El colapso solo cuenta envíos registrados DESDE la fecha de inicio del escenario. Sin esto, al
+        // arrancar en (p.ej.) jul-2027 los millones de envíos previos —PENDING, nunca planificados en esta
+        // corrida y con deadline ya vencido— se detectaban como "primer envío tarde" → colapso espurio día 1.
+        LocalDateTime scenarioStart = config.getEffectiveScenarioStartAt() != null
+                ? config.getEffectiveScenarioStartAt()
+                : config.getScenarioStartAt();
+        if (scenarioStart == null) {
+            scenarioStart = LocalDateTime.of(1970, 1, 1, 0, 0);
+        }
+        List<Shipment> late = shipmentRepository.findFirstLateShipment(
+                scenarioStart, horizon, org.springframework.data.domain.PageRequest.of(0, 1));
+        if (late.isEmpty()) {
+            return false;
+        }
+        Shipment first = late.get(0);
+        config.setCollapseDetectedAtSim(first.getDeadline());
+        config.setCollapseShipmentId(first.getId());
+        config.setCollapseShipmentCode(first.getShipmentCode());
+        simulationConfigRepository.save(config);
+
+        shipmentAuditService.log(
+                first,
+                ShipmentAuditType.DELAYED,
+                "Colapso: primer envío fuera de plazo (deadline " + first.getDeadline() + ")",
+                first.getDestinationAirport(),
+                null
+        );
+
+        runtimeService.stopSimulationOnly();
+        log.warn("COLAPSO detectado: envío {} no llegó a tiempo (deadline {} <= horizonte {})",
+                first.getShipmentCode(), first.getDeadline(), horizon);
+        return true;
+    }
+
     private LocalDateTime resolveInitialSimulationTime(LocalDateTime fallbackNow) {
-        // Prefer configured scenario start, then projected demand start
+        // Inicio configurado; si no, el primer vuelo programado o el primer envío importado.
         SimulationConfig config = getConfig();
         if (config.getScenarioStartAt() != null) {
             return config.getScenarioStartAt();
-        }
-        if (config.getProjectedFrom() != null) {
-            return config.getProjectedFrom().atStartOfDay();
         }
         LocalDateTime minDeparture = flightRepository.findMinScheduledDeparture();
         if (minDeparture != null) {
@@ -380,18 +452,8 @@ public class SimulationEngineService {
     }
 
     private LocalDateTime resolvePeriodEnd(SimulationConfig config) {
-        if (config == null || config.getScenario() != SimulationScenario.PERIOD_SIMULATION) {
-            return null;
-        }
-        LocalDateTime start = config.getEffectiveScenarioStartAt();
-        if (start == null) {
-            start = config.getScenarioStartAt();
-        }
-        if (start == null) {
-            return null;
-        }
-        int days = config.getSimulationDays() == null ? 5 : Math.max(1, config.getSimulationDays());
-        return start.plusDays(days);
+        // Fin del escenario unificado para todos los modos (ver SimulationRuntimeService.resolveScenarioEnd).
+        return runtimeService.resolveScenarioEnd(config);
     }
 
 }

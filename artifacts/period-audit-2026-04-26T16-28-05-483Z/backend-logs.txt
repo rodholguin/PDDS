@@ -1,0 +1,88 @@
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.4)
+
+2026-04-26T16:27:02.305Z  INFO 1 --- [tasf-b2b-backend] [           main] com.tasfb2b.TasfB2BApplication           : Starting TasfB2BApplication v0.0.1-SNAPSHOT using Java 21.0.10 with PID 1 (/app/app.jar started by spring in /app)
+2026-04-26T16:27:02.319Z  INFO 1 --- [tasf-b2b-backend] [           main] com.tasfb2b.TasfB2BApplication           : No active profile set, falling back to 1 default profile: "default"
+2026-04-26T16:27:07.092Z  INFO 1 --- [tasf-b2b-backend] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-04-26T16:27:07.471Z  INFO 1 --- [tasf-b2b-backend] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 296 ms. Found 9 JPA repository interfaces.
+2026-04-26T16:27:10.248Z  INFO 1 --- [tasf-b2b-backend] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-04-26T16:27:10.322Z  INFO 1 --- [tasf-b2b-backend] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-04-26T16:27:10.324Z  INFO 1 --- [tasf-b2b-backend] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.39]
+2026-04-26T16:27:10.601Z  INFO 1 --- [tasf-b2b-backend] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-04-26T16:27:10.606Z  INFO 1 --- [tasf-b2b-backend] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 8041 ms
+Standard Commons Logging discovery in action with spring-jcl: please remove commons-logging.jar from classpath in order to avoid potential conflicts
+2026-04-26T16:27:11.542Z  INFO 1 --- [tasf-b2b-backend] [           main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-04-26T16:27:11.728Z  INFO 1 --- [tasf-b2b-backend] [           main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.6.11.Final
+2026-04-26T16:27:11.870Z  INFO 1 --- [tasf-b2b-backend] [           main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-04-26T16:27:13.509Z  INFO 1 --- [tasf-b2b-backend] [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-04-26T16:27:13.817Z  INFO 1 --- [tasf-b2b-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-04-26T16:27:14.851Z  INFO 1 --- [tasf-b2b-backend] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@1f6c4ae
+2026-04-26T16:27:14.857Z  INFO 1 --- [tasf-b2b-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-04-26T16:27:14.973Z  WARN 1 --- [tasf-b2b-backend] [           main] org.hibernate.orm.deprecation            : HHH90000025: PostgreSQLDialect does not need to be specified explicitly using 'hibernate.dialect' (remove the property setting and it will be selected by default)
+2026-04-26T16:27:15.055Z  INFO 1 --- [tasf-b2b-backend] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
+	Database driver: undefined/unknown
+	Database version: 15.17
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-04-26T16:27:19.827Z  INFO 1 --- [tasf-b2b-backend] [           main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-04-26T16:27:23.226Z  INFO 1 --- [tasf-b2b-backend] [           main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-04-26T16:27:24.592Z  INFO 1 --- [tasf-b2b-backend] [           main] o.s.d.j.r.query.QueryEnhancerFactory     : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-04-26T16:27:49.201Z  INFO 1 --- [tasf-b2b-backend] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-04-26T16:27:49.281Z  INFO 1 --- [tasf-b2b-backend] [           main] com.tasfb2b.TasfB2BApplication           : Started TasfB2BApplication in 49.61 seconds (process running for 57.34)
+2026-04-26T16:27:50.263Z  INFO 1 --- [tasf-b2b-backend] [           main] c.t.s.SimulationRuntimeBootstrapService  : Runtime de simulación rehidratado en arranque con tiempo 2029-06-20T00:00
+2026-04-26T16:27:51.246Z  INFO 1 --- [tasf-b2b-backend] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-26T16:27:51.247Z  INFO 1 --- [tasf-b2b-backend] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-04-26T16:27:51.250Z  INFO 1 --- [tasf-b2b-backend] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 2 ms
+2026-04-26T16:28:07.044Z  INFO 1 --- [tasf-b2b-backend] [nio-8080-exec-3] c.t.service.SimulationRuntimeService     : resetOperationalData: STARTING heavy DB reset
+2026-04-26T16:28:15.709Z  INFO 1 --- [tasf-b2b-backend] [nio-8080-exec-3] c.t.service.SimulationRuntimeService     : resetOperationalData: hasStops=false, hasAuditLogs=false, hasAlerts=false, hasNonPendingShipments=false
+2026-04-26T16:28:15.709Z  INFO 1 --- [tasf-b2b-backend] [nio-8080-exec-3] c.t.service.SimulationRuntimeService     : resetOperationalData: already clean, skipping
+2026-04-26T16:28:19.940Z  INFO 1 --- [tasf-b2b-backend] [nio-8080-exec-8] c.t.controller.SimulationController      : Simulacion iniciada — escenario=PERIOD_SIMULATION, secondsPerTick=60, scenarioStartAt=2029-06-15T00:00, effectiveStartAt=2029-06-15T00:00, dateAdjusted=false
+2026-04-26T16:28:20.736Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick breakdown escenario=PERIOD_SIMULATION total=510 ms reconcile=81 ms plan=122 ms activate=90 ms close=54 ms overdue=115 ms setTime=21 ms markTick=25 ms
+2026-04-26T16:28:20.779Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.SimulationEngineService      : Tick de simulación tardó 556 ms en escenario PERIOD_SIMULATION (intervalo objetivo=500 ms)
+2026-04-26T16:28:21.423Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:28:21.424Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:28:51.952Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:28:51.953Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:29:22.443Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:29:22.443Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:29:53.217Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:29:53.218Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:30:23.678Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:30:23.679Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:30:54.178Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:30:54.179Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:31:24.642Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:31:24.642Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:31:55.053Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:31:55.053Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:32:25.473Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:32:25.474Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:32:55.836Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:32:55.836Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:33:26.258Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:33:26.259Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:33:56.693Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:33:56.693Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-1] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:34:27.045Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:34:27.045Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:34:57.381Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:34:57.381Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:35:27.789Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:35:27.789Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:35:58.183Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:35:58.184Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas
+2026-04-26T16:36:17.926Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.SimulationEngineService      : Tick breakdown escenario=PERIOD_SIMULATION total=1003 ms reconcile=1 ms plan=917 ms activate=28 ms close=19 ms overdue=32 ms setTime=2 ms markTick=2 ms
+2026-04-26T16:36:17.932Z  WARN 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.SimulationEngineService      : Tick de simulación tardó 1010 ms en escenario PERIOD_SIMULATION (intervalo objetivo=500 ms)
+2026-04-26T16:36:28.676Z  INFO 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] Carga promedio: {:.1f}% | Cuellos de botella: 0.0 | Tiempo estimado al colapso: {:.1f}h
+2026-04-26T16:36:28.676Z ERROR 1 --- [tasf-b2b-backend] [   scheduling-2] c.t.service.CollapseMonitorService       : [CollapseMonitor] COLAPSO INMINENTE — menos de 2 horas estimadas

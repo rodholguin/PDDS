@@ -1,0 +1,3 @@
+Error: No se pudo configurar simulación: {"ok":false,"status":0,"body":null,"error":"fetch failed"}
+    at configureAndStart (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:316:28)
+    at async main (file:///C:/Users/papar/OneDrive/Documentos/PDDS/tools/period-simulation-audit.mjs:366:17)

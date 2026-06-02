@@ -11,7 +11,10 @@ export const flightsApi = {
   getById: (id: number) =>
     api<FlightDetailResponse>(`/api/flights/${id}`),
   cancel:  (id: number) =>
-    api<unknown>(`/api/flights/${id}/cancel`, { method: 'PUT' }),
+    api<{ flightCode: string; status: string; affectedShipments: number; replanned: number; failedToReplan: number }>(
+      `/api/flights/${id}/cancel`,
+      { method: 'PUT' },
+    ),
 
   capacityView: (date?: string) =>
     api<FlightCapacityView[]>(`/api/flights/capacity-view${date ? `?date=${encodeURIComponent(date)}` : ''}`),

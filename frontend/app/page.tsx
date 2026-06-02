@@ -6,7 +6,6 @@ import Map, { Marker, NavigationControl, Popup, type MapLayerMouseEvent, type Ma
 import type { StyleSpecification } from 'maplibre-gl';
 import { dashboardApi } from '@/lib/api/dashboardApi';
 import { alertsApi } from '@/lib/api/alertsApi';
-import { importApi } from '@/lib/api/importApi';
 import { simulationApi } from '@/lib/api/simulationApi';
 import { useSimulation } from '@/lib/SimulationContext';
 import type { Airport, MapLiveFlight, NodeDetail, OperationalAlert, SimScenario } from '@/lib/types';
@@ -26,7 +25,7 @@ const SATELLITE_STYLE: StyleSpecification = {
 };
 
 const INITIAL_VIEW = { latitude: 16, longitude: -38, zoom: 1.5 } as const;
-const SPEED_OPTIONS = [1, 5, 10, 20] as const;
+const SPEED_OPTIONS = [1, 5, 20] as const;
 const FLIGHT_ANIMATION_MS = 900;
 const SIM_TIME_FORMATTER = new Intl.DateTimeFormat('es-PE', {
   year: 'numeric',
@@ -44,18 +43,24 @@ type RuntimeConfig = {
   scenario: SimScenario;
   simulationDays: 3 | 5 | 7;
   scenarioStartDate: string;
-  cancellationRatePct: number;
-  intraNodeCapacity: number;
-  interNodeCapacity: number;
   normalThresholdPct: number;
   warningThresholdPct: number;
+  slaWarnPct: number;
+  slaCritPct: number;
+  riskShipmentsWarnPct: number;
+  riskShipmentsCritPct: number;
+  criticalNodesWarnPct: number;
+  criticalNodesCritPct: number;
 };
 
-function toDateInput(value: string | null): string {
+function toDateTimeInput(value: string | null): string {
   if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toISOString().slice(0, 10);
+  // value es un LocalDateTime "YYYY-MM-DDTHH:mm(:ss)" sin zona; el input datetime-local usa "YYYY-MM-DDTHH:mm".
+  // Se extrae por string (NO con new Date()) para evitar corrimientos por huso del navegador.
+  const dt = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(value);
+  if (dt) return `${dt[1]}T${dt[2]}`;
+  const d = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  return d ? `${d[1]}T00:00` : '';
 }
 
 function escenarioLabel(value: SimScenario): string {
@@ -64,26 +69,41 @@ function escenarioLabel(value: SimScenario): string {
   return 'Operación día a día';
 }
 
-function colorSemaforo(estado: 'ok' | 'warn' | 'bad'): string {
+function colorSemaforo(estado: 'ok' | 'warn' | 'bad' | 'neutral'): string {
+  if (estado === 'neutral') return '#64748b';
   if (estado === 'ok') return '#22c55e';
   if (estado === 'warn') return '#f59e0b';
   return '#ef4444';
 }
 
-function semaforoSla(value: number): 'ok' | 'warn' | 'bad' {
-  if (value >= 90) return 'ok';
-  if (value >= 75) return 'warn';
+// SLA: valores altos = mejor (verde por encima de warnPct, ámbar por encima de critPct).
+function semaforoSla(value: number, warnPct: number, critPct: number): 'ok' | 'warn' | 'bad' {
+  if (value >= warnPct) return 'ok';
+  if (value >= critPct) return 'warn';
   return 'bad';
 }
 
-function semaforoRiesgo(value: number): 'ok' | 'warn' | 'bad' {
-  if (value <= 2) return 'ok';
-  if (value <= 8) return 'warn';
+// Métricas de riesgo: valores bajos = mejor (verde bajo warnMax, ámbar bajo critMax, rojo por encima).
+function semaforoMax(value: number, warnMax: number, critMax: number): 'ok' | 'warn' | 'bad' {
+  if (value <= warnMax) return 'ok';
+  if (value <= critMax) return 'warn';
   return 'bad';
 }
 
 function fmtPct(value: number): string {
   return `${value.toFixed(1)}%`;
+}
+
+function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const parts: string[] = [];
+  if (d) parts.push(`${d}d`);
+  if (h || d) parts.push(`${h}h`);
+  parts.push(`${m}m`);
+  return parts.join(' ');
 }
 
 function formatSimTime(value: Date): string {
@@ -187,85 +207,14 @@ function BootstrapOverlay({ planned, total, message }: { planned: number; total:
   );
 }
 
-function RollingPlanningCard({ plannedThrough, backlog, message }: { plannedThrough: string | null | undefined; backlog: number; message: string | null | undefined }) {
-  const plannedLabel = plannedThrough
-    ? new Date(plannedThrough).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })
-    : 'Pendiente';
-
+function KpiCard({ title, value, status }: { title: string; value: string; status: 'ok' | 'warn' | 'bad' | 'neutral' }) {
   return (
-    <article className="surface-panel" style={{ padding: 14, border: '1px solid rgba(96, 165, 250, 0.24)' }}>
-      <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: 99, background: '#60a5fa', boxShadow: '0 0 0 3px rgba(96, 165, 250, 0.22)' }} />
-        Planificación incremental
-      </p>
-      <strong style={{ marginTop: 4, display: 'block', fontSize: 18, color: '#eff3ff' }}>Cobertura hasta {plannedLabel}</strong>
-      <p style={{ margin: '6px 0 0', color: '#9ca3bf', fontSize: 12 }}>{message ?? 'Completando rutas del resto del período mientras la simulación ya está corriendo.'}</p>
-      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', color: '#dbeafe', fontSize: 12 }}>
-        <span>Backlog restante</span>
-        <strong>{Math.max(0, backlog).toLocaleString('es-PE')} envíos</strong>
-      </div>
-    </article>
-  );
-}
-
-function formatTelemetryDate(value: string | null | undefined): string {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '-';
-  return date.toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'medium' });
-}
-
-function PeriodTelemetryCard({
-  seedTarget,
-  plannedThrough,
-  backlog,
-  batchCount,
-  lastBatchPlanned,
-  lastBatchFailed,
-  lastBatchElapsedMs,
-  lastBatchAt,
-  tickWaitCount,
-  tickLastElapsedMs,
-  tickLastWaitAt,
-}: {
-  seedTarget: string | null | undefined;
-  plannedThrough: string | null | undefined;
-  backlog: number;
-  batchCount: number;
-  lastBatchPlanned: number;
-  lastBatchFailed: number;
-  lastBatchElapsedMs: number;
-  lastBatchAt: string | null | undefined;
-  tickWaitCount: number;
-  tickLastElapsedMs: number;
-  tickLastWaitAt: string | null | undefined;
-}) {
-  return (
-    <article className="surface-panel" style={{ padding: 14 }}>
-      <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf' }}>Telemetría período</p>
-      <div style={{ marginTop: 10, display: 'grid', gap: 6, fontSize: 12, color: '#dbeafe' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Semilla hasta</span><strong>{formatTelemetryDate(seedTarget)}</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Cobertura actual</span><strong>{formatTelemetryDate(plannedThrough)}</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Backlog</span><strong>{Math.max(0, backlog).toLocaleString('es-PE')}</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Batches rolling</span><strong>{Math.max(0, batchCount).toLocaleString('es-PE')}</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último batch</span><strong>{lastBatchPlanned}/{lastBatchFailed} en {Math.max(0, lastBatchElapsedMs)} ms</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último batch at</span><strong>{formatTelemetryDate(lastBatchAt)}</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Tick waits</span><strong>{Math.max(0, tickWaitCount).toLocaleString('es-PE')}</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último tick</span><strong>{Math.max(0, tickLastElapsedMs)} ms</strong></div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><span>Último wait at</span><strong>{formatTelemetryDate(tickLastWaitAt)}</strong></div>
-      </div>
-    </article>
-  );
-}
-
-function KpiCard({ title, value, status }: { title: string; value: string; status: 'ok' | 'warn' | 'bad' }) {
-  return (
-    <article className="surface-panel" style={{ padding: 14 }}>
-      <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ width: 8, height: 8, borderRadius: 99, background: colorSemaforo(status), boxShadow: `0 0 0 3px ${colorSemaforo(status)}33` }} />
+    <article className="surface-panel" style={{ flex: 1, minHeight: 58, padding: '12px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, borderLeft: `3px solid ${colorSemaforo(status)}` }}>
+      <span style={{ fontSize: 12, color: '#a9b3cf', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 9, height: 9, borderRadius: 99, flexShrink: 0, background: colorSemaforo(status), boxShadow: `0 0 0 3px ${colorSemaforo(status)}33` }} />
         {title}
-      </p>
-      <strong style={{ marginTop: 4, display: 'block', fontSize: 24, color: '#eff3ff' }}>{value}</strong>
+      </span>
+      <strong style={{ fontSize: 26, color: '#eff3ff' }}>{value}</strong>
     </article>
   );
 }
@@ -504,12 +453,15 @@ export default function HomePage() {
   const [selectedNode, setSelectedNode] = useState<{ point: { longitude: number; latitude: number }; detail: NodeDetail } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savingConfig, setSavingConfig] = useState(false);
-  const [generatingDemand, setGeneratingDemand] = useState(false);
   const [draftDirty, setDraftDirty] = useState(false);
   const [alerts, setAlerts] = useState<OperationalAlert[]>([]);
   const [panelCollapsed, setPanelCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('pdds-panel-collapsed') === 'true';
+  });
+  const [kpisCollapsed, setKpisCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('pdds-kpis-collapsed') === 'true';
   });
   const [selectedFlightVisual, setSelectedFlightVisual] = useState<MapLiveFlight | null>(null);
   const [renderedFlights, setRenderedFlights] = useState<MapLiveFlight[]>([]);
@@ -526,11 +478,14 @@ export default function HomePage() {
     scenario: 'PERIOD_SIMULATION',
     simulationDays: 5,
     scenarioStartDate: '',
-    cancellationRatePct: 5,
-    intraNodeCapacity: 700,
-    interNodeCapacity: 800,
     normalThresholdPct: 70,
     warningThresholdPct: 90,
+    slaWarnPct: 90,
+    slaCritPct: 75,
+    riskShipmentsWarnPct: 10,
+    riskShipmentsCritPct: 25,
+    criticalNodesWarnPct: 10,
+    criticalNodesCritPct: 25,
   });
 
   const simulacionActiva = Boolean(sim?.running || sim?.paused);
@@ -538,7 +493,6 @@ export default function HomePage() {
   const canEditConfig = !simulacionActiva;
   const speedOptions = config.scenario === 'DAY_TO_DAY' ? [1] : SPEED_OPTIONS;
   const bootstrapping = Boolean(sim?.bootstrapping);
-  const rollingPlanning = Boolean(sim?.periodPlanningActive && !sim?.bootstrapping);
 
   const hydrateFromState = useCallback((state: typeof sim) => {
     if (!state) return;
@@ -547,12 +501,15 @@ export default function HomePage() {
     setConfig({
       scenario: state.scenario,
       simulationDays: state.simulationDays === 3 || state.simulationDays === 7 ? state.simulationDays : 5,
-      scenarioStartDate: toDateInput(effectiveStart),
-      cancellationRatePct: state.cancellationRatePct,
-      intraNodeCapacity: state.intraNodeCapacity,
-      interNodeCapacity: state.interNodeCapacity,
+      scenarioStartDate: toDateTimeInput(effectiveStart),
       normalThresholdPct: state.normalThresholdPct,
       warningThresholdPct: state.warningThresholdPct,
+      slaWarnPct: state.slaWarnPct,
+      slaCritPct: state.slaCritPct,
+      riskShipmentsWarnPct: state.riskShipmentsWarnPct,
+      riskShipmentsCritPct: state.riskShipmentsCritPct,
+      criticalNodesWarnPct: state.criticalNodesWarnPct,
+      criticalNodesCritPct: state.criticalNodesCritPct,
     });
   }, []);
 
@@ -690,12 +647,13 @@ export default function HomePage() {
         scenarioStartDate: config.scenarioStartDate || undefined,
         normalThresholdPct: config.normalThresholdPct,
         warningThresholdPct: config.warningThresholdPct,
+        slaWarnPct: config.slaWarnPct,
+        slaCritPct: config.slaCritPct,
+        riskShipmentsWarnPct: config.riskShipmentsWarnPct,
+        riskShipmentsCritPct: config.riskShipmentsCritPct,
+        criticalNodesWarnPct: config.criticalNodesWarnPct,
+        criticalNodesCritPct: config.criticalNodesCritPct,
       };
-      if (config.scenario === 'COLLAPSE_TEST') {
-        body.cancellationRatePct = config.cancellationRatePct;
-        body.intraNodeCapacity = config.intraNodeCapacity;
-        body.interNodeCapacity = config.interNodeCapacity;
-      }
       const updated = await simulationApi.configure(body);
       setSim(updated);
       hydrateFromState(updated);
@@ -766,23 +724,6 @@ export default function HomePage() {
     }
   }
 
-  async function onGenerateFutureDemand(): Promise<void> {
-    try {
-      setGeneratingDemand(true);
-      const today = new Date().toISOString().slice(0, 10);
-      const inThirtyDays = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      await importApi.projectFutureDemand({ projectionStart: today, projectionEnd: inThirtyDays });
-      const refreshed = await simulationApi.getState();
-      setSim(refreshed);
-      hydrateFromState(refreshed);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo generar demanda futura.');
-    } finally {
-      setGeneratingDemand(false);
-    }
-  }
-
   const openNode = useCallback(async (airport: Airport) => {
     try {
       const detail = await dashboardApi.getNodeDetail(airport.icaoCode);
@@ -828,8 +769,8 @@ export default function HomePage() {
     <div className="app-page" style={{ display: 'grid', gridTemplateRows: 'auto 1fr', gap: 0 }}>
       <header className="page-head">
         <div>
-          <h1 className="page-head-title">Centro de simulación</h1>
-          <p className="page-head-subtitle">Configura escenarios, ejecuta y monitorea la operación en tiempo real</p>
+          <h1 className="page-head-title">Tasf.B2B — Operación logística</h1>
+          <p className="page-head-subtitle">Monitoreo en tiempo real del traslado de equipaje entre aeropuertos</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-primary" disabled={simulacionActiva} onClick={onStart}>Iniciar</button>
@@ -851,7 +792,7 @@ export default function HomePage() {
       </header>
 
       <div style={{ padding: '14px 16px 16px 20px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: panelCollapsed ? '48px 1fr 320px' : '360px 1fr 320px', gap: 12, minHeight: 'calc(100vh - 110px)', transition: 'grid-template-columns 0.25s ease' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `${panelCollapsed ? '48px' : '340px'} 1fr ${kpisCollapsed ? '48px' : '300px'}`, gap: 12, minHeight: 'calc(100vh - 110px)', transition: 'grid-template-columns 0.25s ease' }}>
           <aside className="surface-panel" style={{ padding: panelCollapsed ? '14px 6px' : 14, overflowY: 'auto', position: 'relative' }}>
             <button
               onClick={() => {
@@ -891,8 +832,9 @@ export default function HomePage() {
               )}
 
                 <label>
-                <span style={{ fontSize: 12, color: '#9ca7c8' }}>Fecha del escenario</span>
-                <input disabled={!canEditConfig} type="date" value={config.scenarioStartDate} onChange={(e) => patchConfig({ scenarioStartDate: e.target.value })} style={field} />
+                <span style={{ fontSize: 12, color: '#9ca7c8' }}>Fecha y hora de inicio</span>
+                <input disabled={!canEditConfig} type="datetime-local" step={60} value={config.scenarioStartDate} onChange={(e) => patchConfig({ scenarioStartDate: e.target.value })} style={field} />
+                <span style={{ fontSize: 11, color: '#6b7392' }}>Vacío = primer envío importado (fecha y hora).</span>
               </label>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
@@ -906,51 +848,41 @@ export default function HomePage() {
                 </label>
               </div>
 
-              {config.scenario === 'COLLAPSE_TEST' && (
-                <>
-                  <label>
-                    <span style={{ fontSize: 12, color: '#9ca7c8' }}>Tasa de cancelación %</span>
-                    <input disabled={!canEditConfig} type="number" min={0} max={100} value={config.cancellationRatePct} onChange={(e) => patchConfig({ cancellationRatePct: Number(e.target.value) })} style={field} />
-                  </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    <label>
-                      <span style={{ fontSize: 12, color: '#9ca7c8' }}>Capacidad intra</span>
-                      <input disabled={!canEditConfig} type="number" min={200} max={5000} value={config.intraNodeCapacity} onChange={(e) => patchConfig({ intraNodeCapacity: Number(e.target.value) })} style={field} />
-                    </label>
-                    <label>
-                      <span style={{ fontSize: 12, color: '#9ca7c8' }}>Capacidad inter</span>
-                      <input disabled={!canEditConfig} type="number" min={200} max={5000} value={config.interNodeCapacity} onChange={(e) => patchConfig({ interNodeCapacity: Number(e.target.value) })} style={field} />
-                    </label>
-                  </div>
-                </>
-              )}
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#9ca7c8' }}>Umbrales del semáforo de KPIs de riesgo</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <label>
+                  <span style={{ fontSize: 12, color: '#9ca7c8' }}>SLA verde ≥ %</span>
+                  <input disabled={!canEditConfig} type="number" min={0} max={100} value={config.slaWarnPct} onChange={(e) => patchConfig({ slaWarnPct: Number(e.target.value) })} style={field} />
+                </label>
+                <label>
+                  <span style={{ fontSize: 12, color: '#9ca7c8' }}>SLA ámbar ≥ %</span>
+                  <input disabled={!canEditConfig} type="number" min={0} max={100} value={config.slaCritPct} onChange={(e) => patchConfig({ slaCritPct: Number(e.target.value) })} style={field} />
+                </label>
+                <label>
+                  <span style={{ fontSize: 12, color: '#9ca7c8' }}>Riesgo ámbar ≤ % activos</span>
+                  <input disabled={!canEditConfig} type="number" min={0} max={100} value={config.riskShipmentsWarnPct} onChange={(e) => patchConfig({ riskShipmentsWarnPct: Number(e.target.value) })} style={field} />
+                </label>
+                <label>
+                  <span style={{ fontSize: 12, color: '#9ca7c8' }}>Riesgo rojo &gt; % activos</span>
+                  <input disabled={!canEditConfig} type="number" min={0} max={100} value={config.riskShipmentsCritPct} onChange={(e) => patchConfig({ riskShipmentsCritPct: Number(e.target.value) })} style={field} />
+                </label>
+                <label>
+                  <span style={{ fontSize: 12, color: '#9ca7c8' }}>Nodos ámbar ≤ % nodos</span>
+                  <input disabled={!canEditConfig} type="number" min={0} max={100} value={config.criticalNodesWarnPct} onChange={(e) => patchConfig({ criticalNodesWarnPct: Number(e.target.value) })} style={field} />
+                </label>
+                <label>
+                  <span style={{ fontSize: 12, color: '#9ca7c8' }}>Nodos rojo &gt; % nodos</span>
+                  <input disabled={!canEditConfig} type="number" min={0} max={100} value={config.criticalNodesCritPct} onChange={(e) => patchConfig({ criticalNodesCritPct: Number(e.target.value) })} style={field} />
+                </label>
+              </div>
 
               <button className="btn btn-primary" disabled={!canEditConfig || savingConfig} onClick={() => void saveScenarioConfig()}>
                 {savingConfig ? 'Guardando...' : 'Guardar configuración'}
               </button>
 
-                <div className="state-panel" style={{ marginTop: 6 }}>
-                  <p className="state-panel-title">Estado runtime</p>
-                <p className="state-panel-copy">
-                  {!stateLoaded ? 'Cargando...' : sim?.paused ? 'Simulación pausada' : sim?.running ? 'Simulación corriendo' : 'Simulación detenida'}
-                  {stateLoaded && <>{' · '}{sim ? escenarioLabel(sim.scenario) : 'Sin estado'}</>}
-                </p>
-                  <p className="state-panel-copy">Demanda futura: {sim?.projectedDemandReady ? 'Lista' : 'No disponible'}</p>
-                  {!sim?.projectedDemandReady ? (
-                    <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-                      <p className="state-panel-copy" style={{ color: '#fbbf24' }}>
-                        Falta generar demanda futura para poder iniciar la simulación.
-                      </p>
-                      <button className="btn btn-neutral" disabled={generatingDemand || simulacionActiva} onClick={onGenerateFutureDemand}>
-                        {generatingDemand ? 'Generando...' : 'Generar demanda futura'}
-                      </button>
-                    </div>
-                  ) : null}
-                  <p className="state-panel-copy">Inicio efectivo: {sim?.effectiveScenarioStartAt ? new Date(sim.effectiveScenarioStartAt).toLocaleDateString('es-PE') : 'Sin definir'}</p>
-                  <p className="state-panel-copy">Modo de tiempo: {sim ? formatTimeScaleLabel(sim.simulationSecondsPerTick, sim.tickIntervalMs) : 'Sin definir'}</p>
-                 {config.scenario === 'DAY_TO_DAY' ? <p className="state-panel-copy">La operación día a día mantiene velocidad fija para preservar continuidad visual.</p> : null}
-                  {sim?.dateAdjusted && sim?.dateAdjustmentReason ? <p className="state-panel-copy" style={{ color: '#fbbf24' }}>{sim.dateAdjustmentReason}</p> : null}
-                </div>
+              {sim?.dateAdjusted && sim?.dateAdjustmentReason ? (
+                <p style={{ margin: 0, fontSize: 11, color: '#fbbf24' }}>{sim.dateAdjustmentReason}</p>
+              ) : null}
             </div>
               </>
             )}
@@ -978,13 +910,44 @@ export default function HomePage() {
             bootstrapMessage={sim?.bootstrapMessage}
           />
 
-          <aside style={{ display: 'grid', gap: 10, alignContent: 'start' }}>
-            <KpiCard title="Vuelos visibles" value={String(simulacionActiva ? mapLiveFlights.length : 0)} status={semaforoRiesgo(simulacionActiva ? mapLiveFlights.length : 0)} />
-            <KpiCard title="Próximos vuelos" value={String(simulacionActiva ? (overview?.nextScheduledFlights ?? 0) : 0)} status={semaforoRiesgo(simulacionActiva ? (overview?.nextScheduledFlights ?? 0) : 0)} />
-            <KpiCard title="Envíos operativos" value={String(simulacionActiva ? (overview?.shipmentsInRoute ?? 0) : 0)} status={semaforoRiesgo(simulacionActiva ? (overview?.shipmentsInRoute ?? 0) : 0)} />
-            <KpiCard title="SLA actual" value={fmtPct(simulacionActiva ? (overview?.slaCompliancePct ?? 100) : 100)} status={semaforoSla(simulacionActiva ? (overview?.slaCompliancePct ?? 100) : 100)} />
-            <KpiCard title="Nodos críticos" value={String(system?.criticoAirports ?? 0)} status={semaforoRiesgo(system?.criticoAirports ?? 0)} />
-            <KpiCard title="Envíos en riesgo" value={String(simulacionActiva ? (overview?.atRiskShipments ?? 0) : 0)} status={semaforoRiesgo(simulacionActiva ? (overview?.atRiskShipments ?? 0) : 0)} />
+          <aside style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: kpisCollapsed ? 'center' : 'space-between', minHeight: 28 }}>
+              {!kpisCollapsed && <span style={{ fontSize: 12, fontWeight: 700, color: '#9ca7c8' }}>Indicadores</span>}
+              <button
+                onClick={() => {
+                  const next = !kpisCollapsed;
+                  setKpisCollapsed(next);
+                  localStorage.setItem('pdds-kpis-collapsed', String(next));
+                }}
+                title={kpisCollapsed ? 'Expandir indicadores' : 'Colapsar indicadores'}
+                style={{ background: '#171a29', border: '1px solid #32364f', borderRadius: 6, color: '#9ca7c8', cursor: 'pointer', padding: '4px 8px', fontSize: 14 }}
+              >
+                {kpisCollapsed ? '◀' : '▶'}
+              </button>
+            </div>
+            {!kpisCollapsed && (
+            <>
+            {sim?.collapseDetectedAt ? (
+              <article className="surface-panel" style={{ padding: 14, border: '1px solid #ef4444', background: '#2a1414' }}>
+                <p style={{ margin: 0, fontSize: 12, color: '#fca5a5', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4 }}>Colapso detectado</p>
+                <strong style={{ marginTop: 6, display: 'block', fontSize: 18, color: '#fee2e2' }}>
+                  {formatSimTime(new Date(sim.collapseDetectedAt))}
+                </strong>
+                <p style={{ margin: '6px 0 0', color: '#fecaca', fontSize: 12 }}>
+                  Supervivencia: {sim.collapseSurvivalSeconds != null ? formatDuration(sim.collapseSurvivalSeconds) : '-'}
+                  {sim.collapseShipmentCode ? ` · Envío ${sim.collapseShipmentCode}` : ''}
+                </p>
+                <p style={{ margin: '4px 0 0', color: '#f8b4b4', fontSize: 11 }}>Primer envío que no llegó a tiempo. Simulación detenida.</p>
+              </article>
+            ) : null}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0 }}>
+            <KpiCard title="Vuelos visibles" value={String(simulacionActiva ? mapLiveFlights.length : 0)} status="neutral" />
+            <KpiCard title="Próximos vuelos" value={String(simulacionActiva ? (overview?.nextScheduledFlights ?? 0) : 0)} status="neutral" />
+            <KpiCard title="Envíos operativos" value={String(simulacionActiva ? (overview?.shipmentsInRoute ?? 0) : 0)} status="neutral" />
+            <KpiCard title="SLA actual" value={fmtPct(simulacionActiva ? (overview?.slaCompliancePct ?? 100) : 100)} status={semaforoSla(simulacionActiva ? (overview?.slaCompliancePct ?? 100) : 100, sim?.slaWarnPct ?? 90, sim?.slaCritPct ?? 75)} />
+            <KpiCard title="Nodos críticos" value={String(system?.criticoAirports ?? 0)} status={semaforoMax(((system?.criticoAirports ?? 0) / Math.max(1, system?.totalAirports ?? 0)) * 100, sim?.criticalNodesWarnPct ?? 10, sim?.criticalNodesCritPct ?? 25)} />
+            <KpiCard title="Envíos en riesgo" value={String(simulacionActiva ? (overview?.atRiskShipments ?? 0) : 0)} status={semaforoMax(simulacionActiva ? ((overview?.atRiskShipments ?? 0) / Math.max(1, (overview?.activeIntraShipments ?? 0) + (overview?.activeInterShipments ?? 0))) * 100 : 0, sim?.riskShipmentsWarnPct ?? 10, sim?.riskShipmentsCritPct ?? 25)} />
+            </div>
             <article className="surface-panel" style={{ padding: 14 }}>
               <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 99, background: simulacionActiva ? '#22c55e' : '#64748b' }} />
@@ -995,28 +958,6 @@ export default function HomePage() {
               </strong>
               {stateLoaded && sim ? <p style={{ margin: '6px 0 0', color: '#9ca3bf', fontSize: 12 }}>{formatTimeScaleLabel(sim.simulationSecondsPerTick, sim.tickIntervalMs)}</p> : null}
             </article>
-            {rollingPlanning ? (
-              <RollingPlanningCard
-                plannedThrough={sim?.periodPlannedThrough}
-                backlog={sim?.periodPlanningBacklog ?? 0}
-                message={sim?.bootstrapMessage}
-              />
-            ) : null}
-            {sim?.scenario === 'PERIOD_SIMULATION' ? (
-              <PeriodTelemetryCard
-                seedTarget={sim?.periodPlanningSeedTarget}
-                plannedThrough={sim?.periodPlannedThrough}
-                backlog={sim?.periodPlanningBacklog ?? 0}
-                batchCount={sim?.periodPlanningBatchCount ?? 0}
-                lastBatchPlanned={sim?.periodPlanningLastBatchPlanned ?? 0}
-                lastBatchFailed={sim?.periodPlanningLastBatchFailed ?? 0}
-                lastBatchElapsedMs={sim?.periodPlanningLastBatchElapsedMs ?? 0}
-                lastBatchAt={sim?.periodPlanningLastBatchAt}
-                tickWaitCount={sim?.periodTickWaitCount ?? 0}
-                tickLastElapsedMs={sim?.periodTickLastElapsedMs ?? 0}
-                tickLastWaitAt={sim?.periodTickLastWaitAt}
-              />
-            ) : null}
             <article className="surface-panel" style={{ padding: 14 }}>
               <p style={{ margin: 0, fontSize: 12, color: '#a9b3cf' }}>Alertas activas</p>
               {alerts.length === 0 ? (
@@ -1036,6 +977,8 @@ export default function HomePage() {
                 </div>
               )}
             </article>
+            </>
+            )}
           </aside>
         </div>
       </div>

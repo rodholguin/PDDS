@@ -1,0 +1,9 @@
+{
+  "findings": [
+    "KPIs finales inconsistentes: active=876 vs pending+inRoute=287711"
+  ],
+  "evidence": [
+    "Se validaron detalles completos de 12 envíos representativos del cierre",
+    "Se validaron detalles completos de 12 vuelos representativos del cierre"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "startedAt": "2026-04-26T15:18:23.87899",
+  "finishedAt": "2026-04-26T16:20:58.654Z",
+  "samples": 104,
+  "issuesFound": 1,
+  "distinctIssues": [
+    "Progreso temporal insuficiente: ratio=-0.25 por debajo del mínimo=0.85",
+    "No se observaron vuelos activos reales durante la corrida",
+    "No se observaron envíos operativos reales durante la corrida",
+    "Los KPIs operativos no reportaron vuelos activos durante la corrida"
+  ],
+  "successSignals": [
+    "La red de rutas estuvo disponible en todas las muestras",
+    "La simulación terminó limpia por backend sin quedar corriendo ni pausada"
+  ],
+  "artifactsDir": "C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\artifacts\\period-audit-2026-04-26T15-18-21-479Z"
+}

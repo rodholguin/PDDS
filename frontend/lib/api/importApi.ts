@@ -3,10 +3,8 @@ import type {
   DataImportLog,
   DatasetImportResult,
   DatasetStatus,
-  DemandGenerationResult,
   EnviosImportJobState,
   EnviosImportResult,
-  FutureDemandGenerationResult,
 } from '@/lib/types';
 import { download, upload, api } from './client';
 
@@ -41,31 +39,6 @@ export const importApi = {
 
   getLatestBenchmarkStatus: () =>
     api<BenchmarkJobState | { status: 'IDLE'; message: string }>('/api/import/benchmark/status'),
-
-  generateDemand: (payload: {
-    scenario: string;
-    size: number;
-    seed: number;
-    startHour: number;
-    algorithmName?: string;
-  }) =>
-    api<{ message: string; result: DemandGenerationResult }>('/api/import/demand/generate', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-
-  projectFutureDemand: (payload: {
-    historicalFrom?: string;
-    historicalTo?: string;
-    projectionStart?: string;
-    projectionEnd?: string;
-    randomSeed?: number;
-    randomNoisePct?: number;
-  }) =>
-    api<FutureDemandGenerationResult>('/api/import/demand/project-future', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
 
   importEnviosDataset: (payload?: {
     seed?: number;

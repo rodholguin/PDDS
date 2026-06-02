@@ -22,6 +22,12 @@ public record SimulationStateDto(
         int interNodeCapacity,
         int normalThresholdPct,
         int warningThresholdPct,
+        int slaWarnPct,
+        int slaCritPct,
+        int riskShipmentsWarnPct,
+        int riskShipmentsCritPct,
+        int criticalNodesWarnPct,
+        int criticalNodesCritPct,
         LocalDateTime scenarioStartAt,
         LocalDateTime requestedScenarioStartAt,
         LocalDateTime effectiveScenarioStartAt,
@@ -67,6 +73,9 @@ public record SimulationStateDto(
         LocalDateTime startedAt,
         LocalDateTime simulatedNow,
         LocalDateTime lastTickAt,
-        LocalDateTime updatedAt
+        LocalDateTime updatedAt,
+        LocalDateTime collapseDetectedAt,
+        String collapseShipmentCode,
+        Long collapseSurvivalSeconds
 ) {
 }

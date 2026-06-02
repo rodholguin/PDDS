@@ -13,8 +13,11 @@ import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.AlgorithmProfileService;
 import com.tasfb2b.service.SimulationEngineService;
+import com.tasfb2b.service.SimulationAsyncOperationsService;
 import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
+import com.tasfb2b.service.PeriodSimulationBootstrapService;
+import com.tasfb2b.service.WarmupService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,6 +63,12 @@ class SimulationControllerSeedStatisticalTest {
     @MockBean
     private FutureDemandProjectionService futureDemandProjectionService;
     @MockBean
+    private SimulationAsyncOperationsService simulationAsyncOperationsService;
+    @MockBean
+    private PeriodSimulationBootstrapService periodSimulationBootstrapService;
+    @MockBean
+    private WarmupService warmupService;
+    @MockBean
     private PlatformTransactionManager transactionManager;
 
     @BeforeEach
@@ -90,6 +99,12 @@ class SimulationControllerSeedStatisticalTest {
                 800,
                 70,
                 90,
+                90,
+                75,
+                10,
+                25,
+                10,
+                25,
                 null,
                 null,
                 null,
@@ -135,7 +150,10 @@ class SimulationControllerSeedStatisticalTest {
                 null,
                 null,
                 null,
-                java.time.LocalDateTime.now()
+                java.time.LocalDateTime.now(),
+                null,
+                null,
+                null
         ));
     }
 

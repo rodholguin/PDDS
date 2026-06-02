@@ -1,0 +1,19 @@
+{
+  "startedAt": "2026-04-27T03:21:00.417Z",
+  "references": [
+    {
+      "flightId": 21864893,
+      "flightCode": "FP1563R2029-06-15"
+    }
+  ],
+  "flights": [
+    {
+      "flightId": 21864893,
+      "flightCode": "FP1563R2029-06-15",
+      "maxJumpPx": 95.64,
+      "maxDivergencePx": 33.78,
+      "lastUiProgress": null
+    }
+  ],
+  "anomalyCount": 1
+}

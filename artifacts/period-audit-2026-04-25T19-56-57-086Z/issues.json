@@ -1,0 +1,50 @@
+[
+  {
+    "timestamp": "2026-04-25T20:36:19.838Z",
+    "issues": [
+      "Desfase vuelos visibles UI=8 backend=7"
+    ]
+  },
+  {
+    "timestamp": "2026-04-25T20:39:21.288Z",
+    "issues": [
+      "Desfase vuelos visibles UI=9 backend=8"
+    ]
+  },
+  {
+    "timestamp": "2026-04-25T22:00:19.800Z",
+    "issues": [
+      "Desfase vuelos visibles UI=15 backend=16"
+    ]
+  },
+  {
+    "timestamp": "2026-04-25T22:48:03.870Z",
+    "issues": [
+      "Desfase vuelos visibles UI=18 backend=19"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T01:22:49.820Z",
+    "issues": [
+      "Desfase vuelos visibles UI=19 backend=20"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T01:41:43.692Z",
+    "issues": [
+      "Desfase vuelos visibles UI=19 backend=20"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T02:07:11.580Z",
+    "issues": [
+      "Desfase vuelos visibles UI=12 backend=13"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T02:35:38.082Z",
+    "issues": [
+      "Desfase vuelos visibles UI=15 backend=14"
+    ]
+  }
+]

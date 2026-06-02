@@ -56,14 +56,15 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
             SELECT f.id FROM Flight f
             WHERE f.status = 'SCHEDULED'
               AND f.scheduledDeparture <= :horizon
-              AND f.scheduledArrival > :horizon
+              AND f.scheduledArrival > :simulatedNow
               AND EXISTS (
                     SELECT ts.id FROM TravelStop ts
                     WHERE ts.flight = f
                       AND ts.stopStatus = 'PENDING'
               )
             """)
-    List<Long> findRecoverableScheduledFlightIds(@Param("horizon") LocalDateTime horizon);
+    List<Long> findRecoverableScheduledFlightIds(@Param("simulatedNow") LocalDateTime simulatedNow,
+                                                 @Param("horizon") LocalDateTime horizon);
 
     @Query("""
             SELECT f.id FROM Flight f
@@ -100,6 +101,15 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
 
     @Query("SELECT MIN(f.scheduledDeparture) FROM Flight f WHERE f.scheduledDeparture IS NOT NULL")
     LocalDateTime findEarliestScheduledDeparture();
+
+    /**
+     * Fecha de salida más temprana de un vuelo TEMPLATE (original del archivo, no recurrente).
+     * Los clones recurrentes tienen código {@code baseCode + "R" + yyyy-MM-dd}; este filtro los excluye.
+     * Se usa para hallar el día patrón de forma estable: una vez que existen clones (p.ej. de enero),
+     * el "vuelo más temprano" pasa a ser un clone y la búsqueda de templates fallaría.
+     */
+    @Query("SELECT MIN(f.scheduledDeparture) FROM Flight f WHERE f.scheduledDeparture IS NOT NULL AND f.flightCode NOT LIKE '%R____-__-__'")
+    LocalDateTime findEarliestTemplateDeparture();
 
     @Query("""
             SELECT f FROM Flight f

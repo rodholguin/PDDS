@@ -1,0 +1,19 @@
+{
+  "startedAt": "2026-04-26T12:22:54.97565",
+  "finishedAt": "2026-04-26T12:56:18.025Z",
+  "samples": 56,
+  "issuesFound": 1,
+  "distinctIssues": [
+    "Fallos consecutivos de backend: 1",
+    "state: status=0 error=fetch failed",
+    "overview: status=0 error=fetch failed",
+    "system: status=0 error=fetch failed",
+    "alerts: status=0 error=fetch failed",
+    "mapFlights: status=0 error=fetch failed",
+    "mapShipments: status=0 error=fetch failed",
+    "collapseRisk: status=0 error=fetch failed",
+    "routes: status=0 error=fetch failed",
+    "nodeOpkc: status=0 error=fetch failed"
+  ],
+  "artifactsDir": "C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\artifacts\\period-audit-2026-04-26T12-22-52-928Z"
+}

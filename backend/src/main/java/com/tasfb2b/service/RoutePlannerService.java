@@ -588,11 +588,25 @@ public class RoutePlannerService {
         };
     }
 
+    // Caché corta del SimulationConfig. evaluateCandidate() llama a getConfig() hasta ~64 veces por envío
+    // (una por par de piernas evaluado en el one-hop); sin caché eso eran decenas de queries por envío y el
+    // costo dominante del planner. TTL de 1s → como mucho 1 query/seg; la config casi no cambia en corrida.
+    private volatile SimulationConfig cachedConfig;
+    private volatile long cachedConfigAtNanos;
+    private static final long CONFIG_CACHE_TTL_NANOS = 1_000_000_000L;
+
     private SimulationConfig getConfig() {
+        SimulationConfig cached = cachedConfig;
+        if (cached != null && (System.nanoTime() - cachedConfigAtNanos) < CONFIG_CACHE_TTL_NANOS) {
+            return cached;
+        }
         SimulationConfig config = configRepository.findTopByOrderByIdAsc();
-        return config != null
-                ? config
-                : configRepository.save(SimulationConfig.builder().build());
+        if (config == null) {
+            config = configRepository.save(SimulationConfig.builder().build());
+        }
+        cachedConfig = config;
+        cachedConfigAtNanos = System.nanoTime();
+        return config;
     }
 
     private void allocateFlightLoads(Shipment shipment, List<TravelStop> stops, boolean persistImmediately) {
@@ -741,21 +755,23 @@ public class RoutePlannerService {
                                                    List<Flight> eligibleFlights,
                                                    List<Flight> candidateFlights) {
         Map<Long, List<Flight>> eligibleFlightsByOrigin = RoutePlanningSupport.planningIndexByOrigin(eligibleFlights);
+        Map<Long, List<Flight>> connectionIndex = connectionIndexByOrigin(eligibleFlights, candidateFlights);
         CandidatePlan directCandidate = evaluateCandidate(shipment, "DIRECT", buildDirectCandidate(shipment, eligibleFlightsByOrigin));
-        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, eligibleFlightsByOrigin);
+        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, connectionIndex);
         CandidatePlan fastPathCandidate = chooseFastPathCandidate(directCandidate, oneHopCandidate);
         return new PlanningContext(eligibleFlights, candidateFlights, directCandidate, oneHopCandidate, fastPathCandidate, difficultyFor(candidateFlights.size(), fastPathCandidate));
     }
 
     private PlanningContext prepareBootstrapPlanningContext(Shipment shipment,
                                                            List<Flight> eligibleFlights) {
+        // candidateFlights se calcula SIEMPRE (no condicional): el fallback de mejor esfuerzo lo necesita
+        // cuando el candidato barato (directo/one-hop) llega tarde. Incluye vuelos de hubs (2das piernas).
+        List<Flight> candidateFlights = RoutePlanningSupport.planningCandidatesFromEligible(shipment, eligibleFlights);
         Map<Long, List<Flight>> eligibleFlightsByOrigin = RoutePlanningSupport.planningIndexByOrigin(eligibleFlights);
+        Map<Long, List<Flight>> connectionIndex = connectionIndexByOrigin(eligibleFlights, candidateFlights);
         CandidatePlan directCandidate = evaluateCandidate(shipment, "DIRECT", buildDirectCandidate(shipment, eligibleFlightsByOrigin));
-        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, eligibleFlightsByOrigin);
+        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, connectionIndex);
         CandidatePlan fastPathCandidate = chooseFastPathCandidate(directCandidate, oneHopCandidate);
-        List<Flight> candidateFlights = directCandidate.stops().isEmpty() && oneHopCandidate.stops().isEmpty()
-                ? RoutePlanningSupport.planningCandidatesFromEligible(shipment, eligibleFlights)
-                : List.of();
         return new PlanningContext(
                 eligibleFlights,
                 candidateFlights,
@@ -769,13 +785,16 @@ public class RoutePlannerService {
     private PlanningContext prepareBootstrapPlanningContext(Shipment shipment,
                                                            RoutePlanningSupport.PlanningFlightIndex flightIndex) {
         List<Flight> eligibleFlights = RoutePlanningSupport.eligiblePlanningFlightsFromIndex(shipment, flightIndex);
+        // BUG raíz: eligiblePlanningFlightsFromIndex solo trae vuelos que SALEN del origen, así que el
+        // one-hop nunca veía 2das piernas (hub->destino) y, al existir un directo (aunque tardío), se
+        // asignaba el directo → colapso espurio. candidateFlights SÍ incluye vuelos de hubs y llegadas
+        // al destino; se calcula siempre y alimenta tanto el one-hop como el fallback de mejor esfuerzo.
+        List<Flight> candidateFlights = RoutePlanningSupport.planningCandidatesFromIndex(shipment, flightIndex);
         Map<Long, List<Flight>> eligibleFlightsByOrigin = RoutePlanningSupport.planningIndexByOrigin(eligibleFlights);
+        Map<Long, List<Flight>> connectionIndex = connectionIndexByOrigin(eligibleFlights, candidateFlights);
         CandidatePlan directCandidate = evaluateCandidate(shipment, "DIRECT", buildDirectCandidate(shipment, eligibleFlightsByOrigin));
-        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, eligibleFlightsByOrigin);
+        CandidatePlan oneHopCandidate = buildDominantOneHopCandidate(shipment, connectionIndex);
         CandidatePlan fastPathCandidate = chooseFastPathCandidate(directCandidate, oneHopCandidate);
-        List<Flight> candidateFlights = directCandidate.stops().isEmpty() && oneHopCandidate.stops().isEmpty()
-                ? RoutePlanningSupport.planningCandidatesFromIndex(shipment, flightIndex)
-                : List.of();
         return new PlanningContext(
                 eligibleFlights,
                 candidateFlights,
@@ -794,12 +813,47 @@ public class RoutePlannerService {
     private CandidatePlan selectBootstrapCandidate(Shipment shipment,
                                                    PlanningContext planning) {
         CandidatePlan bestCheapCandidate = selectBestCandidate(planning.directCandidate(), planning.oneHopCandidate());
-        if (!bestCheapCandidate.stops().isEmpty()) {
+        // Solo aceptamos el candidato barato si llega A TIEMPO. Si missea el deadline (o no existe),
+        // enumeramos rutas multi-tramo de mejor esfuerzo: puede haber una conexión que SÍ cumpla el plazo
+        // (p.ej. el directo llega tarde pero origen->hub->destino llega antes). Antes se devolvía el
+        // directo tardío de inmediato → colapso espurio aunque existiera ruta factible.
+        if (!bestCheapCandidate.stops().isEmpty() && !missesDeadline(shipment, bestCheapCandidate)) {
             return bestCheapCandidate;
         }
         List<TravelStop> stops = FastRoutePlanning.planBestEffort(shipment, planning.candidateFlights());
         CandidatePlan bootstrapCandidate = evaluateCandidate(shipment, "FAST_BOOTSTRAP", stops);
         return selectBestCandidate(bestCheapCandidate, bootstrapCandidate);
+    }
+
+    private boolean missesDeadline(Shipment shipment, CandidatePlan candidate) {
+        if (shipment == null || shipment.getDeadline() == null || candidate == null || candidate.stops().isEmpty()) {
+            return false;
+        }
+        return candidate.stops().stream()
+                .filter(stop -> stop.getFlight() != null)
+                .map(stop -> stop.getFlight().getScheduledArrival())
+                .filter(java.util.Objects::nonNull)
+                .max(LocalDateTime::compareTo)
+                .map(arrival -> arrival.isAfter(shipment.getDeadline()))
+                .orElse(false);
+    }
+
+    /**
+     * Índice por aeropuerto de origen que UNE vuelos elegibles (1ras piernas desde el origen del envío)
+     * con los vuelos candidatos (incluye salidas de hubs intermedios y llegadas al destino). El one-hop
+     * necesita ver las 2das piernas (hub->destino); con solo los vuelos del origen quedaba ciego.
+     */
+    private Map<Long, List<Flight>> connectionIndexByOrigin(List<Flight> primary, List<Flight> secondary) {
+        java.util.LinkedHashMap<Long, Flight> merged = new java.util.LinkedHashMap<>();
+        for (List<Flight> list : java.util.Arrays.asList(primary, secondary)) {
+            if (list == null) continue;
+            for (Flight flight : list) {
+                if (flight != null && flight.getId() != null) {
+                    merged.putIfAbsent(flight.getId(), flight);
+                }
+            }
+        }
+        return RoutePlanningSupport.planningIndexByOrigin(new java.util.ArrayList<>(merged.values()));
     }
 
     private ShipmentDifficulty difficultyFor(int candidateCount, CandidatePlan fastPathCandidate) {

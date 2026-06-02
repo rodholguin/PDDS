@@ -29,10 +29,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class SimulationAsyncOperationsService {
 
     private static final Logger log = LoggerFactory.getLogger(SimulationAsyncOperationsService.class);
-    private static final int DAY_TO_DAY_BATCH = 8;
-    private static final int COLLAPSE_BATCH = 8;
-    private static final int PERIOD_BATCH = 16;
+    private static final int DAY_TO_DAY_BATCH = 64;
+    private static final int COLLAPSE_BATCH = 256;
+    private static final int PERIOD_BATCH = 256;
     private static final long OVERDUE_SCAN_MS = 10_000L;
+    // El planner procesa varios lotes seguidos hasta agotar este presupuesto por invocacion (en vez de 1
+    // lote pequeño cada 250ms), reusando el indice de vuelos cacheado → throughput mucho mayor.
+    private static final long PLANNING_BUDGET_NANOS = 1_500_000_000L;
+    // La ventana de vuelos del indice cubre el registro del lote + este lapso, y se reusa mientras siga
+    // cubriendo los lotes siguientes (que avanzan en tiempo de registro) → amortiza el costoso load.
+    private static final long FLIGHT_INDEX_SPAN_DAYS = 2L;
 
     private final SimulationConfigRepository simulationConfigRepository;
     private final SimulationRuntimeService runtimeService;
@@ -43,6 +49,16 @@ public class SimulationAsyncOperationsService {
     private final TransactionTemplate transactionTemplate;
     private final AtomicBoolean planningInProgress = new AtomicBoolean(false);
     private final AtomicBoolean overdueScanInProgress = new AtomicBoolean(false);
+
+    // Caché del índice de vuelos. Reconstruir la ventana de vuelos + el índice por lote es el costo
+    // DOMINANTE del planner (con millones de clones de vuelos materializados). Se reusa entre lotes e
+    // invocaciones mientras la ventana cubra el registro del lote → el load se amortiza sobre miles de
+    // envíos en vez de 8-16. Solo lo usa el hilo del planner (single-flight via planningInProgress).
+    private List<Airport> cachedAirports;
+    private RoutePlanningSupport.PlanningFlightIndex cachedFlightIndex;
+    private LocalDateTime cachedIndexFrom;
+    private LocalDateTime cachedIndexTo;
+    private LocalDateTime cachedRunStartedAt;
 
     public SimulationAsyncOperationsService(
             SimulationConfigRepository simulationConfigRepository,
@@ -72,7 +88,8 @@ public class SimulationAsyncOperationsService {
             if (!shouldRunPlanning(config)) {
                 return;
             }
-            if (config.getScenario() == SimulationScenario.PERIOD_SIMULATION) {
+            if (config.getScenario() == SimulationScenario.PERIOD_SIMULATION
+                    || config.getScenario() == SimulationScenario.COLLAPSE_TEST) {
                 processPeriodPlanningBacklog(config);
                 return;
             }
@@ -239,66 +256,88 @@ public class SimulationAsyncOperationsService {
         if (periodStart == null) {
             return;
         }
-        LocalDateTime periodEnd = periodStart.plusDays(Math.max(1, config.getSimulationDays() == null ? 5 : config.getSimulationDays()));
+        LocalDateTime periodEnd = runtimeService.resolveScenarioEnd(config);
+        if (periodEnd == null) {
+            periodEnd = periodStart.plusDays(Math.max(1, config.getSimulationDays() == null ? 5 : config.getSimulationDays()));
+        }
         long backlog = shipmentRepository.countPendingWithoutRouteForPlanningInPeriod(periodStart, periodEnd);
         if (backlog <= 0L) {
+            invalidateFlightIndexCache();
             runtimeService.updatePeriodPlanningProgress(periodEnd, 0L, "Planificacion incremental del periodo completada");
             return;
         }
 
         int batchSize = planningBatchForScenario(config.getScenario());
-        List<Shipment> pending = shipmentRepository.findPendingWithoutRouteForPlanningInPeriod(periodStart, periodEnd, batchSize);
-        if (pending.isEmpty()) {
-            runtimeService.updatePeriodPlanningProgress(periodEnd, backlog, "Esperando siguiente lote de planificacion del periodo");
-            return;
+        if (cachedAirports == null) {
+            cachedAirports = routePlannerService.allAirports();
         }
 
         long startedAt = System.nanoTime();
-        LocalDateTime minRegistration = pending.stream()
-                .map(Shipment::getRegistrationDate)
-                .filter(java.util.Objects::nonNull)
-                .min(LocalDateTime::compareTo)
-                .orElse(periodStart);
-        LocalDateTime maxRegistration = pending.stream()
-                .map(Shipment::getRegistrationDate)
-                .filter(java.util.Objects::nonNull)
-                .max(LocalDateTime::compareTo)
-                .orElse(periodStart);
-
-        List<Flight> flights = routePlannerService.schedulableFlightsForExistingWindow(minRegistration, periodEnd.plusDays(3));
-        RoutePlanningSupport.PlanningFlightIndex flightIndex = RoutePlanningSupport.buildPlanningFlightIndex(flights);
-        List<Airport> airports = routePlannerService.allAirports();
-
+        long budgetEnd = startedAt + PLANNING_BUDGET_NANOS;
+        String algorithmName = routePlannerService.activeAlgorithmName();
         int planned = 0;
         int failed = 0;
-        for (Long shipmentId : pending.stream().map(Shipment::getId).toList()) {
-            try {
-                List<TravelStop> stops = transactionTemplate.execute(status -> {
-                    Shipment shipment = shipmentRepository.findById(shipmentId).orElse(null);
-                    if (shipment == null || shipment.getStatus() != ShipmentStatus.PENDING || travelStopRepository.existsByShipmentId(shipmentId)) {
-                        return List.<TravelStop>of();
-                    }
-                    return routePlannerService.planShipment(
-                            shipment,
-                            routePlannerService.activeAlgorithmName(),
-                            flightIndex,
-                            airports,
-                            true,
-                            false,
-                            true
-                    );
-                });
-                if (stops == null) {
-                    failed++;
-                } else if (!stops.isEmpty()) {
-                    planned++;
-                    applyReservedLoadSnapshot(stops);
-                }
-            } catch (Exception ex) {
-                failed++;
-                log.debug("Planning worker periodo: no se pudo planificar envio {}: {}", shipmentId, ex.getMessage());
+        int processedBatches = 0;
+
+        // Loop con presupuesto de tiempo: procesa varios lotes seguidos por invocacion (en vez de 1 lote
+        // pequeño cada 250ms), reusando el indice de vuelos cacheado mientras la ventana lo cubra. Asi el
+        // costoso load de vuelos se amortiza sobre miles de envios y se eliminan los huecos entre ticks.
+        do {
+            List<Shipment> pending = shipmentRepository.findPendingWithoutRouteForPlanningInPeriod(periodStart, periodEnd, batchSize);
+            if (pending.isEmpty()) {
+                break;
             }
-        }
+            LocalDateTime minRegistration = pending.stream()
+                    .map(Shipment::getRegistrationDate)
+                    .filter(java.util.Objects::nonNull)
+                    .min(LocalDateTime::compareTo)
+                    .orElse(periodStart);
+            LocalDateTime maxRegistration = pending.stream()
+                    .map(Shipment::getRegistrationDate)
+                    .filter(java.util.Objects::nonNull)
+                    .max(LocalDateTime::compareTo)
+                    .orElse(periodStart);
+
+            RoutePlanningSupport.PlanningFlightIndex flightIndex = flightIndexFor(config.getStartedAt(), minRegistration, maxRegistration);
+            List<Airport> airports = cachedAirports;
+
+            int plannedBefore = planned;
+            for (Long shipmentId : pending.stream().map(Shipment::getId).toList()) {
+                try {
+                    List<TravelStop> stops = transactionTemplate.execute(status -> {
+                        Shipment shipment = shipmentRepository.findByIdWithAirports(shipmentId).orElse(null);
+                        // existsByShipmentId era redundante: la query del lote ya filtra NOT EXISTS travel_stop
+                        // y el planner es de un solo hilo. Se elimina (1 query menos por envío).
+                        if (shipment == null || shipment.getStatus() != ShipmentStatus.PENDING) {
+                            return List.<TravelStop>of();
+                        }
+                        return routePlannerService.planShipment(
+                                shipment,
+                                algorithmName,
+                                flightIndex,
+                                airports,
+                                true,
+                                false,
+                                true
+                        );
+                    });
+                    if (stops == null) {
+                        failed++;
+                    } else if (!stops.isEmpty()) {
+                        planned++;
+                        applyReservedLoadSnapshot(stops);
+                    }
+                } catch (Exception ex) {
+                    failed++;
+                    log.debug("Planning worker periodo: no se pudo planificar envio {}: {}", shipmentId, ex.getMessage());
+                }
+            }
+            processedBatches++;
+            // Si el lote no produjo NINGUN avance (todo fallo/saltado), no insistir en bucle apretado.
+            if (planned == plannedBefore) {
+                break;
+            }
+        } while (System.nanoTime() < budgetEnd);
 
         long remainingBacklog = shipmentRepository.countPendingWithoutRouteForPlanningInPeriod(periodStart, periodEnd);
         LocalDateTime earliestUnplanned = shipmentRepository.findEarliestUnplannedRegistrationInPeriod(periodStart, periodEnd);
@@ -314,15 +353,51 @@ public class SimulationAsyncOperationsService {
         runtimeService.recordPeriodPlanningBatch(planned, failed, elapsedMs);
         if (elapsedMs > 500L || planned > 0 || failed > 0 || remainingBacklog > batchSize) {
             log.info(
-                    "Planning worker escenario={} backlog={} batch={} planned={} failed={} elapsed={} ms",
+                    "Planning worker escenario={} backlog={} batches={} planned={} failed={} elapsed={} ms",
                     config.getScenario(),
                     remainingBacklog,
-                    pending.size(),
+                    processedBatches,
                     planned,
                     failed,
                     elapsedMs
             );
         }
+    }
+
+    /**
+     * Devuelve el índice de vuelos para la ventana del lote, reusando el caché mientras siga cubriendo
+     * [minRegistration, maxRegistration + holgura]. Reconstruir la ventana + índice es el costo dominante;
+     * como los lotes avanzan en tiempo de registro, una sola construcción sirve para ~FLIGHT_INDEX_SPAN_DAYS
+     * de avance. Se invalida al cambiar de corrida (periodStart distinto) o al completar el backlog.
+     */
+    private RoutePlanningSupport.PlanningFlightIndex flightIndexFor(LocalDateTime runStartedAt,
+                                                                    LocalDateTime minRegistration,
+                                                                    LocalDateTime maxRegistration) {
+        boolean sameRun = runStartedAt != null && runStartedAt.equals(cachedRunStartedAt);
+        boolean covered = cachedFlightIndex != null
+                && cachedIndexFrom != null
+                && cachedIndexTo != null
+                && !minRegistration.isBefore(cachedIndexFrom)
+                && !maxRegistration.plusDays(3).isAfter(cachedIndexTo);
+        if (sameRun && covered) {
+            return cachedFlightIndex;
+        }
+        LocalDateTime from = minRegistration;
+        LocalDateTime to = maxRegistration.plusDays(FLIGHT_INDEX_SPAN_DAYS + 3L);
+        List<Flight> flights = routePlannerService.availableFlightsForWindow(from, to);
+        cachedFlightIndex = RoutePlanningSupport.buildPlanningFlightIndex(flights);
+        cachedIndexFrom = from;
+        cachedIndexTo = to;
+        cachedRunStartedAt = runStartedAt;
+        return cachedFlightIndex;
+    }
+
+    private void invalidateFlightIndexCache() {
+        cachedFlightIndex = null;
+        cachedIndexFrom = null;
+        cachedIndexTo = null;
+        cachedRunStartedAt = null;
+        cachedAirports = null;
     }
 
     private void applyReservedLoadSnapshot(List<TravelStop> stops) {

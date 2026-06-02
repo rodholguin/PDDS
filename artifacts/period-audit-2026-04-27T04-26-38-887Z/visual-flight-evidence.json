@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2026-04-27T04:27:32.526Z",
+    "simulatedNow": "2029-06-16T00:19:04",
+    "anomaly": "REFERENCE_SELECTION",
+    "severity": "info",
+    "references": [
+      {
+        "flightId": 21866646,
+        "flightCode": "FP0450R2029-06-16"
+      }
+    ]
+  }
+]

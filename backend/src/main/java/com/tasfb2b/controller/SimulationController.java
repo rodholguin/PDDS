@@ -13,7 +13,6 @@ import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
 import com.tasfb2b.service.CollapseMonitorService;
 import com.tasfb2b.service.AlgorithmRaceService;
-import com.tasfb2b.service.FutureDemandProjectionService;
 import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
@@ -66,7 +65,6 @@ public class SimulationController {
     private final SimulationAsyncOperationsService simulationAsyncOperationsService;
     private final AlgorithmProfileService algorithmProfileService;
     private final FlightScheduleService flightScheduleService;
-    private final FutureDemandProjectionService futureDemandProjectionService;
     private final PeriodSimulationBootstrapService periodSimulationBootstrapService;
     private final WarmupService warmupService;
 
@@ -83,7 +81,6 @@ public class SimulationController {
             SimulationAsyncOperationsService simulationAsyncOperationsService,
             AlgorithmProfileService algorithmProfileService,
             FlightScheduleService flightScheduleService,
-            FutureDemandProjectionService futureDemandProjectionService,
             PeriodSimulationBootstrapService periodSimulationBootstrapService,
             WarmupService warmupService
     ) {
@@ -99,7 +96,6 @@ public class SimulationController {
         this.simulationAsyncOperationsService = simulationAsyncOperationsService;
         this.algorithmProfileService = algorithmProfileService;
         this.flightScheduleService = flightScheduleService;
-        this.futureDemandProjectionService = futureDemandProjectionService;
         this.periodSimulationBootstrapService = periodSimulationBootstrapService;
         this.warmupService = warmupService;
     }
@@ -132,8 +128,14 @@ public class SimulationController {
         if (dto.interNodeCapacity() != null) config.setInterNodeCapacity(dto.interNodeCapacity());
         if (dto.normalThresholdPct() != null) config.setNormalThresholdPct(dto.normalThresholdPct());
         if (dto.warningThresholdPct() != null) config.setWarningThresholdPct(dto.warningThresholdPct());
+        if (dto.slaWarnPct() != null) config.setSlaWarnPct(dto.slaWarnPct());
+        if (dto.slaCritPct() != null) config.setSlaCritPct(dto.slaCritPct());
+        if (dto.riskShipmentsWarnPct() != null) config.setRiskShipmentsWarnPct(dto.riskShipmentsWarnPct());
+        if (dto.riskShipmentsCritPct() != null) config.setRiskShipmentsCritPct(dto.riskShipmentsCritPct());
+        if (dto.criticalNodesWarnPct() != null) config.setCriticalNodesWarnPct(dto.criticalNodesWarnPct());
+        if (dto.criticalNodesCritPct() != null) config.setCriticalNodesCritPct(dto.criticalNodesCritPct());
         if (dto.scenarioStartDate() != null) {
-            LocalDateTime scenarioStart = dto.scenarioStartDate().atStartOfDay();
+            LocalDateTime scenarioStart = dto.scenarioStartDate();
             config.setRequestedScenarioStartAt(scenarioStart);
             config.setScenarioStartAt(scenarioStart);
             config.setEffectiveScenarioStartAt(scenarioStart);
@@ -152,11 +154,6 @@ public class SimulationController {
     @Operation(summary = "Iniciar simulación")
     public ResponseEntity<?> start() {
         SimulationConfig config = getConfig();
-        if (!Boolean.TRUE.equals(config.getProjectedDemandReady())) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "error", "Genera demanda futura antes de iniciar la simulacion"
-            ));
-        }
         if (Boolean.TRUE.equals(config.getIsRunning()) && runtimeService.isPaused()) {
             runtimeService.markResumed();
             return ResponseEntity.ok(Map.of(
@@ -174,27 +171,32 @@ public class SimulationController {
         // Issue 7.2: resolve scenario/date mutations BEFORE flipping isRunning so that concurrent
         // ticks never observe running=true with stale scenarioStartAt/effectiveScenarioStartAt.
         config.setStartedAt(LocalDateTime.now());
+        // Reiniciar la marca de colapso para empezar una nueva corrida limpia.
+        config.setCollapseDetectedAtSim(null);
+        config.setCollapseShipmentId(null);
+        config.setCollapseShipmentCode(null);
 
         // Cuando una simulacion previa termino automaticamente, preservamos su estado final
         // hasta que el operador inicie una nueva corrida. En ese momento limpiamos la operacion
         // anterior antes de bootstrap/arranque para empezar desde un estado consistente.
         runtimeService.resetOperationalData();
 
+        // Nota: las capacidades (vuelos y nodos) son fijas del dataset; NO se sobrescriben.
+        // El almacén de nodos además es cosmético para el colapso por deadline (el ruteo sólo
+        // respeta la capacidad de VUELOS). La palanca legítima para retrasar el colapso es el ruteo.
         LocalDateTime minDemand = shipmentRepository.findMinRegistrationDate();
         LocalDateTime maxDemand = shipmentRepository.findMaxRegistrationDate();
         LocalDateTime desiredStart = config.getScenarioStartAt();
         config.setRequestedScenarioStartAt(desiredStart);
 
-        // Default to projected demand start when no explicit start date is set
-        if (desiredStart == null
-                && Boolean.TRUE.equals(config.getProjectedDemandReady())
-                && config.getProjectedFrom() != null) {
-            desiredStart = config.getProjectedFrom().atStartOfDay();
+        // Sin fecha explícita, la simulación arranca en el día del primer envío importado.
+        if (desiredStart == null && minDemand != null) {
+            desiredStart = minDemand;
             config.setScenarioStartAt(desiredStart);
             config.setEffectiveScenarioStartAt(desiredStart);
             config.setDateAdjusted(false);
-            config.setDateAdjustmentReason("Fecha no enviada; se usa inicio de demanda proyectada");
-            log.info("scenarioStartAt defaulted to projectedFrom: {}", desiredStart);
+            config.setDateAdjustmentReason("Fecha no enviada; se usa el primer día de envíos importados");
+            log.info("scenarioStartAt por defecto al primer envío: {}", desiredStart);
         }
 
         boolean dateAdjusted = false;
@@ -202,16 +204,14 @@ public class SimulationController {
         if (minDemand != null) {
             if (desiredStart == null || desiredStart.isBefore(minDemand)
                     || (maxDemand != null && desiredStart.isAfter(maxDemand))) {
-                // Prefer projected demand start over earliest historical date
-                LocalDateTime fallback = (config.getProjectedFrom() != null)
-                        ? config.getProjectedFrom().atStartOfDay()
-                        : minDemand;
+                // Ajustar al rango disponible de envíos importados (primer envío).
+                LocalDateTime fallback = minDemand;
                 log.warn("scenarioStartAt ajustado: solicitado={}, rango=[{}, {}], usando={}",
                         desiredStart, minDemand, maxDemand, fallback);
                 desiredStart = fallback;
                 config.setScenarioStartAt(desiredStart);
                 dateAdjusted = true;
-                adjustmentReason = "Fecha ajustada al rango de demanda disponible";
+                adjustmentReason = "Fecha ajustada al rango de envíos disponibles";
             }
         }
         config.setEffectiveScenarioStartAt(desiredStart);

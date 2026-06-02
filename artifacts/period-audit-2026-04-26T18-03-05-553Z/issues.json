@@ -1,0 +1,16 @@
+[
+  {
+    "timestamp": "2026-04-26T18:03:13.011Z",
+    "issues": [
+      "UI no muestra simulación corriendo mientras backend indica running=true",
+      "Fallo capturando UI: page.goto: net::ERR_EMPTY_RESPONSE at http://127.0.0.1:3000/\nCall log:\n\u001b[2m  - navigating to \"http://127.0.0.1:3000/\", waiting until \"domcontentloaded\"\u001b[22m\n\n    at captureUi (C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\tools\\period-simulation-audit.mjs:150:14)\n    at main (C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\tools\\period-simulation-audit.mjs:411:20)",
+      "Fallos consecutivos de UI: 1"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:15:37.725Z",
+    "issues": [
+      "No se observaron envíos operativos reales durante la corrida"
+    ]
+  }
+]

@@ -1,10 +1,7 @@
 package com.tasfb2b.controller;
 
-import com.tasfb2b.dto.DemandGenerationRequestDto;
 import com.tasfb2b.dto.DatasetStatusDto;
 import com.tasfb2b.dto.EnviosDatasetImportRequestDto;
-import com.tasfb2b.dto.FutureDemandGenerationRequestDto;
-import com.tasfb2b.dto.FutureDemandGenerationResultDto;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.DataImportLog;
 import com.tasfb2b.model.SimulationConfig;
@@ -12,12 +9,9 @@ import com.tasfb2b.repository.DataImportLogRepository;
 import com.tasfb2b.service.BenchmarkTuningService;
 import com.tasfb2b.service.BenchmarkJobService;
 import com.tasfb2b.service.DataImportService;
-import com.tasfb2b.service.DemandGenerationService;
 import com.tasfb2b.service.EnviosImportJobService;
-import com.tasfb2b.service.FutureDemandProjectionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -40,10 +34,8 @@ public class DataImportController {
     private final DataImportLogRepository importLogRepository;
     private final BenchmarkTuningService benchmarkTuningService;
     private final BenchmarkJobService benchmarkJobService;
-    private final DemandGenerationService demandGenerationService;
     private final EnviosImportJobService enviosImportJobService;
     private final com.tasfb2b.repository.ShipmentRepository shipmentRepository;
-    private final FutureDemandProjectionService futureDemandProjectionService;
     private final com.tasfb2b.repository.SimulationConfigRepository simulationConfigRepository;
 
     // ── Upload endpoints ──────────────────────────────────────────────────────
@@ -203,37 +195,6 @@ public class DataImportController {
             ));
         }
         return ResponseEntity.ok(latest);
-    }
-
-    @PostMapping("/demand/generate")
-    @Operation(summary = "Generar demanda masiva por escenario")
-    public ResponseEntity<?> generateDemand(@Valid @RequestBody DemandGenerationRequestDto request) {
-        markProjectedDemandAsStale();
-        var result = demandGenerationService.generate(request);
-        return ResponseEntity.ok(java.util.Map.of(
-                "message", "Demanda generada",
-                "result", result
-        ));
-    }
-
-    @PostMapping("/demand/project-future")
-    @Operation(summary = "Generar demanda futura (24 meses) basada en historica")
-    public ResponseEntity<FutureDemandGenerationResultDto> projectFutureDemand(
-            @Valid @RequestBody FutureDemandGenerationRequestDto request
-    ) {
-        return ResponseEntity.ok(futureDemandProjectionService.generate(request));
-    }
-
-    @PostMapping("/demand/repair-coverage")
-    @Operation(summary = "Reparar huecos diarios de demanda proyectada")
-    public ResponseEntity<?> repairProjectedCoverage(@Valid @RequestBody FutureDemandGenerationRequestDto request) {
-        int inserted = futureDemandProjectionService.repairProjectedDailyCoverage(request.projectionStart(), request.projectionEnd());
-        return ResponseEntity.ok(java.util.Map.of(
-                "message", "Cobertura diaria reparada",
-                "insertedDays", inserted,
-                "from", request.projectionStart(),
-                "to", request.projectionEnd()
-        ));
     }
 
     @PostMapping("/shipments/dataset")

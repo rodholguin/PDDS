@@ -1,0 +1,501 @@
+[
+  {
+    "timestamp": "2026-04-27T20:10:24.659Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=669"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:11:11.619Z",
+    "issues": [
+      "KPI shipmentsInRoute=5 no coincide con map-live activos=674"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:11:43.959Z",
+    "issues": [
+      "KPI shipmentsInRoute=9 no coincide con map-live activos=678"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:12:15.666Z",
+    "issues": [
+      "KPI shipmentsInRoute=21 no coincide con map-live activos=690"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:12:47.491Z",
+    "issues": [
+      "KPI shipmentsInRoute=26 no coincide con map-live activos=695"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:13:19.363Z",
+    "issues": [
+      "KPI shipmentsInRoute=37 no coincide con map-live activos=706"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:13:50.767Z",
+    "issues": [
+      "KPI shipmentsInRoute=48 no coincide con map-live activos=717"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:14:22.051Z",
+    "issues": [
+      "KPI shipmentsInRoute=53 no coincide con map-live activos=722"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:14:53.436Z",
+    "issues": [
+      "KPI shipmentsInRoute=62 no coincide con map-live activos=731"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:15:25.279Z",
+    "issues": [
+      "KPI shipmentsInRoute=72 no coincide con map-live activos=741"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:15:56.870Z",
+    "issues": [
+      "KPI shipmentsInRoute=86 no coincide con map-live activos=755"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:16:28.239Z",
+    "issues": [
+      "Desfase envíos operativos UI=765 backend=761",
+      "KPI shipmentsInRoute=92 no coincide con map-live activos=761"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:17:09.774Z",
+    "issues": [
+      "KPI shipmentsInRoute=101 no coincide con map-live activos=770"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:17:42.298Z",
+    "issues": [
+      "KPI shipmentsInRoute=107 no coincide con map-live activos=776"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:18:14.282Z",
+    "issues": [
+      "KPI shipmentsInRoute=117 no coincide con map-live activos=786"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:18:46.607Z",
+    "issues": [
+      "KPI shipmentsInRoute=124 no coincide con map-live activos=793"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:19:17.997Z",
+    "issues": [
+      "KPI shipmentsInRoute=132 no coincide con map-live activos=801"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:19:49.684Z",
+    "issues": [
+      "KPI shipmentsInRoute=145 no coincide con map-live activos=814"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:20:20.923Z",
+    "issues": [
+      "KPI shipmentsInRoute=150 no coincide con map-live activos=819"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:20:52.290Z",
+    "issues": [
+      "KPI shipmentsInRoute=163 no coincide con map-live activos=832"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:21:23.513Z",
+    "issues": [
+      "KPI shipmentsInRoute=175 no coincide con map-live activos=844"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:21:55.019Z",
+    "issues": [
+      "KPI shipmentsInRoute=185 no coincide con map-live activos=854"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:22:26.434Z",
+    "issues": [
+      "KPI shipmentsInRoute=194 no coincide con map-live activos=863"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:22:57.784Z",
+    "issues": [
+      "KPI shipmentsInRoute=198 no coincide con map-live activos=867"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:23:29.053Z",
+    "issues": [
+      "KPI shipmentsInRoute=202 no coincide con map-live activos=873"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:24:00.418Z",
+    "issues": [
+      "KPI shipmentsInRoute=200 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:24:36.444Z",
+    "issues": [
+      "KPI shipmentsInRoute=195 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:25:07.939Z",
+    "issues": [
+      "KPI shipmentsInRoute=193 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:25:39.491Z",
+    "issues": [
+      "KPI shipmentsInRoute=191 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:26:13.556Z",
+    "issues": [
+      "KPI shipmentsInRoute=188 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:26:47.534Z",
+    "issues": [
+      "KPI shipmentsInRoute=187 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:27:18.963Z",
+    "issues": [
+      "KPI shipmentsInRoute=183 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:27:53.051Z",
+    "issues": [
+      "KPI shipmentsInRoute=179 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:28:27.315Z",
+    "issues": [
+      "KPI shipmentsInRoute=176 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:28:58.885Z",
+    "issues": [
+      "KPI shipmentsInRoute=174 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:29:30.504Z",
+    "issues": [
+      "KPI shipmentsInRoute=172 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:30:02.863Z",
+    "issues": [
+      "KPI shipmentsInRoute=169 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:30:37.000Z",
+    "issues": [
+      "KPI shipmentsInRoute=168 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:31:08.598Z",
+    "issues": [
+      "KPI shipmentsInRoute=165 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:31:40.090Z",
+    "issues": [
+      "KPI shipmentsInRoute=160 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:32:11.724Z",
+    "issues": [
+      "KPI shipmentsInRoute=157 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:32:43.081Z",
+    "issues": [
+      "KPI shipmentsInRoute=155 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:33:15.101Z",
+    "issues": [
+      "KPI shipmentsInRoute=153 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:33:46.637Z",
+    "issues": [
+      "KPI shipmentsInRoute=150 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:34:18.041Z",
+    "issues": [
+      "KPI shipmentsInRoute=147 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:34:49.177Z",
+    "issues": [
+      "KPI shipmentsInRoute=145 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:35:20.440Z",
+    "issues": [
+      "KPI shipmentsInRoute=144 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:35:51.723Z",
+    "issues": [
+      "KPI shipmentsInRoute=142 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:36:22.913Z",
+    "issues": [
+      "KPI shipmentsInRoute=140 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:36:54.085Z",
+    "issues": [
+      "KPI shipmentsInRoute=137 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:37:25.231Z",
+    "issues": [
+      "KPI shipmentsInRoute=130 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:37:56.449Z",
+    "issues": [
+      "KPI shipmentsInRoute=124 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:38:27.816Z",
+    "issues": [
+      "KPI shipmentsInRoute=117 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:38:59.027Z",
+    "issues": [
+      "KPI shipmentsInRoute=110 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:39:30.217Z",
+    "issues": [
+      "KPI shipmentsInRoute=101 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:40:01.646Z",
+    "issues": [
+      "KPI shipmentsInRoute=97 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:40:32.876Z",
+    "issues": [
+      "KPI shipmentsInRoute=90 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:41:04.168Z",
+    "issues": [
+      "KPI shipmentsInRoute=83 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:41:36.077Z",
+    "issues": [
+      "KPI shipmentsInRoute=77 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:42:07.350Z",
+    "issues": [
+      "KPI shipmentsInRoute=73 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:42:38.768Z",
+    "issues": [
+      "KPI shipmentsInRoute=67 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:43:13.709Z",
+    "issues": [
+      "KPI shipmentsInRoute=59 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:43:46.148Z",
+    "issues": [
+      "KPI shipmentsInRoute=54 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:44:21.152Z",
+    "issues": [
+      "KPI shipmentsInRoute=44 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:44:52.566Z",
+    "issues": [
+      "KPI shipmentsInRoute=40 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:45:26.402Z",
+    "issues": [
+      "KPI shipmentsInRoute=27 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:45:58.291Z",
+    "issues": [
+      "KPI shipmentsInRoute=22 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:46:29.888Z",
+    "issues": [
+      "KPI shipmentsInRoute=15 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:47:04.249Z",
+    "issues": [
+      "KPI shipmentsInRoute=7 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:47:38.584Z",
+    "issues": [
+      "KPI shipmentsInRoute=5 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:48:13.014Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:48:44.785Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:49:17.303Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:49:52.334Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:50:29.064Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:51:02.313Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:51:37.061Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:52:15.691Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=875"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:52:53.339Z",
+    "issues": [
+      "KPI shipmentsInRoute=1 no coincide con map-live activos=876"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:53:26.186Z",
+    "issues": [
+      "KPI shipmentsInRoute=1 no coincide con map-live activos=876"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:53:58.661Z",
+    "issues": [
+      "KPI shipmentsInRoute=0 no coincide con map-live activos=876"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:54:35.030Z",
+    "issues": [
+      "Progreso temporal insuficiente: ratio=0.00 por debajo del mínimo=0.85"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T20:54:36.903Z",
+    "issues": [
+      "KPIs finales inconsistentes: active=876 vs pending+inRoute=287711"
+    ]
+  }
+]

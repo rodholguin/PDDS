@@ -1,0 +1,14 @@
+[
+  {
+    "timestamp": "2026-04-27T03:30:12.948Z",
+    "simulatedNow": "2029-06-15T16:25:43",
+    "anomaly": "REFERENCE_SELECTION",
+    "severity": "info",
+    "references": [
+      {
+        "flightId": 21864893,
+        "flightCode": "FP1563R2029-06-15"
+      }
+    ]
+  }
+]

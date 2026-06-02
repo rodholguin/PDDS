@@ -1,0 +1,32 @@
+[
+  {
+    "timestamp": "2026-04-26T18:35:30.917Z",
+    "issues": [
+      "Desfase vuelos visibles UI=1 backend=0",
+      "Desfase marcadores de aviones UI=1 backend=0",
+      "Desfase próximos vuelos UI=1 backend=0"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:35:53.019Z",
+    "issues": [
+      "Desfase vuelos visibles UI=7 backend=5",
+      "Desfase marcadores de aviones UI=7 backend=5",
+      "Desfase próximos vuelos UI=22 backend=14"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:36:14.972Z",
+    "issues": [
+      "Desfase vuelos visibles UI=41 backend=37",
+      "Desfase marcadores de aviones UI=41 backend=37",
+      "Desfase envíos operativos UI=3 backend=2"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:36:22.169Z",
+    "issues": [
+      "Progreso temporal insuficiente: ratio=0.68 por debajo del mínimo=0.85"
+    ]
+  }
+]

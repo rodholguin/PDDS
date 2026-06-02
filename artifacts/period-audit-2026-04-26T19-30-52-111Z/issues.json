@@ -1,0 +1,9 @@
+[
+  {
+    "timestamp": "2026-04-26T19:31:59.811Z",
+    "issues": [
+      "Desfase vuelos visibles UI=20 backend=16",
+      "Desfase marcadores de aviones UI=20 backend=16"
+    ]
+  }
+]

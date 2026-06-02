@@ -10,7 +10,7 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       connection-timeout: 30000
-      maximum-pool-size:  4
+      maximum-pool-size:  16
 
   # ── JPA / Hibernate ────────────────────────────────────────────────────────
   jpa:
@@ -31,7 +31,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 2
+        size: 4
 
   # ── Multipart (importación CSV/Excel) ─────────────────────────────────────
   servlet:

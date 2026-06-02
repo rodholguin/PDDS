@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-04-26T23:26:15.191993",
+  "finishedAt": "2026-04-26T23:26:36.591Z",
+  "samples": 2,
+  "issuesFound": 1,
+  "distinctIssues": [
+    "No se observaron vuelos activos reales durante la corrida",
+    "Los KPIs operativos no reportaron vuelos activos durante la corrida"
+  ],
+  "successSignals": [
+    "Se observó inventario operativo de envíos planificables, pero la corrida terminó antes de evidenciar movimiento en el mapa",
+    "La red de rutas estuvo disponible en todas las muestras"
+  ],
+  "artifactsDir": "C:\\Users\\papar\\OneDrive\\Documentos\\PDDS\\artifacts\\period-audit-2026-04-26T23-26-08-947Z"
+}

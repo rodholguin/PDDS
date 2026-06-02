@@ -13,7 +13,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -30,13 +29,13 @@ public class OperationalBootstrapService {
     private final SimulationConfigRepository simulationConfigRepository;
     private final DataImportService dataImportService;
     private final AlgorithmProfileService algorithmProfileService;
-    private final FutureDemandProjectionService futureDemandProjectionService;
 
     @EventListener(ApplicationReadyEvent.class)
     public void bootstrap() {
         ensureSimulationConfig();
         ensureRealDatasetLoaded();
-        ensureFutureDemandProjectedAsync();
+        // La demanda ya no se proyecta automáticamente: la simulación trabaja únicamente
+        // con los envíos importados manualmente desde datos/envios (página Importar).
     }
 
     private void ensureSimulationConfig() {
@@ -50,6 +49,12 @@ public class OperationalBootstrapService {
         if (config.getExecutionMinutes() == null) config.setExecutionMinutes(60);
         if (config.getNormalThresholdPct() == null) config.setNormalThresholdPct(70);
         if (config.getWarningThresholdPct() == null) config.setWarningThresholdPct(90);
+        if (config.getSlaWarnPct() == null) config.setSlaWarnPct(90);
+        if (config.getSlaCritPct() == null) config.setSlaCritPct(75);
+        if (config.getRiskShipmentsWarnPct() == null) config.setRiskShipmentsWarnPct(10);
+        if (config.getRiskShipmentsCritPct() == null) config.setRiskShipmentsCritPct(25);
+        if (config.getCriticalNodesWarnPct() == null) config.setCriticalNodesWarnPct(10);
+        if (config.getCriticalNodesCritPct() == null) config.setCriticalNodesCritPct(25);
         if (config.getInitialVolumeAvg() == null) config.setInitialVolumeAvg(8);
         if (config.getInitialVolumeVariance() == null) config.setInitialVolumeVariance(3);
         if (config.getFlightFrequencyMultiplier() == null) config.setFlightFrequencyMultiplier(1);
@@ -88,23 +93,23 @@ public class OperationalBootstrapService {
         }
     }
 
-    @Async
-    void ensureFutureDemandProjectedAsync() {
-        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
-        if (config == null) {
-            config = simulationConfigRepository.save(SimulationConfig.builder().build());
-        }
-        if (Boolean.TRUE.equals(config.getProjectedDemandReady())
-                && config.getProjectedTo() != null
-                && !config.getProjectedTo().isBefore(java.time.LocalDate.of(2030, 12, 31))) {
-            return;
-        }
-        try {
-            futureDemandProjectionService.ensureCoverageUntil(java.time.LocalDate.of(2030, 12, 31));
-            log.info("Demanda futura proyectada y almacenada automaticamente al iniciar");
-        } catch (Exception ex) {
-            log.error("No se pudo proyectar demanda futura al iniciar: {}", ex.getMessage());
-        }
+    /**
+     * Aplica la capacidad de almacén configurada a TODOS los aeropuertos.
+     * Cada nodo queda con capacidad = intraNodeCapacity + interNodeCapacity (maletas), de modo que el
+     * control "Capacidad intra/inter" del front sea un lever real: subirlo retrasa el colapso (el cuello
+     * de botella es el almacenamiento de nodos). Se invoca al configurar e iniciar la simulación.
+     *
+     * @return capacidad por nodo aplicada (intra + inter)
+     */
+    @Transactional
+    public int applyNodeStorageCapacity(SimulationConfig config) {
+        int intra = config.getIntraNodeCapacity() == null ? 700 : config.getIntraNodeCapacity();
+        int inter = config.getInterNodeCapacity() == null ? 800 : config.getInterNodeCapacity();
+        int capacityPerNode = intra + inter;
+        int updated = airportRepository.applyUniformStorageCapacity(capacityPerNode);
+        log.info("Capacidad de nodos aplicada: {} maletas/nodo (intra {} + inter {}) en {} aeropuertos · total={}",
+                capacityPerNode, intra, inter, updated, (long) capacityPerNode * updated);
+        return capacityPerNode;
     }
 
     @Transactional

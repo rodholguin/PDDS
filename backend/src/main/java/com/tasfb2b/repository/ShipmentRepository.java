@@ -23,8 +23,24 @@ import java.util.Optional;
 @Repository
 public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
 
+    /**
+     * Cuenta envios ya importados agrupados por aeropuerto de ORIGEN. Se usa para REANUDAR (resume) una
+     * importacion full interrumpida: por archivo (un origen) se saltan las primeras N lineas validas ya
+     * cargadas, evitando duplicados sin re-importar desde cero.
+     */
+    @Query("SELECT s.originAirport.id, COUNT(s) FROM Shipment s GROUP BY s.originAirport.id")
+    List<Object[]> countGroupedByOriginAirportId();
+
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     Optional<Shipment> findByShipmentCode(String shipmentCode);
+
+    /**
+     * findById que ADEMÁS trae origen y destino en una sola query (evita 2 lazy-loads por envío en el
+     * planner). En el path de planificación masiva esto recorta queries por envío significativamente.
+     */
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    @Query("SELECT s FROM Shipment s WHERE s.id = :id")
+    Optional<Shipment> findByIdWithAirports(@Param("id") Long id);
 
     @Override
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
@@ -53,6 +69,26 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     List<Shipment> findOverdueShipments(@Param("now") LocalDateTime now);
+
+    /**
+     * Primer envío que NO llega a tiempo a una fecha (reloj simulado) dada: el de
+     * menor deadline que, o bien sigue sin entregarse pasado su plazo, o bien fue
+     * entregado tarde. Se usa para detectar el "colapso" en el escenario COLLAPSE_TEST.
+     * Llamar con {@code PageRequest.of(0, 1)} para obtener solo el primero.
+     */
+    @Query("""
+            SELECT s FROM Shipment s
+            WHERE s.deadline IS NOT NULL
+              AND s.registrationDate >= :scenarioStart
+              AND s.deadline <= :horizon
+              AND (s.status NOT IN ('DELIVERED')
+                   OR (s.deliveredAt IS NOT NULL AND s.deliveredAt > s.deadline))
+            ORDER BY s.deadline ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findFirstLateShipment(@Param("scenarioStart") LocalDateTime scenarioStart,
+                                         @Param("horizon") LocalDateTime horizon,
+                                         Pageable pageable);
 
     /** Envíos que pasan por un aeropuerto (como origen o destino). */
     List<Shipment> findByOriginAirportOrDestinationAirport(

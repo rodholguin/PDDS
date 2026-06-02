@@ -1,0 +1,21 @@
+[
+  {
+    "timestamp": "2026-04-27T04:07:06.577Z",
+    "issues": [
+      "KPI vuelos visibles UI=125 no coincide con marcadores reales=122"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T04:17:19.590Z",
+    "issues": [
+      "Desfase vuelos visibles UI=19 backend=13",
+      "Desfase marcadores de aviones UI=19 backend=13"
+    ]
+  },
+  {
+    "timestamp": "2026-04-27T04:21:06.306Z",
+    "issues": [
+      "Progreso temporal insuficiente: ratio=0.80 por debajo del mínimo=0.85"
+    ]
+  }
+]

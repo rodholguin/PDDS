@@ -35,6 +35,15 @@ public final class RoutePlanningSupport {
     private static final int MAX_OUTGOING_SCAN_PER_NODE = 48;
     private static final int MAX_ENUMERATED_ROUTES = 96;
 
+    // Presupuesto del set de candidatos con CUPO RESERVADO por rol. Antes se agregaban primero TODAS las
+    // salidas del origen (cap único); en orígenes de alto grado (cientos de salidas) eso agotaba el cupo y
+    // las 2das piernas (hub->destino) y el directo nunca entraban → el ruteo solo veía salidas del origen y
+    // elegía un directo tardío aunque existiera una conexión a tiempo. Reservar cupo para llegadas al
+    // destino (2das piernas) garantiza que las conexiones factibles sean visibles.
+    private static final int CANDIDATE_TOTAL = 240;
+    private static final int CANDIDATE_DESTINATION_QUOTA = 100;
+    private static final int CANDIDATE_ORIGIN_QUOTA = 100;
+
     private record ScoredRoute(List<Flight> route, double score) {
     }
 
@@ -92,17 +101,45 @@ public final class RoutePlanningSupport {
             return eligible.stream().limit(160).toList();
         }
 
-        Set<Long> pivotAirports = new HashSet<>();
-        pivotAirports.add(originId);
-        firstLegs.forEach(flight -> pivotAirports.add(flight.getDestinationAirport().getId()));
+        Set<Long> hubAirports = new HashSet<>();
+        firstLegs.forEach(flight -> hubAirports.add(flight.getDestinationAirport().getId()));
 
-        List<Flight> reduced = eligible.stream()
-                .filter(flight -> pivotAirports.contains(flight.getOriginAirport().getId())
-                        || destinationId.equals(flight.getDestinationAirport().getId()))
-                .limit(180)
+        // Cupo reservado para las llegadas al destino (directo + 2das piernas hub->destino) ANTES que las
+        // salidas del origen, que en orígenes de alto grado llenaban el cap y dejaban al ruteo sin conexiones.
+        Map<Long, Flight> reduced = new LinkedHashMap<>();
+        addCandidatesMatching(reduced, eligible, flight -> destinationId.equals(flight.getDestinationAirport().getId()), CANDIDATE_DESTINATION_QUOTA);
+        addCandidatesMatching(reduced, eligible, flight -> originId.equals(flight.getOriginAirport().getId()), Math.min(CANDIDATE_TOTAL, reduced.size() + CANDIDATE_ORIGIN_QUOTA));
+        addCandidatesMatching(reduced, eligible, flight -> hubAirports.contains(flight.getOriginAirport().getId()), CANDIDATE_TOTAL);
+
+        if (reduced.isEmpty()) {
+            return eligible.stream().limit(180).toList();
+        }
+        return reduced.values().stream()
+                .sorted(Comparator.comparing(Flight::getScheduledDeparture).thenComparing(Flight::getScheduledArrival))
+                .limit(CANDIDATE_TOTAL)
                 .toList();
+    }
 
-        return reduced.isEmpty() ? eligible.stream().limit(180).toList() : reduced;
+    private static void addCandidatesMatching(Map<Long, Flight> reduced,
+                                              List<Flight> flights,
+                                              java.util.function.Predicate<Flight> predicate,
+                                              int limit) {
+        if (reduced.size() >= limit) {
+            return;
+        }
+        for (Flight flight : flights) {
+            if (flight == null || flight.getId() == null
+                    || flight.getOriginAirport() == null || flight.getDestinationAirport() == null) {
+                continue;
+            }
+            if (!predicate.test(flight)) {
+                continue;
+            }
+            reduced.putIfAbsent(flight.getId(), flight);
+            if (reduced.size() >= limit) {
+                return;
+            }
+        }
     }
 
     public static List<Flight> eligiblePlanningFlights(Shipment shipment, List<Flight> flights) {
@@ -150,18 +187,22 @@ public final class RoutePlanningSupport {
         }
 
         Map<Long, Flight> reduced = new LinkedHashMap<>();
-        addEligibleFlights(reduced, shipment, flightIndex.flightsByOrigin().get(originId), 180);
+        // 1. Vuelos que LLEGAN al destino (directo origen->destino + todas las 2das piernas hub->destino):
+        //    cupo reservado PRIMERO para que las salidas del origen no agoten el presupuesto.
+        addEligibleFlightsToDestination(reduced, shipment, flightIndex.flightsByDestination().get(destinationId), CANDIDATE_DESTINATION_QUOTA);
+        // 2. Primeras piernas: salidas del origen.
+        addEligibleFlights(reduced, shipment, flightIndex.flightsByOrigin().get(originId), Math.min(CANDIDATE_TOTAL, reduced.size() + CANDIDATE_ORIGIN_QUOTA));
+        // 3. Piernas intermedias: salidas de cada hub alcanzable por una primera pierna (incluye hub->destino).
         for (Flight firstLeg : firstLegs) {
-            if (reduced.size() >= 180 || firstLeg.getDestinationAirport() == null || firstLeg.getDestinationAirport().getId() == null) {
+            if (reduced.size() >= CANDIDATE_TOTAL || firstLeg.getDestinationAirport() == null || firstLeg.getDestinationAirport().getId() == null) {
                 continue;
             }
-            addEligibleFlights(reduced, shipment, flightIndex.flightsByOrigin().get(firstLeg.getDestinationAirport().getId()), 180);
+            addEligibleFlights(reduced, shipment, flightIndex.flightsByOrigin().get(firstLeg.getDestinationAirport().getId()), CANDIDATE_TOTAL);
         }
-        addEligibleFlightsToDestination(reduced, shipment, flightIndex.flightsByDestination().get(destinationId), 180);
 
         return reduced.values().stream()
                 .sorted(Comparator.comparing(Flight::getScheduledDeparture).thenComparing(Flight::getScheduledArrival))
-                .limit(180)
+                .limit(CANDIDATE_TOTAL)
                 .toList();
     }
 

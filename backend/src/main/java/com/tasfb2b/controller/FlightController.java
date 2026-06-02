@@ -251,12 +251,8 @@ public class FlightController {
         log.warn("[FlightController] Vuelo {} cancelado. Buscando envíos afectados…",
                 flight.getFlightCode());
 
-        // 2. Encontrar todos los TravelStop que usaban este vuelo
-        List<TravelStop> affectedStops = travelStopRepository.findAll().stream()
-                .filter(ts -> ts.getFlight() != null
-                           && ts.getFlight().getId().equals(id)
-                           && ts.getStopStatus() == StopStatus.PENDING)
-                .toList();
+        // 2. Encontrar los TravelStop PENDING que usaban este vuelo (consulta indexada)
+        List<TravelStop> affectedStops = travelStopRepository.findByFlightAndStopStatus(flight, StopStatus.PENDING);
 
         // 3. Replanificar cada envío afectado
         int replanned = 0;

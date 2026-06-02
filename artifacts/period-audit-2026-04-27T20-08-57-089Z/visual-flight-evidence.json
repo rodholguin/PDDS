@@ -1,0 +1,22 @@
+[
+  {
+    "timestamp": "2026-04-27T20:11:11.619Z",
+    "simulatedNow": "2029-06-16T01:28:22",
+    "anomaly": "REFERENCE_SELECTION",
+    "severity": "info",
+    "references": [
+      {
+        "flightId": 21868727,
+        "flightCode": "FP2531R2029-06-16"
+      },
+      {
+        "flightId": 21868166,
+        "flightCode": "FP1970R2029-06-16"
+      },
+      {
+        "flightId": 21867856,
+        "flightCode": "FP1660R2029-06-16"
+      }
+    ]
+  }
+]

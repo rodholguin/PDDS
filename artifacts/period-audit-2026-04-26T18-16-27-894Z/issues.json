@@ -1,0 +1,22 @@
+[
+  {
+    "timestamp": "2026-04-26T18:24:13.763Z",
+    "issues": [
+      "Desfase próximos vuelos UI=2 backend=0"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:27:25.443Z",
+    "issues": [
+      "Desfase vuelos visibles UI=1 backend=0",
+      "Desfase marcadores de aviones UI=1 backend=0",
+      "Desfase próximos vuelos UI=0 backend=1"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T18:29:15.644Z",
+    "issues": [
+      "Desfase próximos vuelos UI=23 backend=19"
+    ]
+  }
+]

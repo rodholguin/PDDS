@@ -78,9 +78,10 @@ export default function ImportPage() {
   });
   const [logs, setLogs] = useState<DataImportLog[]>([]);
   const [dlLoading, setDlLoading] = useState<ImportType | null>(null);
-  const [datasetSummary, setDatasetSummary] = useState<{ total: number; projected: boolean; range: string | null } | null>(null);
+  const [datasetSummary, setDatasetSummary] = useState<{ total: number } | null>(null);
   const [refreshingSummary, setRefreshingSummary] = useState(false);
-  const [projectingFuture, setProjectingFuture] = useState(false);
+  const [enviosBusy, setEnviosBusy] = useState(false);
+  const [enviosMsg, setEnviosMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const cur = tabs[activeTab];
@@ -101,11 +102,7 @@ export default function ImportPage() {
     setRefreshingSummary(true);
     try {
       const status = await importApi.getDatasetStatus();
-      setDatasetSummary({
-        total: status.totalShipments ?? 0,
-        projected: Boolean(status.projectedDemandReady),
-        range: status.projectedFrom && status.projectedTo ? `${status.projectedFrom} -> ${status.projectedTo}` : null,
-      });
+      setDatasetSummary({ total: status.totalShipments ?? 0 });
     } catch {
       setDatasetSummary(null);
     } finally {
@@ -174,14 +171,34 @@ export default function ImportPage() {
     }
   }
 
-  async function handleProjectFutureDemand() {
-    setProjectingFuture(true);
+  async function importEnvios(full: boolean) {
+    setEnviosBusy(true);
+    setEnviosMsg(full ? 'Iniciando importación del dataset completo…' : 'Importando muestra de envíos…');
     try {
-      await importApi.projectFutureDemand({});
+      if (full) {
+        const { jobId } = await importApi.startEnviosDatasetFullJob();
+        let polls = 0;
+        let done = false;
+        while (!done && polls < 240) {
+          polls += 1;
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          const state = await importApi.getEnviosDatasetFullJobStatus(jobId);
+          setEnviosMsg(state.message || `Estado: ${state.status}`);
+          done = state.status === 'DONE' || state.status === 'FAILED' || state.status === 'IDLE';
+        }
+      } else {
+        const res = await importApi.importEnviosDataset({});
+        setEnviosMsg(
+          `Importados ${res.result.importedRows.toLocaleString('es-PE')} envíos ` +
+          `(${res.result.processedFiles}/${res.result.totalFiles} archivos).`,
+        );
+      }
       await loadSummary();
       await loadLogs();
+    } catch (e) {
+      setEnviosMsg(e instanceof Error ? e.message : 'Error al importar envíos.');
     } finally {
-      setProjectingFuture(false);
+      setEnviosBusy(false);
     }
   }
 
@@ -197,14 +214,12 @@ export default function ImportPage() {
       <div className="rounded-xl mb-6 p-4" style={{ background: '#182130', border: '1px solid #2d3f5f' }}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <p className="text-sm font-semibold" style={{ color: '#d9e7ff' }}>Estado de dataset</p>
+            <p className="text-sm font-semibold" style={{ color: '#d9e7ff' }}>Dataset de envíos (datos/envios)</p>
             <p className="text-xs mt-1" style={{ color: '#9aa3be' }}>
-              {datasetSummary == null ? 'No se pudo leer el estado actual.' : `Envios registrados: ${datasetSummary.total.toLocaleString('es-PE')}`}
+              {datasetSummary == null ? 'No se pudo leer el estado actual.' : `Envíos registrados: ${datasetSummary.total.toLocaleString('es-PE')}`}
             </p>
-            <p className="text-xs mt-1" style={{ color: datasetSummary?.projected ? '#8dd3a8' : '#e3b341' }}>
-              {datasetSummary?.projected
-                ? `Demanda futura almacenada${datasetSummary.range ? ` (${datasetSummary.range})` : ''}`
-                : 'Demanda futura no disponible en este entorno'}
+            <p className="text-xs mt-1" style={{ color: '#9aa3be' }}>
+              La simulación trabaja únicamente con estos envíos importados. No se genera demanda futura.
             </p>
           </div>
           <button
@@ -216,18 +231,26 @@ export default function ImportPage() {
             {refreshingSummary ? 'Actualizando...' : 'Actualizar estado'}
           </button>
         </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <button
-            onClick={() => void handleProjectFutureDemand()}
-            disabled={projectingFuture}
+            onClick={() => void importEnvios(false)}
+            disabled={enviosBusy}
             className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
-            style={{ background: '#3559d1', color: '#fff', opacity: projectingFuture ? 0.7 : 1 }}
+            style={{ background: '#3559d1', color: '#fff', opacity: enviosBusy ? 0.7 : 1 }}
           >
-            {projectingFuture ? 'Generando demanda futura...' : 'Generar demanda futura'}
+            {enviosBusy ? 'Importando...' : 'Importar envíos (muestra)'}
           </button>
-          <p className="text-xs" style={{ margin: 0, color: '#9aa3be', alignSelf: 'center' }}>
-            Prepara el entorno para que la simulación pueda iniciar sin bloqueo por `projectedDemandReady`.
-          </p>
+          <button
+            onClick={() => void importEnvios(true)}
+            disabled={enviosBusy}
+            className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
+            style={{ background: '#2f3b5c', color: '#fff', opacity: enviosBusy ? 0.7 : 1 }}
+          >
+            {enviosBusy ? 'Importando...' : 'Importar dataset completo'}
+          </button>
+          {enviosMsg ? (
+            <p className="text-xs" style={{ margin: 0, color: '#9aa3be', alignSelf: 'center' }}>{enviosMsg}</p>
+          ) : null}
         </div>
       </div>
 

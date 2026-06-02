@@ -5,7 +5,7 @@ import com.tasfb2b.model.SimulationScenario;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 /**
  * Cuerpo de POST /api/simulation/configure.
@@ -34,10 +34,10 @@ public record SimulationConfigUpdateDto(
         @Min(0) @Max(100)
         Integer cancellationRatePct,
 
-        @Min(200) @Max(5000)
+        @Min(200) @Max(20000)
         Integer intraNodeCapacity,
 
-        @Min(200) @Max(5000)
+        @Min(200) @Max(20000)
         Integer interNodeCapacity,
 
         @Min(50) @Max(99)
@@ -46,7 +46,25 @@ public record SimulationConfigUpdateDto(
         @Min(51) @Max(100)
         Integer warningThresholdPct,
 
-        LocalDate scenarioStartDate,
+        @Min(0) @Max(100)
+        Integer slaWarnPct,
+
+        @Min(0) @Max(100)
+        Integer slaCritPct,
+
+        @Min(0) @Max(100)
+        Integer riskShipmentsWarnPct,
+
+        @Min(0) @Max(100)
+        Integer riskShipmentsCritPct,
+
+        @Min(0) @Max(100)
+        Integer criticalNodesWarnPct,
+
+        @Min(0) @Max(100)
+        Integer criticalNodesCritPct,
+
+        LocalDateTime scenarioStartDate,
 
         AlgorithmType primaryAlgorithm,
 

@@ -1,0 +1,30 @@
+[
+  {
+    "timestamp": "2026-04-26T21:25:43.867Z",
+    "issues": [
+      "Fallos consecutivos de backend: 1",
+      "shipments: status=0 error=This operation was aborted"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T21:26:36.259Z",
+    "issues": [
+      "Fallos consecutivos de backend: 2",
+      "shipments: status=0 error=This operation was aborted"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T21:27:27.846Z",
+    "issues": [
+      "Fallos consecutivos de backend: 3",
+      "overview: status=0 error=This operation was aborted",
+      "shipments: status=0 error=This operation was aborted"
+    ]
+  },
+  {
+    "timestamp": "2026-04-26T21:27:27.846Z",
+    "issues": [
+      "Progreso temporal insuficiente: ratio=0.84 por debajo del mínimo=0.85"
+    ]
+  }
+]

@@ -39,9 +39,16 @@ public class FlightScheduleService {
             return List.of();
         }
 
-        List<Flight> existing = flightRepository.findFlightsWithinWindow(fromInclusive, toExclusive);
+        // Cargar existentes por DÍA completo (no desde el timestamp exacto): la generación es por día y
+        // puede producir vuelos con salida anterior a fromInclusive dentro del mismo día. Si el chequeo
+        // de existentes arrancara en fromInclusive, esos clones (de corridas previas, ya en BD) no se
+        // verían y se re-generarían → duplicate key sobre flight_code. Alinear ambos al rango de días.
+        LocalDateTime existingFrom = fromInclusive.toLocalDate().atStartOfDay();
+        LocalDateTime existingTo = toExclusive.minusNanos(1).toLocalDate().plusDays(1).atStartOfDay();
+        List<Flight> existing = flightRepository.findFlightsWithinWindow(existingFrom, existingTo);
 
-        LocalDate earliestExistingDate = java.util.Optional.ofNullable(flightRepository.findEarliestScheduledDeparture())
+        // Día patrón = primer vuelo TEMPLATE (no recurrente), estable aunque ya existan clones tempranos.
+        LocalDate earliestExistingDate = java.util.Optional.ofNullable(flightRepository.findEarliestTemplateDeparture())
                 .map(LocalDateTime::toLocalDate)
                 .orElse(null);
 
@@ -49,9 +56,11 @@ public class FlightScheduleService {
             return existing;
         }
 
+        // Ventana de 3 días: al convertir las horas a UTC, el patrón diario queda repartido en ~2 días
+        // calendario (husos ±12h). Tomar solo 1 día dejaba rutas sin template → envíos inviables (CRITICAL).
         List<Flight> templates = flightRepository.findTemplateFlightsWithinWindow(
                         earliestExistingDate.atStartOfDay(),
-                        earliestExistingDate.plusDays(1).atStartOfDay())
+                        earliestExistingDate.plusDays(3).atStartOfDay())
                 .stream()
                 .filter(f -> !f.getFlightCode().contains(RECURRENT_SUFFIX))
                 .toList();
