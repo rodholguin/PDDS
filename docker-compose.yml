@@ -39,7 +39,7 @@ services:
     volumes:
       - ./datos:/app/datos:ro
     ports:
-      - "8080:8080"
+      - "8081:8080"
 
   # ── Next.js Frontend ────────────────────────────────────────────────────
   frontend:
@@ -48,9 +48,7 @@ services:
       dockerfile: Dockerfile
       args:
         # NEXT_PUBLIC_* se hornea en el bundle en tiempo de build.
-        # Usar 127.0.0.1:8080 para evitar desalineacion de origen cuando el frontend
-        # se abre desde http://127.0.0.1:3000 durante pruebas reales con navegador.
-        NEXT_PUBLIC_API_URL: http://127.0.0.1:8080
+        NEXT_PUBLIC_API_URL: http://1inf54-984-3c.inf.pucp.edu.pe/api
     container_name: tasfb2b-frontend
     restart: unless-stopped
     depends_on:
