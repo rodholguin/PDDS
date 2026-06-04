@@ -9,6 +9,7 @@ import { alertsApi } from '@/lib/api/alertsApi';
 import { simulationApi } from '@/lib/api/simulationApi';
 import { useSimulation } from '@/lib/SimulationContext';
 import type { Airport, MapLiveFlight, NodeDetail, OperationalAlert, SimScenario } from '@/lib/types';
+import { FlightTrajectoryLayer } from '@/components/FlightTrajectoryLayer';
 
 const MAP_STYLE = 'https://demotiles.maplibre.org/style.json';
 const SATELLITE_STYLE: StyleSpecification = {
@@ -333,6 +334,12 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
       >
         <NavigationControl position="top-left" />
 
+        <FlightTrajectoryLayer
+          selectedFlight={selectedFlight}
+          selectedAirportIcao={selectedNode?.detail.icaoCode ?? null}
+          flights={renderedFlights}
+        />
+
         {airports.map((a) => (
           <Marker key={a.id} longitude={a.longitude} latitude={a.latitude} anchor="center" onClick={(e) => { e.originalEvent.stopPropagation(); onOpenNode(a); }}>
             <button
@@ -418,6 +425,7 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
               <p style={{ margin: '4px 0 0', fontSize: 12 }}>Ocupación: {selectedNode.detail.occupancyPct.toFixed(1)}%</p>
               <p style={{ margin: '4px 0 0', fontSize: 12 }}>Capacidad: {selectedNode.detail.currentStorageLoad}/{selectedNode.detail.maxStorageCapacity}</p>
               <p style={{ margin: '4px 0 0', fontSize: 12 }}>Vuelos programados: {selectedNode.detail.scheduledFlights}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Vuelos en camino: {renderedFlights.filter((f) => f.destinationIcao === selectedNode.detail.icaoCode).length}</p>
             </div>
           </Popup>
         ) : null}
@@ -725,6 +733,8 @@ export default function HomePage() {
   }
 
   const openNode = useCallback(async (airport: Airport) => {
+    setSelectedFlightId(null);
+    setSelectedFlightVisual(null);
     try {
       const detail = await dashboardApi.getNodeDetail(airport.icaoCode);
       setSelectedNode({ detail, point: { longitude: airport.longitude, latitude: airport.latitude } });
@@ -833,7 +843,7 @@ export default function HomePage() {
 
                 <label>
                 <span style={{ fontSize: 12, color: '#9ca7c8' }}>Fecha y hora de inicio</span>
-                <input disabled={!canEditConfig} type="datetime-local" step={60} value={config.scenarioStartDate} onChange={(e) => patchConfig({ scenarioStartDate: e.target.value })} style={field} />
+                <input lang="es-PE" disabled={!canEditConfig} type="datetime-local" step={60} value={config.scenarioStartDate} onChange={(e) => patchConfig({ scenarioStartDate: e.target.value })} style={field} />
                 <span style={{ fontSize: 11, color: '#6b7392' }}>Vacío = primer envío importado (fecha y hora).</span>
               </label>
 
