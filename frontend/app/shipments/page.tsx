@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { alertsApi } from '@/lib/api/alertsApi';
 import { shipmentsApi, type ShipmentCreate } from '@/lib/api/shipmentsApi';
 import { useSimulation } from '@/lib/SimulationContext';
@@ -108,6 +109,15 @@ const EMPTY_FORM: CreateForm = {
 };
 
 export default function ShipmentsPage() {
+  return (
+    <Suspense fallback={<div className="app-page"><div style={{ padding: 32, color: '#9ca3bf' }}>Cargando envíos...</div></div>}>
+      <ShipmentsPageContent />
+    </Suspense>
+  );
+}
+
+function ShipmentsPageContent() {
+  const searchParams = useSearchParams();
   const { sim, loaded: simLoaded } = useSimulation();
 
   const [rows, setRows] = useState<Shipment[]>([]);
@@ -123,7 +133,12 @@ export default function ShipmentsPage() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(() => {
+    const raw = searchParams.get('selected');
+    if (!raw) return null;
+    const id = Number(raw);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  });
   const [detail, setDetail] = useState<ShipmentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -159,8 +174,8 @@ export default function ShipmentsPage() {
     }
   }, [sim?.simulatedNow, sim?.effectiveScenarioStartAt, sim?.running, sim?.paused, simLoaded, simActive]);
 
-  const load = useCallback(async (targetPage: number) => {
-    setLoading(true);
+  const load = useCallback(async (targetPage: number, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const result = upcomingOnly
         ? await shipmentsApi.upcoming({
@@ -193,9 +208,9 @@ export default function ShipmentsPage() {
       setTotalElements(result.totalElements);
       setError(null);
     } catch {
-      setError('No se pudo cargar el maestro de envíos.');
+      if (!silent) setError('No se pudo cargar el maestro de envíos.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [code, date, destination, origin, simActive, status, upcomingOnly]);
 
@@ -204,15 +219,24 @@ export default function ShipmentsPage() {
     void load(0);
   }, [date, load]);
 
+  // Punto 4: seleccionar envío al navegar desde la sección de Vuelos (?selected=...)
+  useEffect(() => {
+    const raw = searchParams.get('selected');
+    if (!raw) return;
+    const id = Number(raw);
+    if (Number.isFinite(id) && id > 0) setSelectedId(id);
+  }, [searchParams]);
+
   useEffect(() => {
     if (rows.length === 0) {
-      setSelectedId(null);
+      if (!selectedId || !searchParams.get('selected')) setSelectedId(null);
       return;
     }
+    if (searchParams.get('selected')) return;
     if (!selectedId || !rows.some((row) => row.id === selectedId)) {
       setSelectedId(rows[0].id);
     }
-  }, [rows, selectedId]);
+  }, [rows, selectedId, searchParams]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -229,13 +253,11 @@ export default function ShipmentsPage() {
   useEffect(() => {
     if (!sim?.running || !date) return;
     const timer = setInterval(() => {
-      void load(page);
+      void load(page, true);
       if (selectedId) {
-        setDetailLoading(true);
         shipmentsApi.getById(selectedId)
           .then(setDetail)
-          .catch(() => setDetail(null))
-          .finally(() => setDetailLoading(false));
+          .catch(() => {});
       }
     }, 5000);
     return () => clearInterval(timer);
@@ -326,7 +348,7 @@ export default function ShipmentsPage() {
   }
 
   return (
-    <div className="app-page">
+    <div className="app-page" style={{ height: '100vh', overflow: 'hidden' }}>
       <header className="page-head">
         <div>
           <h1 className="page-head-title">Maestro de Envíos</h1>
@@ -346,9 +368,9 @@ export default function ShipmentsPage() {
         </div>
       </header>
 
-      <div className="shipments-layout">
-        <section className="surface-panel" style={{ overflow: 'hidden' }}>
-          <div className="shipments-toolbar" style={{ marginBottom: 14, flexWrap: 'wrap' }}>
+      <div className="shipments-layout" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <section className="surface-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+          <div className="shipments-toolbar" style={{ flexShrink: 0 }}>
             <select value={status} onChange={(e) => setStatus(e.target.value as ShipmentStatus | '')} className="shipments-search" style={{ width: 170 }}>
               <option value="">Todos</option>
               <option value="PENDING">Pendientes</option>
@@ -373,7 +395,7 @@ export default function ShipmentsPage() {
             ) : null}
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -408,7 +430,7 @@ export default function ShipmentsPage() {
             </table>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+          <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderTop: '1px solid #2a2e44' }}>
             <p style={{ margin: 0, color: '#9ca3bf', fontSize: 13 }}>
               {`${totalElements.toLocaleString('es-PE')} envíos encontrados`}
             </p>
@@ -418,9 +440,17 @@ export default function ShipmentsPage() {
               <button className="chip" disabled={page + 1 >= totalPages} onClick={() => void load(page + 1)}>Siguiente</button>
             </div>
           </div>
+          {error ? (
+            <div style={{ flexShrink: 0, padding: '0 16px 10px' }}>
+              <div className="state-panel is-error">
+                <p className="state-panel-title">Error</p>
+                <p className="state-panel-copy">{error}</p>
+              </div>
+            </div>
+          ) : null}
         </section>
 
-        <aside className="surface-panel" style={{ padding: 16 }}>
+        <aside className="surface-panel" style={{ padding: 16, overflowY: 'auto' }}>
           {detailLoading ? (
             <div className="state-panel"><p className="state-panel-title">Cargando detalle del envío</p></div>
           ) : detail ? (
@@ -435,12 +465,6 @@ export default function ShipmentsPage() {
           )}
         </aside>
 
-        {error ? (
-          <div className="state-panel is-error" style={{ gridColumn: '1 / -1' }}>
-            <p className="state-panel-title">Error</p>
-            <p className="state-panel-copy">{error}</p>
-          </div>
-        ) : null}
       </div>
 
       {createOpen ? (
@@ -532,8 +556,8 @@ function ShipmentDetailPanel({
 }) {
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-        <p className="detail-title">{detail.shipmentCode}</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <p className="detail-title" style={{ minWidth: 0 }}>{detail.shipmentCode}</p>
         <span className={statusClass(detail.status)}>{statusLabel(detail.status)}</span>
       </div>
 
@@ -618,7 +642,7 @@ function LegSummary({ leg }: { leg: ShipmentLeg }) {
     <>
       <p style={{ margin: '8px 0 0', color: '#e7ecff', fontWeight: 600 }}>{leg.fromIcaoCode} {'->'} {leg.toIcaoCode}</p>
       <p style={{ margin: '4px 0 0', color: '#8ea0c8', fontSize: 12 }}>
-        {leg.flightId ? <Link href={`/flights?selected=${leg.flightId}`} style={{ color: '#9bc8ff' }}>Vuelo {leg.flightCode}</Link> : 'Tramo sin vuelo asignado'}
+        {leg.flightId ? <Link href={`/flights?selected=${leg.flightId}${leg.flightStatus ? `&status=${leg.flightStatus}` : ''}`} style={{ color: '#9bc8ff' }}>Vuelo {leg.flightCode}</Link> : 'Tramo sin vuelo asignado'}
       </p>
       <div style={{ marginTop: 6, display: 'flex', gap: 12, flexWrap: 'wrap', color: '#9ca3bf', fontSize: 12 }}>
         <span>Sale: {dateShort(leg.scheduledDeparture)}</span>
@@ -636,7 +660,7 @@ function LegCard({ leg }: { leg: ShipmentLeg }) {
         <div>
           <p style={{ margin: 0, color: '#e7ecff', fontWeight: 600 }}>{leg.fromIcaoCode} {'->'} {leg.toIcaoCode}</p>
           <p style={{ margin: '4px 0 0', color: '#90a2c7', fontSize: 12 }}>
-            {leg.flightId ? <Link href={`/flights?selected=${leg.flightId}`} style={{ color: '#9bc8ff' }}>Vuelo {leg.flightCode}</Link> : 'Sin vuelo asignado'}
+            {leg.flightId ? <Link href={`/flights?selected=${leg.flightId}${leg.flightStatus ? `&status=${leg.flightStatus}` : ''}`} style={{ color: '#9bc8ff' }}>Vuelo {leg.flightCode}</Link> : 'Sin vuelo asignado'}
           </p>
         </div>
         <span className={`chip${leg.current || leg.next ? ' is-active' : ''}`}>{stopLabel(leg.stopStatus)}</span>
