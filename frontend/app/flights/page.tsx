@@ -49,14 +49,23 @@ function FlightsPageContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [status, setStatus] = useState<FlightStatus>('IN_FLIGHT');
+  const [status, setStatus] = useState<FlightStatus>(() => {
+    const s = searchParams.get('status')?.toUpperCase();
+    if (s === 'SCHEDULED' || s === 'IN_FLIGHT' || s === 'COMPLETED' || s === 'CANCELLED') return s as FlightStatus;
+    return 'IN_FLIGHT';
+  });
   const [date, setDate] = useState('');
   const [code, setCode] = useState('');
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
-  const [upcomingOnly, setUpcomingOnly] = useState(true);
+  const [upcomingOnly, setUpcomingOnly] = useState(() => !searchParams.get('status'));
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(() => {
+    const raw = searchParams.get('selected');
+    if (!raw) return null;
+    const id = Number(raw);
+    return Number.isFinite(id) && id > 0 ? id : null;
+  });
   const [detail, setDetail] = useState<FlightDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
@@ -86,9 +95,9 @@ function FlightsPageContent() {
     }
   }, [searchParams]);
 
-  const load = useCallback(async (targetPage: number) => {
+  const load = useCallback(async (targetPage: number, silent = false) => {
     if (!date) return; // do not fire empty-date queries on mount
-    setLoading(true);
+    if (!silent) setLoading(true);
     try {
       const result = await flightsApi.search({
         status,
@@ -107,9 +116,9 @@ function FlightsPageContent() {
       setTotalElements(result.totalElements);
       setError(null);
     } catch {
-      setError('No se pudo cargar la lista de vuelos.');
+      if (!silent) setError('No se pudo cargar la lista de vuelos.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [code, date, destination, origin, status]);
 
@@ -153,16 +162,22 @@ function FlightsPageContent() {
       .finally(() => setDetailLoading(false));
   }, [selectedId]);
 
+  // Punto 1: al navegar desde el mapa (?selected=...), actualiza el filtro de fecha
+  // para que el vuelo aparezca resaltado en la lista.
+  useEffect(() => {
+    if (!detail || !searchParams.get('selected') || userTouchedDateRef.current) return;
+    const depDate = toDateInput(detail.flight.scheduledDeparture);
+    if (depDate) setDate(depDate);
+  }, [detail, searchParams]);
+
   useEffect(() => {
     if (!sim?.running) return;
     const timer = setInterval(() => {
-      void load(page);
+      void load(page, true);
       if (selectedId) {
-        setDetailLoading(true);
         flightsApi.getById(selectedId)
           .then(setDetail)
-          .catch(() => setDetail(null))
-          .finally(() => setDetailLoading(false));
+          .catch(() => {});
       }
     }, 5000);
     return () => clearInterval(timer);
@@ -194,7 +209,7 @@ function FlightsPageContent() {
   }
 
   return (
-    <div className="app-page">
+    <div className="app-page" style={{ height: '100vh', overflow: 'hidden' }}>
       <header className="page-head">
         <div>
           <h1 className="page-head-title">Vuelos Operativos</h1>
@@ -204,9 +219,9 @@ function FlightsPageContent() {
         </div>
       </header>
 
-      <div className="shipments-layout">
-        <section className="surface-panel" style={{ padding: 16 }}>
-          <div className="shipments-toolbar" style={{ marginBottom: 14, flexWrap: 'wrap' }}>
+      <div className="shipments-layout" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <section className="surface-panel" style={{ padding: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+          <div className="shipments-toolbar" style={{ flexShrink: 0 }}>
             <select value={status} onChange={(e) => setStatus(e.target.value as FlightStatus)} className="shipments-search" style={{ width: 170 }}>
               <option value="SCHEDULED">Programados</option>
               <option value="IN_FLIGHT">En vuelo</option>
@@ -230,26 +245,28 @@ function FlightsPageContent() {
           </div>
 
           {simActive && upcomingFlights.length > 0 ? (
-            <div style={{ marginBottom: 14, padding: 10, borderRadius: 10, background: '#10233c', border: '1px solid #2563eb' }}>
-              <p style={{ margin: 0, color: '#cfe1ff', fontSize: 12, fontWeight: 600 }}>
-                Próximos despegues ({upcomingFlights.length})
-              </p>
-              <div style={{ marginTop: 6, display: 'flex', gap: 6, overflowX: 'auto' }}>
-                {upcomingFlights.slice(0, 8).map((flight) => (
-                  <button
-                    key={flight.id}
-                    className={`chip${selectedId === flight.id ? ' is-active' : ''}`}
-                    onClick={() => setSelectedId(flight.id)}
-                    style={{ whiteSpace: 'nowrap' }}
-                  >
-                    {flight.flightCode} · {flight.originAirport.icaoCode}→{flight.destinationAirport.icaoCode} · {dateShort(flight.scheduledDeparture)}
-                  </button>
-                ))}
+            <div style={{ flexShrink: 0, padding: '8px 16px 12px', borderBottom: '1px solid #2a2e44' }}>
+              <div style={{ padding: 10, borderRadius: 10, background: '#10233c', border: '1px solid #2563eb' }}>
+                <p style={{ margin: 0, color: '#cfe1ff', fontSize: 12, fontWeight: 600 }}>
+                  Próximos despegues ({upcomingFlights.length})
+                </p>
+                <div style={{ marginTop: 6, display: 'flex', gap: 6, overflowX: 'auto' }}>
+                  {upcomingFlights.slice(0, 8).map((flight) => (
+                    <button
+                      key={flight.id}
+                      className={`chip${selectedId === flight.id ? ' is-active' : ''}`}
+                      onClick={() => setSelectedId(flight.id)}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {flight.flightCode} · {flight.originAirport.icaoCode}→{flight.destinationAirport.icaoCode} · {dateShort(flight.scheduledDeparture)}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           ) : null}
 
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -288,7 +305,7 @@ function FlightsPageContent() {
             </table>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 14 }}>
+          <div style={{ flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', borderTop: '1px solid #2a2e44' }}>
             <p style={{ margin: 0, color: '#9ca3bf', fontSize: 13 }}>
               {visibleRows.length !== rows.length
                 ? `${visibleRows.length.toLocaleString('es-PE')} mostrados · ${totalElements.toLocaleString('es-PE')} totales`
@@ -302,19 +319,21 @@ function FlightsPageContent() {
           </div>
 
           {error ? (
-            <div className="state-panel is-error" style={{ marginTop: 12 }}>
-              <p className="state-panel-title">Error</p>
-              <p className="state-panel-copy">{error}</p>
+            <div style={{ flexShrink: 0, padding: '0 16px 10px' }}>
+              <div className="state-panel is-error">
+                <p className="state-panel-title">Error</p>
+                <p className="state-panel-copy">{error}</p>
+              </div>
             </div>
           ) : null}
         </section>
 
-        <aside className="surface-panel" style={{ padding: 16 }}>
+        <aside className="surface-panel" style={{ padding: 16, overflowY: 'auto' }}>
           {detailLoading ? (
             <div className="state-panel"><p className="state-panel-title">Cargando detalle del vuelo</p></div>
           ) : detail ? (
             <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
                 <p className="detail-title">{detail.flight.flightCode}</p>
                 <span className="chip is-active">{statusLabel(detail.flight.status)}</span>
               </div>

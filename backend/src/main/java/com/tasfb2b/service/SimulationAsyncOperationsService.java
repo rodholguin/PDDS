@@ -122,7 +122,11 @@ public class SimulationAsyncOperationsService {
                     .max(LocalDateTime::compareTo)
                     .orElse(horizon);
 
-            List<Flight> flights = routePlannerService.availableFlightsForWindow(minRegistration, maxRegistration.plusDays(3));
+            // Usar horizon (simulatedNow) como piso para no asignar vuelos que ya despegaron:
+            // si se usara minRegistration (registrationDate del envío más antiguo del lote), el
+            // planner vería vuelos cuya departure ya pasó → aviones aparecen mid-ruta o envíos
+            // quedan stuck PENDING si el vuelo ya aterrizó.
+            List<Flight> flights = routePlannerService.availableFlightsForWindow(horizon, maxRegistration.plusDays(3));
             RoutePlanningSupport.PlanningFlightIndex flightIndex = RoutePlanningSupport.buildPlanningFlightIndex(flights);
             List<Airport> airports = routePlannerService.allAirports();
             String algorithmName = routePlannerService.activeAlgorithmName();
