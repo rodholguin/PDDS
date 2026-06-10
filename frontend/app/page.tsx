@@ -283,6 +283,8 @@ type SimulationMapPanelProps = {
   bootstrapPlannedShipments: number;
   bootstrapTotalShipments: number;
   bootstrapMessage: string | null | undefined;
+  maximized: boolean;
+  onToggleMaximized: () => void;
 };
 
 const SimulationMapPanel = memo(function SimulationMapPanel({
@@ -305,8 +307,11 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
   bootstrapPlannedShipments,
   bootstrapTotalShipments,
   bootstrapMessage,
+  maximized,
+  onToggleMaximized,
 }: SimulationMapPanelProps) {
   const mapRef = useRef<MapRef | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement | null>(null);
 
   const handleMapClick = useCallback((event: MapLayerMouseEvent) => {
     onSelectedShipmentChange(null);
@@ -315,24 +320,56 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
     onSelectedNodeChange(null);
   }, [onSelectedFlightIdChange, onSelectedFlightVisualChange, onSelectedNodeChange, onSelectedShipmentChange]);
 
+  // Al maximizar/restaurar, el contenedor del mapa cambia de tamaño; maplibre necesita resize() para
+  // redibujar (si no, el canvas queda en blanco). Se llama de inmediato y tras la transición del grid (0.25s).
+  useEffect(() => {
+    const ref = mapRef.current;
+    if (!ref) return;
+    const underlying = (ref as any).getMap ? (ref as any).getMap() : ref;
+    if (underlying && typeof underlying.resize === 'function') underlying.resize();
+    const t = setTimeout(() => { if (underlying && typeof underlying.resize === 'function') underlying.resize(); }, 280);
+    return () => clearTimeout(t);
+  }, [maximized]);
+
+  // Resize observer: cuando el contenedor del mapa cambia de tamaño (por layout/transition),
+  // invocar `resize()` en la instancia de Map para evitar canvas en blanco.
+  useEffect(() => {
+    const node = mapContainerRef.current;
+    if (!node || typeof (window as any).ResizeObserver === 'undefined') return;
+    const obs = new (window as any).ResizeObserver(() => {
+      const ref = mapRef.current;
+      if (!ref) return;
+      const underlying = (ref as any).getMap ? (ref as any).getMap() : ref;
+      try { if (underlying && typeof underlying.resize === 'function') underlying.resize(); } catch (e) { /* ignore */ }
+    });
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, []);
+
   return (
     <section className="surface-panel" style={{ overflow: 'hidden', position: 'relative' }}>
       <div style={{ position: 'absolute', top: 12, left: 56, zIndex: 5, display: 'flex', gap: 8 }}>
         <button className={`chip${mapMode === 'MAPA' ? ' is-active' : ''}`} onClick={() => onMapModeChange('MAPA')}>Mapa</button>
         <button className={`chip${mapMode === 'SATELITAL' ? ' is-active' : ''}`} onClick={() => onMapModeChange('SATELITAL')}>Satelital</button>
       </div>
+      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 5 }}>
+        <button className={`chip${maximized ? ' is-active' : ''}`} onClick={onToggleMaximized} title={maximized ? 'Restaurar paneles' : 'Maximizar mapa'}>
+          {maximized ? '⤡ Restaurar' : '⤢ Maximizar'}
+        </button>
+      </div>
 
       <div style={{ position: 'absolute', inset: 0, zIndex: 1, background: 'rgba(8, 10, 20, 0.24)', pointerEvents: 'none' }} />
 
-      <Map
-        ref={mapRef}
-        mapStyle={mapMode === 'MAPA' ? MAP_STYLE : SATELLITE_STYLE}
-        initialViewState={INITIAL_VIEW}
-        style={{ width: '100%', height: '100%' }}
-        renderWorldCopies={false}
-        onClick={handleMapClick}
-      >
-        <NavigationControl position="top-left" />
+      <div ref={mapContainerRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
+        <Map
+          ref={mapRef}
+          mapStyle={mapMode === 'MAPA' ? MAP_STYLE : SATELLITE_STYLE}
+          initialViewState={INITIAL_VIEW}
+          style={{ width: '100%', height: '100%' }}
+          renderWorldCopies={false}
+          onClick={handleMapClick}
+        >
+          <NavigationControl position="top-left" />
 
         <FlightTrajectoryLayer
           selectedFlight={selectedFlight}
@@ -429,7 +466,8 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
             </div>
           </Popup>
         ) : null}
-      </Map>
+        </Map>
+        </div>
       {bootstrapping ? (
         <BootstrapOverlay
           planned={bootstrapPlannedShipments}
@@ -471,6 +509,13 @@ export default function HomePage() {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('pdds-kpis-collapsed') === 'true';
   });
+  const [mapMaximized, setMapMaximized] = useState(false);
+  // Modo "mapa a pantalla completa": oculta la barra de navegación (clase en <body>) y colapsa los
+  // paneles izquierdo (config) y derecho (KPIs) a 0 para que el mapa ocupe lo máximo posible.
+  useEffect(() => {
+    document.body.classList.toggle('map-maximized', mapMaximized);
+    return () => { document.body.classList.remove('map-maximized'); };
+  }, [mapMaximized]);
   const [selectedFlightVisual, setSelectedFlightVisual] = useState<MapLiveFlight | null>(null);
   const [renderedFlights, setRenderedFlights] = useState<MapLiveFlight[]>([]);
   const renderedFlightsRef = useRef<MapLiveFlight[]>([]);
@@ -802,8 +847,8 @@ export default function HomePage() {
       </header>
 
       <div style={{ padding: '14px 16px 16px 20px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `${panelCollapsed ? '48px' : '340px'} 1fr ${kpisCollapsed ? '48px' : '300px'}`, gap: 12, minHeight: 'calc(100vh - 110px)', transition: 'grid-template-columns 0.25s ease' }}>
-          <aside className="surface-panel" style={{ padding: panelCollapsed ? '14px 6px' : 14, overflowY: 'auto', position: 'relative' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: mapMaximized ? '1fr' : `${panelCollapsed ? '48px' : '340px'} 1fr ${kpisCollapsed ? '48px' : '300px'}`, gap: mapMaximized ? 0 : 12, minHeight: 'calc(100vh - 110px)', transition: 'grid-template-columns 0.25s ease' }}>
+          <aside className="surface-panel" style={{ display: mapMaximized ? 'none' : undefined, padding: panelCollapsed ? '14px 6px' : 14, overflowY: 'auto', position: 'relative' }}>
             <button
               onClick={() => {
                 const next = !panelCollapsed;
@@ -918,9 +963,11 @@ export default function HomePage() {
             bootstrapPlannedShipments={sim?.bootstrapPlannedShipments ?? 0}
             bootstrapTotalShipments={sim?.bootstrapTotalShipments ?? 0}
             bootstrapMessage={sim?.bootstrapMessage}
+            maximized={mapMaximized}
+            onToggleMaximized={() => setMapMaximized((v) => !v)}
           />
 
-          <aside style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+          <aside style={{ display: mapMaximized ? 'none' : 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: kpisCollapsed ? 'center' : 'space-between', minHeight: 28 }}>
               {!kpisCollapsed && <span style={{ fontSize: 12, fontWeight: 700, color: '#9ca7c8' }}>Indicadores</span>}
               <button

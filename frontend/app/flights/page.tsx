@@ -128,13 +128,15 @@ function FlightsPageContent() {
   }, [rows, upcomingOnly, status, simulatedNowMs]);
 
   useEffect(() => {
+    // La selección por deep-link (?selected=) es intocable: la gestiona el efecto que lee el query param.
+    // Antes, al montar con la lista aún vacía, este efecto reseteaba selectedId a null con un closure
+    // obsoleto y —como aquel efecto sólo depende de [searchParams]— ya no se re-ejecutaba → el vuelo del
+    // mapa nunca quedaba seleccionado. Con el return temprano, el deep-link se respeta.
+    if (searchParams.get('selected')) return;
     if (visibleRows.length === 0) {
-      if (!selectedId || !searchParams.get('selected')) {
-        setSelectedId(null);
-      }
+      setSelectedId(null);
       return;
     }
-    if (searchParams.get('selected')) return;
     if (!selectedId || visibleRows.some((row) => row.id === selectedId)) return;
     setSelectedId(visibleRows[0].id);
   }, [visibleRows, selectedId, searchParams]);

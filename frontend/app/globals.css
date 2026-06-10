@@ -125,6 +125,15 @@ a {
   z-index: 40;
 }
 
+/* Modo mapa maximizado: oculta la barra de navegación y libera el margen del contenido para que
+   el mapa ocupe el máximo de la pantalla. Lo activa el botón "Maximizar" del mapa (clase en <body>). */
+body.map-maximized .sidebar-shell {
+  display: none;
+}
+body.map-maximized .content-shell {
+  margin-left: 0;
+}
+
 .sidebar-header {
   height: 78px;
   padding: 0 20px;
