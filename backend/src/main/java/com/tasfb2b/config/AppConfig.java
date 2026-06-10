@@ -32,9 +32,10 @@ public class AppConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
                 .allowedOrigins(
-                        "http://localhost:3000",   // Next.js dev
-                        "http://127.0.0.1:3000",   // Local browser via loopback IP
-                        "http://frontend:3000"     // Docker Compose
+                    "http://localhost:3000",   // Next.js dev
+                    "http://127.0.0.1:3000",   // Local browser via loopback IP
+                    "http://frontend:3000",    // Docker Compose
+                    "https://1inf54-984-3c.inf.pucp.edu.pe" // Public frontend origin
                 )
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
