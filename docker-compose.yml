@@ -7,15 +7,15 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      POSTGRES_DB:       ${POSTGRES_DB:-tasfb2b}
-      POSTGRES_USER:     ${POSTGRES_USER:-tasfb2b}
+      POSTGRES_DB: ${POSTGRES_DB:-tasfb2b}
+      POSTGRES_USER: ${POSTGRES_USER:-tasfb2b}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tasfb2b}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tasfb2b} -d ${POSTGRES_DB:-tasfb2b}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tasfb2b} -d ${POSTGRES_DB:-tasfb2b}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -33,7 +33,7 @@ services:
         condition: service_healthy
     env_file: .env
     environment:
-      DB_URL:  jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tasfb2b}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-tasfb2b}
       DB_USER: ${POSTGRES_USER:-tasfb2b}
       DB_PASS: ${POSTGRES_PASSWORD:-tasfb2b}
     volumes:
@@ -48,7 +48,7 @@ services:
       dockerfile: Dockerfile
       args:
         # NEXT_PUBLIC_* se hornea en el bundle en tiempo de build.
-        NEXT_PUBLIC_API_URL: http://1inf54-984-3c.inf.pucp.edu.pe/api
+        NEXT_PUBLIC_API_URL: https://1inf54-984-3c.inf.pucp.edu.pe
     container_name: tasfb2b-frontend
     restart: unless-stopped
     depends_on:

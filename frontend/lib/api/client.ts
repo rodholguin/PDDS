@@ -1,6 +1,11 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL
+// Resolve API base URL with safe defaults:
+// - If NEXT_PUBLIC_API_URL is set, trim trailing slashes.
+// - Otherwise, prefer same-origin (use window.location.host) so requests stay relative to the site
+//   and avoid mixed-content when the site is served over HTTPS.
+const _env = process.env.NEXT_PUBLIC_API_URL;
+const BASE = (_env && _env.replace(/\/+$/, ''))
   ?? (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:8080`
+    ? `${window.location.protocol}//${window.location.host}`
     : 'http://localhost:8080');
 
 /** Generic JSON fetcher with unified error handling. */
