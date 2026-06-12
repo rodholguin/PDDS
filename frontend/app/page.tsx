@@ -875,7 +875,7 @@ export default function HomePage() {
                 </select>
               </label>
 
-              {(config.scenario === 'PERIOD_SIMULATION' || config.scenario === 'COLLAPSE_TEST') && (
+              {config.scenario === 'PERIOD_SIMULATION' && (
                 <label>
                   <span style={{ fontSize: 12, color: '#9ca7c8' }}>Duración (días)</span>
                   <select disabled={!canEditConfig} value={config.simulationDays} onChange={(e) => patchConfig({ simulationDays: Number(e.target.value) as 3 | 5 | 7 })} style={field}>
