@@ -255,10 +255,138 @@ type SelectedFlightView = MapLiveFlight & {
   currentLongitude: number;
 };
 
+type FlightsOverlayProps = {
+  flights: MapLiveFlight[];
+  active: boolean;
+  selectedFlight: SelectedFlightView | null;
+  selectedAirportIcao: string | null;
+  selectedFlightId: number | null;
+  onFlightClick: (flightId: number) => void;
+};
+
+// Capa animada de vuelos: el loop de requestAnimationFrame (60fps durante FLIGHT_ANIMATION_MS por
+// cada poll) vive AQUÍ y no en HomePage, de modo que cada frame re-renderiza solo los íconos de
+// avión y la trayectoria — no la página completa (config, KPIs, alertas) ni el resto del mapa.
+const FlightsOverlay = memo(function FlightsOverlay({
+  flights,
+  active,
+  selectedFlight,
+  selectedAirportIcao,
+  selectedFlightId,
+  onFlightClick,
+}: FlightsOverlayProps) {
+  const [renderedFlights, setRenderedFlights] = useState<MapLiveFlight[]>([]);
+  const renderedFlightsRef = useRef<MapLiveFlight[]>([]);
+  const flightAnimationFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (flightAnimationFrameRef.current) {
+      cancelAnimationFrame(flightAnimationFrameRef.current);
+      flightAnimationFrameRef.current = null;
+    }
+
+    if (!active || flights.length === 0) {
+      setRenderedFlights([]);
+      renderedFlightsRef.current = [];
+      return;
+    }
+
+    const previousById = new globalThis.Map(renderedFlightsRef.current.map((flight) => [flight.flightId, flight]));
+    const startAt = performance.now();
+    const fromFlights = flights.map((flight) => previousById.get(flight.flightId) ?? flight);
+
+    setRenderedFlights(fromFlights);
+    renderedFlightsRef.current = fromFlights;
+
+    const animate = (now: number) => {
+      const ratio = clamp01((now - startAt) / FLIGHT_ANIMATION_MS);
+      const nextFlights = flights.map((flight, index) => {
+        const from = fromFlights[index] ?? flight;
+        const position = interpolateFlightPosition(
+          { latitude: from.currentLatitude, longitude: from.currentLongitude },
+          { latitude: flight.currentLatitude, longitude: flight.currentLongitude },
+          ratio,
+        );
+
+        return {
+          ...flight,
+          currentLatitude: position.latitude,
+          currentLongitude: position.longitude,
+        };
+      });
+
+      setRenderedFlights(nextFlights);
+      renderedFlightsRef.current = nextFlights;
+
+      if (ratio < 1) {
+        flightAnimationFrameRef.current = requestAnimationFrame(animate);
+      } else {
+        flightAnimationFrameRef.current = null;
+      }
+    };
+
+    flightAnimationFrameRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (flightAnimationFrameRef.current) {
+        cancelAnimationFrame(flightAnimationFrameRef.current);
+        flightAnimationFrameRef.current = null;
+      }
+    };
+  }, [flights, active]);
+
+  return (
+    <>
+      <FlightTrajectoryLayer
+        selectedFlight={selectedFlight}
+        selectedAirportIcao={selectedAirportIcao}
+        flights={renderedFlights}
+      />
+
+      {active && renderedFlights.map((row) => {
+        const rotation = computeBearing(
+          row.currentLatitude,
+          row.currentLongitude,
+          row.destinationLatitude,
+          row.destinationLongitude,
+        );
+
+        return (
+          <Marker
+            key={`flight-${row.flightId}`}
+            longitude={row.currentLongitude}
+            latitude={row.currentLatitude}
+            anchor="center"
+            onClick={(e) => {
+              e.originalEvent.stopPropagation();
+              onFlightClick(row.flightId);
+            }}
+          >
+            <button
+              title={row.flightCode}
+              type="button"
+              className="map-flight-button"
+              style={{
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                margin: 0,
+                cursor: 'pointer',
+                display: 'block',
+              }}
+            >
+              <PlaneIcon rotation={rotation} selected={selectedFlightId === row.flightId} />
+            </button>
+          </Marker>
+        );
+      })}
+    </>
+  );
+});
+
 type SimulationMapPanelProps = {
   airports: Airport[];
   flights: MapLiveFlight[];
-  renderedFlights: MapLiveFlight[];
   active: boolean;
   mapMode: MapMode;
   onMapModeChange: (mode: MapMode) => void;
@@ -290,7 +418,6 @@ type SimulationMapPanelProps = {
 const SimulationMapPanel = memo(function SimulationMapPanel({
   airports,
   flights,
-  renderedFlights,
   active,
   mapMode,
   onMapModeChange,
@@ -319,6 +446,13 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
     onSelectedFlightVisualChange(null);
     onSelectedNodeChange(null);
   }, [onSelectedFlightIdChange, onSelectedFlightVisualChange, onSelectedNodeChange, onSelectedShipmentChange]);
+
+  // Estable para que el memo de FlightsOverlay no se invalide en cada render del panel.
+  const handleFlightClick = useCallback((flightId: number) => {
+    onSelectedShipmentChange(null);
+    onSelectedNodeChange(null);
+    onSelectedFlightIdChange(flightId);
+  }, [onSelectedFlightIdChange, onSelectedNodeChange, onSelectedShipmentChange]);
 
   // Al maximizar/restaurar, el contenedor del mapa cambia de tamaño; maplibre necesita resize() para
   // redibujar (si no, el canvas queda en blanco). Se llama de inmediato y tras la transición del grid (0.25s).
@@ -371,10 +505,13 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
         >
           <NavigationControl position="top-left" />
 
-        <FlightTrajectoryLayer
+        <FlightsOverlay
+          flights={flights}
+          active={active}
           selectedFlight={selectedFlight}
           selectedAirportIcao={selectedNode?.detail.icaoCode ?? null}
-          flights={renderedFlights}
+          selectedFlightId={selectedFlightId}
+          onFlightClick={handleFlightClick}
         />
 
         {airports.map((a) => (
@@ -392,46 +529,6 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
             />
           </Marker>
         ))}
-
-        {active && renderedFlights.map((row) => {
-          const rotation = computeBearing(
-            row.currentLatitude,
-            row.currentLongitude,
-            row.destinationLatitude,
-            row.destinationLongitude,
-          );
-
-          return (
-            <Marker
-              key={`flight-${row.flightId}`}
-              longitude={row.currentLongitude}
-              latitude={row.currentLatitude}
-              anchor="center"
-              onClick={(e) => {
-                e.originalEvent.stopPropagation();
-                onSelectedShipmentChange(null);
-                onSelectedNodeChange(null);
-                onSelectedFlightIdChange(row.flightId);
-              }}
-            >
-              <button
-                title={row.flightCode}
-                type="button"
-                className="map-flight-button"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  padding: 0,
-                  margin: 0,
-                  cursor: 'pointer',
-                  display: 'block',
-                }}
-              >
-                <PlaneIcon rotation={rotation} selected={selectedFlightId === row.flightId} />
-              </button>
-            </Marker>
-          );
-        })}
 
         {active && selectedShipment ? (
           <Popup longitude={selectedShipment.currentLongitude} latitude={selectedShipment.currentLatitude} closeButton={false} closeOnClick={false} anchor="top">
@@ -462,7 +559,7 @@ const SimulationMapPanel = memo(function SimulationMapPanel({
               <p style={{ margin: '4px 0 0', fontSize: 12 }}>Ocupación: {selectedNode.detail.occupancyPct.toFixed(1)}%</p>
               <p style={{ margin: '4px 0 0', fontSize: 12 }}>Capacidad: {selectedNode.detail.currentStorageLoad}/{selectedNode.detail.maxStorageCapacity}</p>
               <p style={{ margin: '4px 0 0', fontSize: 12 }}>Vuelos programados: {selectedNode.detail.scheduledFlights}</p>
-              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Vuelos en camino: {renderedFlights.filter((f) => f.destinationIcao === selectedNode.detail.icaoCode).length}</p>
+              <p style={{ margin: '4px 0 0', fontSize: 12 }}>Vuelos en camino: {flights.filter((f) => f.destinationIcao === selectedNode.detail.icaoCode).length}</p>
             </div>
           </Popup>
         ) : null}
@@ -498,6 +595,7 @@ export default function HomePage() {
   const [selectedFlightId, setSelectedFlightId] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<{ point: { longitude: number; latitude: number }; detail: NodeDetail } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [draftDirty, setDraftDirty] = useState(false);
   const [alerts, setAlerts] = useState<OperationalAlert[]>([]);
@@ -517,9 +615,6 @@ export default function HomePage() {
     return () => { document.body.classList.remove('map-maximized'); };
   }, [mapMaximized]);
   const [selectedFlightVisual, setSelectedFlightVisual] = useState<MapLiveFlight | null>(null);
-  const [renderedFlights, setRenderedFlights] = useState<MapLiveFlight[]>([]);
-  const renderedFlightsRef = useRef<MapLiveFlight[]>([]);
-  const flightAnimationFrameRef = useRef<number | null>(null);
 
   // Derived clock display from the globally-extrapolated simulated time
   const displayedSimTime = useMemo(() => {
@@ -578,73 +673,11 @@ export default function HomePage() {
   // navigation between pages never triggers a flash of empty state.
   useEffect(() => {
     if (!simulacionActiva) {
-      setRenderedFlights([]);
-      renderedFlightsRef.current = [];
       setSelectedShipmentId(null);
       setSelectedFlightId(null);
       setSelectedFlightVisual(null);
     }
   }, [simulacionActiva]);
-
-  useEffect(() => {
-    renderedFlightsRef.current = renderedFlights;
-  }, [renderedFlights]);
-
-  useEffect(() => {
-    if (flightAnimationFrameRef.current) {
-      cancelAnimationFrame(flightAnimationFrameRef.current);
-      flightAnimationFrameRef.current = null;
-    }
-
-    if (!simulacionActiva || mapLiveFlights.length === 0) {
-      setRenderedFlights([]);
-      renderedFlightsRef.current = [];
-      return;
-    }
-
-    const previousById = new globalThis.Map(renderedFlightsRef.current.map((flight) => [flight.flightId, flight]));
-    const startAt = performance.now();
-    const fromFlights = mapLiveFlights.map((flight) => previousById.get(flight.flightId) ?? flight);
-
-    setRenderedFlights(fromFlights);
-    renderedFlightsRef.current = fromFlights;
-
-    const animate = (now: number) => {
-      const ratio = clamp01((now - startAt) / FLIGHT_ANIMATION_MS);
-      const nextFlights = mapLiveFlights.map((flight, index) => {
-        const from = fromFlights[index] ?? flight;
-        const position = interpolateFlightPosition(
-          { latitude: from.currentLatitude, longitude: from.currentLongitude },
-          { latitude: flight.currentLatitude, longitude: flight.currentLongitude },
-          ratio,
-        );
-
-        return {
-          ...flight,
-          currentLatitude: position.latitude,
-          currentLongitude: position.longitude,
-        };
-      });
-
-      setRenderedFlights(nextFlights);
-      renderedFlightsRef.current = nextFlights;
-
-      if (ratio < 1) {
-        flightAnimationFrameRef.current = requestAnimationFrame(animate);
-      } else {
-        flightAnimationFrameRef.current = null;
-      }
-    };
-
-    flightAnimationFrameRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (flightAnimationFrameRef.current) {
-        cancelAnimationFrame(flightAnimationFrameRef.current);
-        flightAnimationFrameRef.current = null;
-      }
-    };
-  }, [mapLiveFlights, simulacionActiva]);
 
   useEffect(() => {
     if (selectedFlightId == null) {
@@ -720,6 +753,7 @@ export default function HomePage() {
   }
 
   async function onStart(): Promise<void> {
+    setStarting(true);
     try {
       if (draftDirty) await saveScenarioConfig();
       const res = await simulationApi.start();
@@ -729,6 +763,8 @@ export default function HomePage() {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo iniciar la simulación.');
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -828,10 +864,10 @@ export default function HomePage() {
           <p className="page-head-subtitle">Monitoreo en tiempo real del traslado de equipaje entre aeropuertos</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-primary" disabled={simulacionActiva} onClick={onStart}>Iniciar</button>
-          <button className="btn btn-primary" disabled={!canResume} onClick={onResume}>Reanudar</button>
-          <button className="btn btn-neutral" disabled={!sim?.running || Boolean(sim?.paused)} onClick={onPause}>Pausar</button>
-          <button className="btn btn-danger" disabled={!sim?.running && !sim?.paused} onClick={onStop}>Detener</button>
+          <button className="btn btn-primary" disabled={simulacionActiva || starting} onClick={onStart}>{starting ? 'Iniciando...' : 'Iniciar'}</button>
+          <button className="btn btn-primary" disabled={!canResume || starting} onClick={onResume}>Reanudar</button>
+          <button className="btn btn-neutral" disabled={!sim?.running || Boolean(sim?.paused) || starting} onClick={onPause}>Pausar</button>
+          <button className="btn btn-danger" disabled={(!sim?.running && !sim?.paused) || starting} onClick={onStop}>Detener</button>
           {speedOptions.map((speed) => (
             <button
               key={speed}
@@ -946,7 +982,6 @@ export default function HomePage() {
           <SimulationMapPanel
             airports={airports}
             flights={mapLiveFlights}
-            renderedFlights={renderedFlights}
             active={simulacionActiva}
             mapMode={mapMode}
             onMapModeChange={setMapMode}
