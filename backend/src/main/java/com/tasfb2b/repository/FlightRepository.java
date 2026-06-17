@@ -284,7 +284,7 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
             WHERE f.status = 'SCHEDULED'
               AND f.scheduledDeparture >= :from
               AND f.scheduledDeparture < :to
-              AND f.currentLoad > 0
+              AND (f.reservedLoad > 0 OR f.currentLoad > 0)
             """)
     long countLoadedScheduledFlightsBetween(@Param("from") LocalDateTime from,
                                             @Param("to") LocalDateTime to);

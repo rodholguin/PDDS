@@ -192,7 +192,7 @@ public class DashboardController {
         long activeFlights = isPlanAheadScenario(config)
                 ? flightRepository.countActiveFlightsSince(now, visibleFrom)
                 : flightRepository.countLoadedActiveFlightsAtWithinDay(now, todayStart, tomorrow);
-        long nextScheduledFlights = Math.min(25L, flightRepository.countLoadedScheduledFlightsBetween(now, tomorrow));
+        long nextScheduledFlights = flightRepository.countLoadedScheduledFlightsBetween(now, tomorrow);
         long inRoute = isPlanAheadScenario(config)
                 ? shipmentRepository.countInRouteSince(visibleFrom)
                 : shipmentRepository.countVisibleForMapWithinDay(todayStart, tomorrow);

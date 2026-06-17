@@ -498,6 +498,7 @@ export default function HomePage() {
   const [selectedFlightId, setSelectedFlightId] = useState<number | null>(null);
   const [selectedNode, setSelectedNode] = useState<{ point: { longitude: number; latitude: number }; detail: NodeDetail } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [draftDirty, setDraftDirty] = useState(false);
   const [alerts, setAlerts] = useState<OperationalAlert[]>([]);
@@ -720,6 +721,7 @@ export default function HomePage() {
   }
 
   async function onStart(): Promise<void> {
+    setStarting(true);
     try {
       if (draftDirty) await saveScenarioConfig();
       const res = await simulationApi.start();
@@ -729,6 +731,8 @@ export default function HomePage() {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo iniciar la simulación.');
+    } finally {
+      setStarting(false);
     }
   }
 
@@ -828,10 +832,10 @@ export default function HomePage() {
           <p className="page-head-subtitle">Monitoreo en tiempo real del traslado de equipaje entre aeropuertos</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-primary" disabled={simulacionActiva} onClick={onStart}>Iniciar</button>
-          <button className="btn btn-primary" disabled={!canResume} onClick={onResume}>Reanudar</button>
-          <button className="btn btn-neutral" disabled={!sim?.running || Boolean(sim?.paused)} onClick={onPause}>Pausar</button>
-          <button className="btn btn-danger" disabled={!sim?.running && !sim?.paused} onClick={onStop}>Detener</button>
+          <button className="btn btn-primary" disabled={simulacionActiva || starting} onClick={onStart}>{starting ? 'Iniciando...' : 'Iniciar'}</button>
+          <button className="btn btn-primary" disabled={!canResume || starting} onClick={onResume}>Reanudar</button>
+          <button className="btn btn-neutral" disabled={!sim?.running || Boolean(sim?.paused) || starting} onClick={onPause}>Pausar</button>
+          <button className="btn btn-danger" disabled={(!sim?.running && !sim?.paused) || starting} onClick={onStop}>Detener</button>
           {speedOptions.map((speed) => (
             <button
               key={speed}
@@ -875,7 +879,7 @@ export default function HomePage() {
                 </select>
               </label>
 
-              {(config.scenario === 'PERIOD_SIMULATION' || config.scenario === 'COLLAPSE_TEST') && (
+              {config.scenario === 'PERIOD_SIMULATION' && (
                 <label>
                   <span style={{ fontSize: 12, color: '#9ca7c8' }}>Duración (días)</span>
                   <select disabled={!canEditConfig} value={config.simulationDays} onChange={(e) => patchConfig({ simulationDays: Number(e.target.value) as 3 | 5 | 7 })} style={field}>
