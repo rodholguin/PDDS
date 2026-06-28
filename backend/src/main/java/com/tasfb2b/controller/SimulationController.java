@@ -1,18 +1,16 @@
 package com.tasfb2b.controller;
 
 import com.tasfb2b.dto.CollapseRiskDto;
-import com.tasfb2b.dto.AlgorithmRaceReportDto;
 import com.tasfb2b.dto.SimulationConfigUpdateDto;
 import com.tasfb2b.dto.SimulationEventDto;
 import com.tasfb2b.dto.SimulationResultsDto;
 import com.tasfb2b.dto.SimulationSpeedDto;
 import com.tasfb2b.dto.SimulationStateDto;
-import com.tasfb2b.model.AlgorithmType;
 import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
+import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.CollapseMonitorService;
-import com.tasfb2b.service.AlgorithmRaceService;
 import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
@@ -24,7 +22,6 @@ import com.tasfb2b.service.SimulationExportService;
 import com.tasfb2b.service.SimulationRuntimeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.tasfb2b.service.AlgorithmProfileService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,10 +38,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/simulation")
@@ -57,13 +53,12 @@ public class SimulationController {
     private final RoutePlannerService routePlannerService;
     private final CollapseMonitorService collapseMonitorService;
     private final ShipmentRepository shipmentRepository;
+    private final TravelStopRepository travelStopRepository;
     private final SimulationRuntimeService runtimeService;
-    private final AlgorithmRaceService algorithmRaceService;
     private final OperationalBootstrapService operationalBootstrapService;
     private final SimulationExportService simulationExportService;
     private final SimulationEngineService simulationEngineService;
     private final SimulationAsyncOperationsService simulationAsyncOperationsService;
-    private final AlgorithmProfileService algorithmProfileService;
     private final FlightScheduleService flightScheduleService;
     private final PeriodSimulationBootstrapService periodSimulationBootstrapService;
     private final WarmupService warmupService;
@@ -73,13 +68,12 @@ public class SimulationController {
             RoutePlannerService routePlannerService,
             CollapseMonitorService collapseMonitorService,
             ShipmentRepository shipmentRepository,
+            TravelStopRepository travelStopRepository,
             SimulationRuntimeService runtimeService,
-            AlgorithmRaceService algorithmRaceService,
             OperationalBootstrapService operationalBootstrapService,
             SimulationExportService simulationExportService,
             SimulationEngineService simulationEngineService,
             SimulationAsyncOperationsService simulationAsyncOperationsService,
-            AlgorithmProfileService algorithmProfileService,
             FlightScheduleService flightScheduleService,
             PeriodSimulationBootstrapService periodSimulationBootstrapService,
             WarmupService warmupService
@@ -88,13 +82,12 @@ public class SimulationController {
         this.routePlannerService = routePlannerService;
         this.collapseMonitorService = collapseMonitorService;
         this.shipmentRepository = shipmentRepository;
+        this.travelStopRepository = travelStopRepository;
         this.runtimeService = runtimeService;
-        this.algorithmRaceService = algorithmRaceService;
         this.operationalBootstrapService = operationalBootstrapService;
         this.simulationExportService = simulationExportService;
         this.simulationEngineService = simulationEngineService;
         this.simulationAsyncOperationsService = simulationAsyncOperationsService;
-        this.algorithmProfileService = algorithmProfileService;
         this.flightScheduleService = flightScheduleService;
         this.periodSimulationBootstrapService = periodSimulationBootstrapService;
         this.warmupService = warmupService;
@@ -102,14 +95,53 @@ public class SimulationController {
 
     @GetMapping("/state")
     @Operation(summary = "Obtener estado actual de la simulación")
-    public ResponseEntity<SimulationStateDto> getState() {
+    public ResponseEntity<SimulationStateDto> getState(
+            @RequestParam(required = false, defaultValue = "live") String mode) {
+        if ("sim".equalsIgnoreCase(mode)) {
+            SimulationConfig sim = configRepository.findFirstByScenarioInAndIsRunningTrue(java.util.List.of(
+                    com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION,
+                    com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST)).orElse(null);
+            if (sim == null) {
+                sim = configRepository.findFirstByScenarioIn(java.util.List.of(
+                        com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION,
+                        com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST)).orElse(null);
+            }
+            if (sim != null) {
+                return ResponseEntity.ok(runtimeService.getState(sim));
+            }
+        }
         return ResponseEntity.ok(runtimeService.getState());
+    }
+
+    @GetMapping("/sim-state")
+    @Operation(summary = "Estado liviano de la SIMULACIÓN (corre en paralelo a la operación viva)")
+    public ResponseEntity<Map<String, Object>> simState() {
+        SimulationConfig sim = configRepository.findFirstByScenarioInAndIsRunningTrue(java.util.List.of(
+                com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION,
+                com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST)).orElse(null);
+        if (sim == null) {
+            sim = configRepository.findFirstByScenarioIn(java.util.List.of(
+                    com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION,
+                    com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST)).orElse(null);
+        }
+        java.util.Map<String, Object> m = new java.util.HashMap<>();
+        m.put("exists", sim != null);
+        if (sim != null) {
+            m.put("scenario", sim.getScenario());
+            m.put("running", sim.getIsRunning());
+            m.put("simulatedNow", sim.getRuntimeSimulatedNow());
+            m.put("scenarioStartAt", sim.getEffectiveScenarioStartAt());
+            m.put("simulationDays", sim.getSimulationDays());
+            m.put("collapseDetectedAtSim", sim.getCollapseDetectedAtSim());
+            m.put("collapseShipmentCode", sim.getCollapseShipmentCode());
+        }
+        return ResponseEntity.ok(m);
     }
 
     @PostMapping("/configure")
     @Operation(summary = "Actualizar parametros de simulación")
     public ResponseEntity<?> configure(@Valid @RequestBody SimulationConfigUpdateDto dto) {
-        SimulationConfig config = getConfig();
+        SimulationConfig config = getSimConfig();
 
         if (Boolean.TRUE.equals(config.getIsRunning())) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -142,32 +174,65 @@ public class SimulationController {
             config.setDateAdjusted(false);
             config.setDateAdjustmentReason(null);
         }
-        config.setPrimaryAlgorithm(AlgorithmType.GENETIC);
-        config.setSecondaryAlgorithm(AlgorithmType.GENETIC);
+        if (dto.primaryAlgorithm() != null) config.setPrimaryAlgorithm(dto.primaryAlgorithm());
+        if (dto.secondaryAlgorithm() != null) config.setSecondaryAlgorithm(dto.secondaryAlgorithm());
 
         configRepository.save(config);
-        algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
-        return ResponseEntity.ok(runtimeService.getState());
+        return ResponseEntity.ok(runtimeService.getState(config));
     }
 
     @PostMapping("/start")
     @Operation(summary = "Iniciar simulación")
     public ResponseEntity<?> start() {
-        SimulationConfig config = getConfig();
+        SimulationConfig config = getSimConfig();
         if (Boolean.TRUE.equals(config.getIsRunning()) && runtimeService.isPaused()) {
-            runtimeService.markResumed();
+            runtimeService.markResumed(config);
             return ResponseEntity.ok(Map.of(
                     "message", "Simulacion reanudada",
-                    "state", runtimeService.getState()
+                    "state", runtimeService.getState(config)
             ));
         }
         if (Boolean.TRUE.equals(config.getIsRunning()) && !runtimeService.isPaused()) {
             return ResponseEntity.ok(Map.of(
                     "message", "La simulacion ya estaba en curso",
-                    "state", runtimeService.getState()
+                    "state", runtimeService.getState(config)
             ));
         }
 
+        if (!runtimeService.beginControlTransition()) {
+            return ResponseEntity.status(409).body(Map.of(
+                    "error", "Ya hay una transicion de control en curso"
+            ));
+        }
+
+        runtimeService.markBootstrapStarted(0L, "Preparando simulacion");
+        Long configId = config.getId();
+        runControlAsync("simulation-start-" + configId, () -> {
+            try {
+                SimulationConfig fresh = configRepository.findById(configId)
+                        .orElseThrow(() -> new IllegalStateException("Config de simulacion no encontrada: " + configId));
+                log.info("Inicio async de simulacion: configId={}", configId);
+                startSimulationRun(fresh);
+                log.info("Fin async de simulacion: configId={}", configId);
+            } catch (Throwable ex) {
+                log.error("No se pudo iniciar la simulacion", ex);
+                runtimeService.markBootstrapFailed("No se pudo iniciar la simulacion: " + ex.getMessage());
+                configRepository.findById(configId).ifPresent(failed -> {
+                    failed.setIsRunning(false);
+                    configRepository.save(failed);
+                });
+            } finally {
+                runtimeService.endControlTransition();
+            }
+        });
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Preparando simulacion",
+                "state", runtimeService.getState(config)
+        ));
+    }
+
+    private void startSimulationRun(SimulationConfig config) {
         // Issue 7.2: resolve scenario/date mutations BEFORE flipping isRunning so that concurrent
         // ticks never observe running=true with stale scenarioStartAt/effectiveScenarioStartAt.
         config.setStartedAt(LocalDateTime.now());
@@ -176,10 +241,8 @@ public class SimulationController {
         config.setCollapseShipmentId(null);
         config.setCollapseShipmentCode(null);
 
-        // Cuando una simulacion previa termino automaticamente, preservamos su estado final
-        // hasta que el operador inicie una nueva corrida. En ese momento limpiamos la operacion
-        // anterior antes de bootstrap/arranque para empezar desde un estado consistente.
-        runtimeService.resetOperationalData();
+        // El reset (acotado a HISTORICAL, sin tocar la operación viva) se hace abajo una vez resuelta la
+        // fecha de inicio, para conocer la ventana de vuelos del sim a resetear.
 
         // Nota: las capacidades (vuelos y nodos) son fijas del dataset; NO se sobrescriben.
         // El almacén de nodos además es cosmético para el colapso por deadline (el ruteo sólo
@@ -217,8 +280,11 @@ public class SimulationController {
         config.setEffectiveScenarioStartAt(desiredStart);
         config.setDateAdjusted(dateAdjusted);
         config.setDateAdjustmentReason(adjustmentReason);
+        // Reset ACOTADO a la simulación (HISTORICAL + vuelos de su ventana). La operación viva (envíos/paradas
+        // LIVE y vuelos de hoy) NO se toca → el día a día sigue corriendo en paralelo sin interrupción.
+        runtimeService.resetSimulationOperationalData(desiredStart, runtimeService.resolveScenarioEnd(config));
         if (desiredStart != null) {
-            runtimeService.setSimulationTime(desiredStart);
+            runtimeService.setSimulationTime(config, desiredStart);
             if (warmupService.requiresWarmup(config, desiredStart)) {
                 var warmup = warmupService.runWarmup(config, desiredStart);
                 log.info("Warmup PERIOD_SIMULATION completado: total={} planned={} ticks={} from={} to={}",
@@ -247,42 +313,62 @@ public class SimulationController {
                 desiredStart,
                 dateAdjusted);
 
-        runtimeService.markStarted();
+        runtimeService.markStarted(config);
 
-        return ResponseEntity.ok(Map.of(
-                "message", dateAdjusted
-                        ? "Simulacion iniciada (fecha ajustada al rango de demanda: " + desiredStart + ")"
-                        : "Simulacion iniciada",
-                "state", runtimeService.getState()
-        ));
     }
 
     @PostMapping("/stop")
     @Operation(summary = "Detener simulación y reiniciar estado operativo")
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ResponseEntity<?> stop() {
+        SimulationConfig sim = getSimConfig();
         if (!runtimeService.beginControlTransition()) {
             return ResponseEntity.status(409).body(Map.of(
-                    "error", "Ya hay una transicion de control en curso"
+                    "message", "Ya hay una transicion de control en curso",
+                    "state", runtimeService.getState(sim)
             ));
         }
-        try {
-            runtimeService.prepareStop();
-            if (!awaitTickDrain()) {
-                return ResponseEntity.status(409).body(Map.of(
-                        "error", "No se pudo detener la simulacion porque aun hay un tick largo en progreso"
-                ));
-            }
-            simulationEngineService.resetTickSequence();
-            runtimeService.resetOperationalData();
 
-            return ResponseEntity.ok(Map.of(
-                    "message", "Simulacion detenida y estado reiniciado",
-                    "state", runtimeService.getState()
-            ));
-        } finally {
-            runtimeService.endControlTransition();
+        runtimeService.markBootstrapStarted(0L, "Deteniendo simulacion y limpiando estado operativo");
+        Long configId = sim.getId();
+        runControlAsync("simulation-stop-" + configId, () -> {
+            try {
+                SimulationConfig fresh = configRepository.findById(configId)
+                        .orElseThrow(() -> new IllegalStateException("Config de simulacion no encontrada: " + configId));
+                log.info("Detencion async de simulacion: configId={}", configId);
+                stopSimulationRun(fresh);
+            } catch (Throwable ex) {
+                log.error("No se pudo detener la simulacion", ex);
+                runtimeService.markBootstrapFailed("No se pudo detener la simulacion: " + ex.getMessage());
+            } finally {
+                runtimeService.endControlTransition();
+            }
+        });
+
+        return ResponseEntity.ok(Map.of(
+                "message", "Deteniendo simulacion",
+                "state", runtimeService.getState(sim)
+        ));
+    }
+
+    private void stopSimulationRun(SimulationConfig sim) {
+        runtimeService.stopSimulationOnly(sim);
+        runtimeService.markBootstrapStarted(0L, "Esperando que termine el tick en curso");
+        if (!awaitTickDrain()) {
+            runtimeService.markBootstrapFailed("No se pudo detener: aun hay un tick largo en progreso");
+            return;
         }
+        simulationEngineService.resetTickSequence();
+        runtimeService.markBootstrapStarted(0L, "Limpiando datos operativos de la simulacion");
+        runtimeService.resetSimulationOperationalData(sim.getEffectiveScenarioStartAt(), runtimeService.resolveScenarioEnd(sim));
+        runtimeService.resetRuntimeState(sim);
+        runtimeService.markBootstrapCompleted("Simulacion detenida y estado reiniciado");
+    }
+
+    private void runControlAsync(String name, Runnable task) {
+        Thread thread = new Thread(task, name);
+        thread.setDaemon(false);
+        thread.start();
     }
 
     @PostMapping("/reset-to-initial")
@@ -295,6 +381,7 @@ public class SimulationController {
             ));
         }
         try {
+            SimulationConfig config = getSimConfig();
             runtimeService.prepareStop();
             if (!awaitTickDrain()) {
                 return ResponseEntity.status(409).body(Map.of(
@@ -305,7 +392,7 @@ public class SimulationController {
             runtimeService.resetOperationalData();
             return ResponseEntity.ok(Map.of(
                     "message", "Estado inicial restaurado",
-                    "state", runtimeService.getState()
+                    "state", runtimeService.getState(config)
             ));
         } finally {
             runtimeService.endControlTransition();
@@ -334,64 +421,66 @@ public class SimulationController {
     @PostMapping("/pause")
     @Operation(summary = "Pausar simulación")
     public ResponseEntity<?> pause() {
-        SimulationConfig config = getConfig();
+        SimulationConfig config = getSimConfig();
         if (!Boolean.TRUE.equals(config.getIsRunning())) {
             return ResponseEntity.badRequest().body(Map.of("error", "No hay simulacion en ejecucion"));
         }
         if (runtimeService.isPaused()) {
             return ResponseEntity.ok(Map.of(
                     "message", "La simulacion ya estaba pausada",
-                    "state", runtimeService.getState()
+                    "state", runtimeService.getState(config)
             ));
         }
 
-        runtimeService.markPaused();
+        runtimeService.markPaused(config);
         awaitTickDrain();
         return ResponseEntity.ok(Map.of(
                 "message", "Simulacion pausada",
-                "state", runtimeService.getState()
+                "state", runtimeService.getState(config)
         ));
     }
 
     @PostMapping("/resume")
     @Operation(summary = "Reanudar simulación pausada")
     public ResponseEntity<?> resume() {
-        SimulationConfig config = getConfig();
+        SimulationConfig config = getSimConfig();
         if (!Boolean.TRUE.equals(config.getIsRunning())) {
             return ResponseEntity.badRequest().body(Map.of("error", "No hay simulacion iniciada"));
         }
         if (!runtimeService.isPaused()) {
             return ResponseEntity.ok(Map.of(
                     "message", "La simulacion ya estaba corriendo",
-                    "state", runtimeService.getState()
+                    "state", runtimeService.getState(config)
             ));
         }
 
-        runtimeService.markResumed();
+        runtimeService.markResumed(config);
         return ResponseEntity.ok(Map.of(
                 "message", "Simulacion reanudada",
-                "state", runtimeService.getState()
+                "state", runtimeService.getState(config)
         ));
     }
 
     @PostMapping("/speed")
     @Operation(summary = "Cambiar velocidad de simulación")
     public ResponseEntity<?> setSpeed(@Valid @RequestBody SimulationSpeedDto dto) {
+        SimulationConfig config = getSimConfig();
         runtimeService.setSpeed(dto.speed());
-        return ResponseEntity.ok(Map.of(
-                "message", "Velocidad actualizada",
-                "speed", runtimeService.currentSpeed(),
-                "state", runtimeService.getState()
-        ));
+        java.util.Map<String, Object> response = new java.util.LinkedHashMap<>();
+        response.put("message", "Velocidad actualizada");
+        response.put("speed", runtimeService.currentSpeed());
+        response.put("state", runtimeService.getState(config));
+        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/events")
     @Operation(summary = "Inyectar evento manual en simulación")
     public ResponseEntity<?> injectEvent(@Valid @RequestBody SimulationEventDto dto) {
+        SimulationConfig config = getSimConfig();
         String result = runtimeService.injectEvent(dto);
         return ResponseEntity.ok(Map.of(
                 "message", result,
-                "state", runtimeService.getState()
+                "state", runtimeService.getState(config)
         ));
     }
 
@@ -424,13 +513,100 @@ public class SimulationController {
     @GetMapping("/results")
     @Operation(summary = "Resultados comparativos de algoritmos + KPIs simulación")
     public ResponseEntity<SimulationResultsDto> getResults() {
-        return ResponseEntity.ok(new SimulationResultsDto(Map.of(), runtimeService.computeKpis(), "INTERNAL_GA"));
+        SimulationConfig config = getSimConfig();
+        var kpis = runtimeService.computeKpis(config);
+        var collapseAt = config.getCollapseDetectedAtSim();
+        if (config.getScenario() == com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST
+                && collapseAt != null
+                && config.getCollapseShipmentCode() != null) {
+            kpis = new com.tasfb2b.dto.SimulationKpisDto(
+                    kpis.deliveredOnTimePct(),
+                    kpis.avgFlightOccupancyPct(),
+                    kpis.avgNodeOccupancyPct(),
+                    kpis.replannings(),
+                    kpis.delivered(),
+                    0L,
+                    0L,
+                    1L,
+                    kpis.simulatedEvents()
+            );
+        }
+        var startAt = config.getEffectiveScenarioStartAt();
+        var endAt = resultsEndAt(config);
+        Long survival = (collapseAt != null && startAt != null)
+                ? Math.max(0L, java.time.Duration.between(startAt, collapseAt).getSeconds())
+                : null;
+        long totalShipments = startAt != null && endAt != null
+                ? shipmentRepository.countByRegistrationDateBetween(startAt, endAt)
+                : kpis.delivered() + kpis.delayed() + kpis.active() + kpis.critical();
+        long plannedShipments = startAt != null && endAt != null
+                ? travelStopRepository.countPlannedShipmentsByRegistrationBetween(startAt, endAt)
+                : Math.max(0L, totalShipments - runtimeService.periodPlanningBacklog());
+        return ResponseEntity.ok(new SimulationResultsDto(
+                Map.of(), kpis, "INTERNAL_GA",
+                config.getScenario() != null ? config.getScenario().name() : null,
+                startAt != null ? startAt.toString() : null,
+                endAt != null ? endAt.toString() : null,
+                collapseAt != null ? collapseAt.toString() : null,
+                config.getCollapseShipmentCode(),
+                survival,
+                totalShipments,
+                plannedShipments,
+                runtimeService.periodPlanningLastBatchFailed(),
+                kpis.active(),
+                kpis.delayed(),
+                kpis.critical(),
+                kpis.avgNodeOccupancyPct(),
+                runtimeService.periodPlanningBacklog(),
+                routePlannerService.getLastPlanningDurationMs(),
+                kpis.replannings()
+        ));
     }
 
     @GetMapping("/results/export")
     @Operation(summary = "Exportar resultados de simulación en CSV o PDF")
     public ResponseEntity<byte[]> exportResults(@RequestParam(defaultValue = "csv") String format) {
-        SimulationResultsDto results = new SimulationResultsDto(Map.of(), runtimeService.computeKpis(), "INTERNAL_GA");
+        SimulationConfig config = getSimConfig();
+        var kpis = runtimeService.computeKpis(config);
+        if (config.getScenario() == com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST
+                && config.getCollapseDetectedAtSim() != null
+                && config.getCollapseShipmentCode() != null) {
+            kpis = new com.tasfb2b.dto.SimulationKpisDto(
+                    kpis.deliveredOnTimePct(),
+                    kpis.avgFlightOccupancyPct(),
+                    kpis.avgNodeOccupancyPct(),
+                    kpis.replannings(),
+                    kpis.delivered(),
+                    0L,
+                    0L,
+                    1L,
+                    kpis.simulatedEvents()
+            );
+        }
+        var endAt = resultsEndAt(config);
+        SimulationResultsDto results = new SimulationResultsDto(
+                Map.of(), kpis, "INTERNAL_GA",
+                config.getScenario() != null ? config.getScenario().name() : null,
+                config.getEffectiveScenarioStartAt() != null ? config.getEffectiveScenarioStartAt().toString() : null,
+                endAt != null ? endAt.toString() : null,
+                config.getCollapseDetectedAtSim() != null ? config.getCollapseDetectedAtSim().toString() : null,
+                config.getCollapseShipmentCode(),
+                config.getCollapseDetectedAtSim() != null && config.getEffectiveScenarioStartAt() != null
+                        ? Math.max(0L, java.time.Duration.between(config.getEffectiveScenarioStartAt(), config.getCollapseDetectedAtSim()).getSeconds())
+                        : null,
+                kpis.delivered() + kpis.delayed() + kpis.active() + kpis.critical(),
+                config.getEffectiveScenarioStartAt() != null && endAt != null
+                        ? travelStopRepository.countPlannedShipmentsByRegistrationBetween(config.getEffectiveScenarioStartAt(), endAt)
+                        : Math.max(0L, kpis.delivered() + kpis.delayed() + kpis.active() + kpis.critical() - runtimeService.periodPlanningBacklog()),
+                runtimeService.periodPlanningLastBatchFailed(),
+                kpis.active(),
+                kpis.delayed(),
+                kpis.critical(),
+                kpis.avgNodeOccupancyPct(),
+                runtimeService.periodPlanningBacklog(),
+                routePlannerService.getLastPlanningDurationMs(),
+                kpis.replannings()
+        );
 
         String normalized = format == null ? "csv" : format.trim().toLowerCase();
         byte[] content;
@@ -453,64 +629,35 @@ public class SimulationController {
                 .body(content);
     }
 
-    @GetMapping("/race-report")
-    @Operation(summary = "Reporte extendido de benchmark GA vs ACO")
-    public ResponseEntity<AlgorithmRaceReportDto> getRaceReport(
-            @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to,
-            @RequestParam(required = false) String scenario
-    ) {
-        LocalDate fromDate = (from == null || from.isBlank()) ? null : LocalDate.parse(from);
-        LocalDate toDate = (to == null || to.isBlank()) ? null : LocalDate.parse(to);
-        return ResponseEntity.ok(algorithmRaceService.buildRaceReport(fromDate, toDate, scenario));
-    }
-
-    @PostMapping("/seed-statistical")
-    @Operation(summary = "Generar volumen inicial estadistico de envios")
-    public ResponseEntity<?> seedStatistical(
-            @RequestParam(required = false) Integer avg,
-            @RequestParam(required = false) Integer variance
-    ) {
-        SimulationConfig config = getConfig();
-        int effectiveAvg = avg == null ? config.getInitialVolumeAvg() : avg;
-        int effectiveVariance = variance == null ? config.getInitialVolumeVariance() : variance;
-        int created = operationalBootstrapService.replenishStatisticalVolume(effectiveAvg, effectiveVariance);
-        return ResponseEntity.ok(Map.of(
-                "message", "Volumen estadistico generado",
-                "avg", effectiveAvg,
-                "variance", effectiveVariance,
-                "created", created,
-                "state", runtimeService.getState()
-        ));
-    }
-
-    @GetMapping("/initial-volume-samples")
-    @Operation(summary = "Muestra N ejecuciones para validar media del generador estadistico")
-    public ResponseEntity<?> initialVolumeSamples(
-            @RequestParam(defaultValue = "8") Integer avg,
-            @RequestParam(defaultValue = "3") Integer variance,
-            @RequestParam(defaultValue = "10") Integer runs
-    ) {
-        int total = 0;
-        var samples = new ArrayList<Integer>();
-        for (int i = 0; i < Math.max(1, runs); i++) {
-            int created = operationalBootstrapService.replenishStatisticalVolume(avg, variance);
-            samples.add(created);
-            total += created;
-        }
-        double mean = samples.isEmpty() ? 0.0 : (total * 1.0) / samples.size();
-        return ResponseEntity.ok(Map.of(
-                "avgConfigured", avg,
-                "varianceConfigured", variance,
-                "runs", runs,
-                "samples", samples,
-                "mean", mean,
-                "within5pct", Math.abs(mean - avg) <= Math.max(1.0, avg * 0.05)
-        ));
+    /**
+     * Fila de SIMULACIÓN (PERIOD/COLLAPSE), SEPARADA de la operación viva (DAY_TO_DAY = id=1, siempre on).
+     * El motor procesa ambas a la vez; este controlador maneja SOLO la simulación (la operación viva no
+     * se inicia/detiene desde aquí). Se crea perezosamente la primera vez que se configura/inicia un sim.
+     */
+    private SimulationConfig getSimConfig() {
+        return configRepository.findFirstByScenarioIn(java.util.List.of(
+                        com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION,
+                        com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST))
+                .orElseGet(() -> {
+                    SimulationConfig live = getConfig();
+                    SimulationConfig sim = SimulationConfig.builder()
+                            .scenario(com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION)
+                            .isRunning(false)
+                            .normalThresholdPct(live == null ? 70 : live.getNormalThresholdPct())
+                            .warningThresholdPct(live == null ? 90 : live.getWarningThresholdPct())
+                            .slaWarnPct(live == null ? 90 : live.getSlaWarnPct())
+                            .slaCritPct(live == null ? 75 : live.getSlaCritPct())
+                            .riskShipmentsWarnPct(live == null ? 10 : live.getRiskShipmentsWarnPct())
+                            .riskShipmentsCritPct(live == null ? 25 : live.getRiskShipmentsCritPct())
+                            .criticalNodesWarnPct(live == null ? 10 : live.getCriticalNodesWarnPct())
+                            .criticalNodesCritPct(live == null ? 25 : live.getCriticalNodesCritPct())
+                            .build();
+                    return configRepository.save(sim);
+                });
     }
 
     private SimulationConfig getConfig() {
-        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = configRepository.findLiveConfigOrFirst();
         return config != null
                 ? config
                 : configRepository.save(SimulationConfig.builder().build());
@@ -530,5 +677,17 @@ public class SimulationController {
             }
         }
         return !simulationEngineService.isTickInProgress();
+    }
+
+    private LocalDateTime resultsEndAt(SimulationConfig config) {
+        if (config == null) {
+            return null;
+        }
+        if (config.getCollapseDetectedAtSim() != null) {
+            return config.getCollapseDetectedAtSim();
+        }
+        LocalDateTime fixedEnd = runtimeService.resolveScenarioEnd(config);
+        return runtimeService.displaySimulationTime(config,
+                fixedEnd != null ? fixedEnd : config.getRuntimeSimulatedNow());
     }
 }

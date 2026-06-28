@@ -24,6 +24,8 @@ public record DashboardOverviewDto(
         double avgDeliveryHours,
         double avgCommittedHours,
         double avgDeliveryDeltaHours,
-        long replanningsToday
+        long replanningsToday,
+        double avgFlightOccupancyPct,
+        double avgNodeOccupancyPct
 ) {
 }

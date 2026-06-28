@@ -1,6 +1,7 @@
 package com.tasfb2b.repository;
 
 import com.tasfb2b.model.Shipment;
+import com.tasfb2b.model.ShipmentSource;
 import com.tasfb2b.model.Flight;
 import com.tasfb2b.model.StopStatus;
 import com.tasfb2b.model.TravelStop;
@@ -42,6 +43,26 @@ public interface TravelStopRepository extends JpaRepository<TravelStop, Long> {
 
     @EntityGraph(attributePaths = {"airport", "flight", "shipment"})
     List<TravelStop> findByFlightInAndStopStatus(List<Flight> flights, StopStatus stopStatus);
+
+    /** Borra las paradas de envíos de un source: la simulación borra solo HISTORICAL; las LIVE quedan intactas. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query("DELETE FROM TravelStop t WHERE t.shipment.source = :source")
+    int deleteByShipmentSource(@Param("source") ShipmentSource source);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = """
+            DELETE FROM travel_stop ts
+            USING shipment s
+            WHERE ts.shipment_id = s.id
+              AND s.source = :source
+              AND s.registration_date >= :from
+              AND s.registration_date < :to
+            """, nativeQuery = true)
+    int deleteByShipmentSourceAndRegistrationBetween(@Param("source") String source,
+                                                     @Param("from") LocalDateTime from,
+                                                     @Param("to") LocalDateTime to);
 
     @Query("""
             SELECT ts FROM TravelStop ts
@@ -96,6 +117,16 @@ public interface TravelStopRepository extends JpaRepository<TravelStop, Long> {
             """)
     long countInTransitByShipmentRegistrationBetween(@Param("from") java.time.LocalDateTime from,
                                                      @Param("to") java.time.LocalDateTime to);
+
+    @Query(value = """
+            SELECT COUNT(DISTINCT ts.shipment_id)
+            FROM travel_stop ts
+            JOIN shipment s ON s.id = ts.shipment_id
+            WHERE s.registration_date >= :from
+              AND s.registration_date < :to
+            """, nativeQuery = true)
+    long countPlannedShipmentsByRegistrationBetween(@Param("from") java.time.LocalDateTime from,
+                                                    @Param("to") java.time.LocalDateTime to);
 
     long countByStopStatus(StopStatus stopStatus);
 

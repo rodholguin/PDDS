@@ -5,8 +5,10 @@ import com.tasfb2b.model.Continent;
 import com.tasfb2b.model.Flight;
 import com.tasfb2b.model.FlightStatus;
 import com.tasfb2b.model.Shipment;
+import com.tasfb2b.model.ShipmentSource;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.SimulationConfig;
+import com.tasfb2b.model.SimulationScenario;
 import com.tasfb2b.model.StopStatus;
 import com.tasfb2b.model.TravelStop;
 import com.tasfb2b.repository.AirportRepository;
@@ -89,6 +91,7 @@ class SimulationEngineDepartureFlowTest {
         shipment.setDestinationAirport(destination);
         shipment.setLuggageCount(15);
         shipment.setStatus(ShipmentStatus.PENDING);
+        shipment.setSource(ShipmentSource.LIVE);
         shipment.setRegistrationDate(LocalDateTime.now().minusMinutes(2));
 
         flight = new Flight();
@@ -120,19 +123,20 @@ class SimulationEngineDepartureFlowTest {
     @Test
     void tickMovesShipmentFromOriginToInTransitOnlyAtDeparture() {
         SimulationConfig config = new SimulationConfig();
+        config.setId(1L);
+        config.setScenario(SimulationScenario.DAY_TO_DAY);
         config.setIsRunning(true);
-        when(simulationConfigRepository.findTopByOrderByIdAsc()).thenReturn(config);
-        when(runtimeService.isPaused()).thenReturn(false);
-        when(runtimeService.currentSimulationTime()).thenReturn(java.util.Optional.of(LocalDateTime.now().minusMinutes(3)));
+        LocalDateTime simulatedNow = LocalDateTime.now().minusMinutes(3);
+        LocalDateTime horizon = LocalDateTime.now();
+        when(runtimeService.currentSimulationTime(config)).thenReturn(java.util.Optional.of(simulatedNow));
+        when(runtimeService.simulationSecondsPerTick(config)).thenReturn(1L);
 
-        when(flightRepository.findByStatusAndScheduledDepartureLessThanEqual(any(), any())).thenReturn(List.of(flight));
-        when(travelStopRepository.findByFlightInAndStopStatus(List.of(flight), StopStatus.PENDING)).thenReturn(List.of(destinationStop));
+        when(flightRepository.findRecoverableScheduledFlightIds(any(), any(), any())).thenReturn(List.of());
+        when(travelStopRepository.findPendingStopsForActivation(any(), any())).thenReturn(List.of(destinationStop));
         when(travelStopRepository.findByShipmentInOrderByShipmentIdAscStopOrderAsc(List.of(shipment))).thenReturn(List.of(originStop, destinationStop));
-        when(shipmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(travelStopRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
-        when(flightRepository.findByStatusAndScheduledArrivalLessThanEqual(any(), any())).thenReturn(List.of());
-        simulationEngineService.tick();
+        when(flightRepository.findByStatusAndScheduledArrivalGreaterThanAndScheduledArrivalLessThanEqual(any(), any(), any())).thenReturn(List.of());
+        simulationEngineService.executeHeadlessTick(config);
 
         assertEquals(StopStatus.COMPLETED, originStop.getStopStatus());
         assertEquals(StopStatus.IN_TRANSIT, destinationStop.getStopStatus());

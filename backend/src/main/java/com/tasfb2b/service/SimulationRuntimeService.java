@@ -79,7 +79,6 @@ public class SimulationRuntimeService {
     private final ShipmentAuditLogRepository shipmentAuditLogRepository;
     private final OperationalAlertRepository operationalAlertRepository;
     private final ShipmentAuditService shipmentAuditService;
-    private final AlgorithmProfileService algorithmProfileService;
     private final RoutePlannerService routePlannerService;
     private final OperationalAlertService operationalAlertService;
 
@@ -96,7 +95,6 @@ public class SimulationRuntimeService {
             ShipmentAuditLogRepository shipmentAuditLogRepository,
             OperationalAlertRepository operationalAlertRepository,
             ShipmentAuditService shipmentAuditService,
-            AlgorithmProfileService algorithmProfileService,
             RoutePlannerService routePlannerService,
             OperationalAlertService operationalAlertService
     ) {
@@ -108,14 +106,17 @@ public class SimulationRuntimeService {
         this.shipmentAuditLogRepository = shipmentAuditLogRepository;
         this.operationalAlertRepository = operationalAlertRepository;
         this.shipmentAuditService = shipmentAuditService;
-        this.algorithmProfileService = algorithmProfileService;
         this.routePlannerService = routePlannerService;
         this.operationalAlertService = operationalAlertService;
     }
 
     @Transactional(readOnly = true)
     public SimulationStateDto getState() {
-        SimulationConfig config = getConfig();
+        return getState(getConfig());
+    }
+
+    /** Estado del runtime indicado (live = id=1 / sim = fila PERIOD/COLLAPSE), para pantallas separadas. */
+    public SimulationStateDto getState(SimulationConfig config) {
         LocalDateTime simulatedNow = projectedSimulationTime(config);
         // CLAMP del reloj de DISPLAY a la frontera de planificacion (escenarios plan-ahead). El reloj REAL
         // nunca rebasa plannedThrough (el guard del tick lo impide), pero la extrapolacion para UI fluida SI
@@ -125,10 +126,15 @@ public class SimulationRuntimeService {
         if (config.getScenario() == com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION
                 || config.getScenario() == com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST) {
             LocalDateTime plannedThrough = periodPlannedThrough().orElse(null);
-            if (plannedThrough != null && simulatedNow != null && simulatedNow.isAfter(plannedThrough)) {
+            if (plannedThrough == null) {
+                simulatedNow = config.getRuntimeSimulatedNow() != null
+                        ? config.getRuntimeSimulatedNow()
+                        : effectiveScenarioStart(config);
+            } else if (simulatedNow != null && simulatedNow.isAfter(plannedThrough)) {
                 simulatedNow = plannedThrough;
             }
         }
+        simulatedNow = displaySimulationTime(config, simulatedNow);
         LocalDateTime collapseAt = config.getCollapseDetectedAtSim();
         LocalDateTime collapseStart = effectiveScenarioStart(config);
         Long collapseSurvivalSeconds = (collapseAt != null && collapseStart != null)
@@ -156,6 +162,7 @@ public class SimulationRuntimeService {
                 config.getScenarioStartAt(),
                 config.getRequestedScenarioStartAt(),
                 effectiveScenarioStart(config),
+                resolveScenarioEnd(config),
                 Boolean.TRUE.equals(config.getDateAdjusted()),
                 config.getDateAdjustmentReason(),
                 Boolean.TRUE.equals(config.getProjectedDemandReady()),
@@ -173,6 +180,9 @@ public class SimulationRuntimeService {
                 timeMode(config),
                 simulationSecondsPerTick(config),
                 tickIntervalMs(config),
+                planningIntervalSeconds(config),
+                consumptionK(config),
+                consumptionWindowSeconds(config),
                 effectiveSpeed(config),
                 replannings(),
                 injectedEvents(),
@@ -190,6 +200,7 @@ public class SimulationRuntimeService {
                 periodPlanningLastBatchFailed(),
                 periodPlanningLastBatchElapsedMs(),
                 periodPlanningLastBatchAt().orElse(null),
+                routePlannerService.getLastPlanningDurationMs(),
                 periodTickWaitCount(),
                 periodTickLastElapsedMs(),
                 periodTickLastWaitAt().orElse(null),
@@ -206,43 +217,67 @@ public class SimulationRuntimeService {
     }
 
     public void markStarted() {
+        markStarted(getConfig());
+    }
+
+    public void markStarted(SimulationConfig config) {
         runtime.put(KEY_PAUSED, Boolean.FALSE);
         runtime.putIfAbsent(KEY_SPEED, defaultSpeed.get());
-        // Re-anclar al inicio de escenario configurado; si no, al primer envío importado.
-        SimulationConfig config = getConfig();
-        LocalDateTime initial = config.getScenarioStartAt();
-        if (initial == null) {
-            initial = shipmentRepository.findMinRegistrationDate();
-        }
-        if (initial != null) {
-            runtime.put(KEY_SIM_TIME, initial);
-            config.setEffectiveScenarioStartAt(initial);
-            configRepository.save(config);
+        // DAY_TO_DAY (operación EN VIVO): el reloj arranca en la hora real actual, no en una fecha histórica.
+        // Otros escenarios: re-anclar al inicio configurado; si no, al primer envío importado.
+        LocalDateTime initial;
+        if (config != null && config.getScenario() == com.tasfb2b.model.SimulationScenario.DAY_TO_DAY) {
+            initial = LocalDateTime.now();
+        } else {
+            initial = config == null ? null : config.getScenarioStartAt();
+            if (initial == null) {
+                initial = shipmentRepository.findMinRegistrationDate();
+            }
         }
         LocalDateTime now = LocalDateTime.now();
         runtime.put(KEY_LAST_TICK, now);
-        persistRuntimeSnapshot(currentSimulationTime().orElse(null), now);
+        if (config != null) {
+            if (initial != null) {
+                config.setEffectiveScenarioStartAt(initial);
+            }
+            // Reloj per-config: se escribe en la FILA del config (no en el caché global).
+            persistRuntimeSnapshot(config, initial != null ? initial : config.getRuntimeSimulatedNow(), now);
+        }
     }
 
     public void markResumed() {
+        markResumed(getConfig());
+    }
+
+    public void markResumed(SimulationConfig config) {
         LocalDateTime now = LocalDateTime.now();
         runtime.put(KEY_PAUSED, Boolean.FALSE);
         runtime.put(KEY_LAST_TICK, now);
-        persistRuntimeSnapshot(currentSimulationTime().orElse(null), now);
+        persistRuntimeSnapshot(config, currentSimulationTime(config).orElse(null), now);
     }
 
     public void markPaused() {
+        markPaused(getConfig());
+    }
+
+    public void markPaused(SimulationConfig config) {
         LocalDateTime now = LocalDateTime.now();
         runtime.put(KEY_PAUSED, Boolean.TRUE);
         runtime.put(KEY_LAST_TICK, now);
-        persistRuntimeSnapshot(currentSimulationTime().orElse(null), now);
+        persistRuntimeSnapshot(config, currentSimulationTime(config).orElse(null), now);
     }
 
     public void markStopped() {
+        markStopped(getConfig());
+    }
+
+    public void markStopped(SimulationConfig config) {
         LocalDateTime now = LocalDateTime.now();
         runtime.put(KEY_PAUSED, Boolean.FALSE);
         runtime.put(KEY_LAST_TICK, now);
-        persistRuntimeSnapshot(currentSimulationTime().orElse(null), now);
+        runtime.put(KEY_BOOTSTRAPPING, Boolean.FALSE);
+        runtime.put(KEY_WARMING_UP, Boolean.FALSE);
+        persistRuntimeSnapshot(config, currentSimulationTime(config).orElse(null), now);
     }
 
     public boolean isResetting() {
@@ -446,10 +481,16 @@ public class SimulationRuntimeService {
 
     @Transactional
     public void stopSimulationOnly() {
-        SimulationConfig config = getConfig();
-        config.setIsRunning(false);
-        configRepository.save(config);
-        markStopped();
+        stopSimulationOnly(getConfig());
+    }
+
+    @Transactional
+    public void stopSimulationOnly(SimulationConfig config) {
+        if (config != null) {
+            config.setIsRunning(false);
+            configRepository.save(config);
+        }
+        markStopped(config);
     }
 
     public void clearPausedFlag() {
@@ -464,11 +505,42 @@ public class SimulationRuntimeService {
         resetDemandKeepingNetwork();
     }
 
+    /**
+     * Reset acotado a la SIMULACIÓN (HISTORICAL): limpia solo paradas/envíos HISTORICAL y los vuelos de la
+     * ventana del escenario, SIN tocar la operación viva — los envíos/paradas LIVE y los vuelos de hoy quedan
+     * intactos. Permite (re)iniciar una simulación sin tumbar el día a día que corre en paralelo.
+     */
+    @Transactional
+    public void resetSimulationOperationalData(LocalDateTime windowStart, LocalDateTime windowEnd) {
+        runtime.put(KEY_RESETTING, Boolean.TRUE);
+        long startedAt = System.nanoTime();
+        try {
+            com.tasfb2b.model.ShipmentSource historical = com.tasfb2b.model.ShipmentSource.HISTORICAL;
+            int deletedStops;
+            int resetShipments;
+            if (windowStart != null && windowEnd != null) {
+                deletedStops = travelStopRepository.deleteByShipmentSourceAndRegistrationBetween(
+                        historical.name(), windowStart, windowEnd);
+                resetShipments = shipmentRepository.resetToInitialStateBySourceAndRegistrationBetween(
+                        historical.name(), windowStart, windowEnd);
+                flightRepository.resetOperationalStateInWindow(windowStart, windowEnd);
+            } else {
+                deletedStops = travelStopRepository.deleteByShipmentSource(historical);
+                resetShipments = shipmentRepository.resetToInitialStateBySource(historical);
+            }
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000L;
+            log.info("resetSimulationOperationalData: window=[{}, {}) deletedStops={} resetShipments={} elapsed={}ms",
+                    windowStart, windowEnd, deletedStops, resetShipments, elapsedMs);
+        } finally {
+            runtime.put(KEY_RESETTING, Boolean.FALSE);
+        }
+    }
+
     @Transactional
     public void resetDemandKeepingNetwork() {
         runtime.put(KEY_RESETTING, Boolean.TRUE);
         try {
-            resetRuntimeState();
+            resetRuntimeState(getConfig());
 
             // Reset por BULK QUERY (sin cargar entidades). Tras una corrida puede haber MILLONES de clones
             // de vuelos materializados; el viejo findAll()+saveAll los cargaba TODOS al heap y lo reventaba
@@ -513,9 +585,15 @@ public class SimulationRuntimeService {
             boolean hasAuditLogs = shipmentAuditLogRepository.existsByIdIsNotNull();
             boolean hasAlerts = operationalAlertRepository.existsByIdIsNotNull();
             boolean hasNonPendingShipments = shipmentRepository.existsByStatusNot(ShipmentStatus.PENDING);
-            log.info("resetOperationalData: hasStops={}, hasAuditLogs={}, hasAlerts={}, hasNonPendingShipments={}",
-                    hasStops, hasAuditLogs, hasAlerts, hasNonPendingShipments);
-            if (!hasStops && !hasAuditLogs && !hasAlerts && !hasNonPendingShipments) {
+            // DAY_TO_DAY (operación EN VIVO): el reset borra SOLO los envíos LIVE (la operación), dejando
+            // intactos los ~9.5M HISTORICAL. Los otros escenarios resetean todo a PENDING como antes.
+            SimulationConfig dayToDayConfig = getConfig();
+            boolean dayToDay = dayToDayConfig != null
+                    && dayToDayConfig.getScenario() == com.tasfb2b.model.SimulationScenario.DAY_TO_DAY;
+            boolean hasLiveShipments = dayToDay && shipmentRepository.existsBySource(com.tasfb2b.model.ShipmentSource.LIVE);
+            log.info("resetOperationalData: hasStops={}, hasAuditLogs={}, hasAlerts={}, hasNonPendingShipments={}, dayToDay={}, hasLive={}",
+                    hasStops, hasAuditLogs, hasAlerts, hasNonPendingShipments, dayToDay, hasLiveShipments);
+            if (!hasStops && !hasAuditLogs && !hasAlerts && !hasNonPendingShipments && !hasLiveShipments) {
                 log.info("resetOperationalData: already clean, skipping");
                 return;
             }
@@ -529,9 +607,15 @@ public class SimulationRuntimeService {
             shipmentAuditLogRepository.truncateFast();
             operationalAlertRepository.truncateFast();
 
-            log.info("resetOperationalData: resetting all shipments to PENDING");
-            int reset = shipmentRepository.resetAllToInitialState();
-            log.info("resetOperationalData: DONE, reset {} shipments", reset);
+            if (dayToDay) {
+                log.info("resetOperationalData: DAY_TO_DAY → borrando solo envíos LIVE (históricos intactos)");
+                int deleted = shipmentRepository.deleteBySource(com.tasfb2b.model.ShipmentSource.LIVE);
+                log.info("resetOperationalData: DONE, deleted {} envíos LIVE", deleted);
+            } else {
+                log.info("resetOperationalData: resetting all shipments to PENDING");
+                int reset = shipmentRepository.resetAllToInitialState();
+                log.info("resetOperationalData: DONE, reset {} shipments", reset);
+            }
         } catch (Exception ex) {
             log.error("resetOperationalData: FAILED", ex);
             throw ex;
@@ -542,7 +626,7 @@ public class SimulationRuntimeService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void stopAndResetRuntimeFast() {
-        resetRuntimeState();
+        resetRuntimeState(getConfig());
     }
 
     private void clearOperationalDataWithRetry() {
@@ -564,8 +648,10 @@ public class SimulationRuntimeService {
         }
     }
 
-    private void resetRuntimeState() {
-        SimulationConfig config = getConfig();
+    public void resetRuntimeState(SimulationConfig config) {
+        if (config == null) {
+            return;
+        }
         config.setIsRunning(false);
         config.setStartedAt(null);
         config.setPrimaryAlgorithm(com.tasfb2b.model.AlgorithmType.GENETIC);
@@ -573,10 +659,12 @@ public class SimulationRuntimeService {
         config.setEffectiveScenarioStartAt(null);
         config.setDateAdjusted(false);
         config.setDateAdjustmentReason(null);
+        config.setCollapseDetectedAtSim(null);
+        config.setCollapseShipmentId(null);
+        config.setCollapseShipmentCode(null);
         config.setRuntimeSimulatedNow(null);
         config.setRuntimeLastTickAt(null);
         configRepository.save(config);
-        algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
         markStopped();
         runtime.put(KEY_SPEED, defaultSpeed.get());
         runtime.put(KEY_REPLANS, 0L);
@@ -610,9 +698,13 @@ public class SimulationRuntimeService {
     }
 
     public void markTick(LocalDateTime tickAt) {
+        markTick(getConfig(), tickAt);
+    }
+
+    public void markTick(SimulationConfig config, LocalDateTime tickAt) {
         LocalDateTime now = LocalDateTime.now();
-        runtime.put(KEY_LAST_TICK, now);
-        persistRuntimeSnapshot(currentSimulationTime().orElse(tickAt), now);
+        runtime.put(KEY_LAST_TICK, now); // marca global "motor vivo" (detección de stale)
+        persistRuntimeSnapshot(config, currentSimulationTime(config).orElse(tickAt), now);
     }
 
     public Optional<LocalDateTime> lastTickAt() {
@@ -629,23 +721,48 @@ public class SimulationRuntimeService {
         return Optional.ofNullable(persisted);
     }
 
-    public Optional<LocalDateTime> currentSimulationTime() {
-        Object value = runtime.get(KEY_SIM_TIME);
-        if (value instanceof LocalDateTime localDateTime) {
-            return Optional.of(localDateTime);
-        }
+    /** Último tick POR-CONFIG (su propia fila), independiente del marcador global de "motor vivo". */
+    public Optional<LocalDateTime> lastTickAt(SimulationConfig config) {
+        return Optional.ofNullable(config == null ? null : config.getRuntimeLastTickAt());
+    }
 
+    /** True si el escenario activo es la operación EN VIVO (DAY_TO_DAY) → se opera/lista solo envíos LIVE. */
+    public boolean isLiveOperationScenario() {
         SimulationConfig config = getConfig();
-        LocalDateTime persisted = config.getRuntimeSimulatedNow();
-        if (persisted != null) {
-            runtime.put(KEY_SIM_TIME, persisted);
-        }
-        return Optional.ofNullable(persisted);
+        return config != null && config.getScenario() == com.tasfb2b.model.SimulationScenario.DAY_TO_DAY;
+    }
+
+    public Optional<LocalDateTime> currentSimulationTime() {
+        return currentSimulationTime(getConfig());
+    }
+
+    /**
+     * Reloj POR-CONFIG: cada runtime (LIVE id=1 / SIM id=2) lleva el suyo en su propia fila
+     * ({@code runtime_simulated_now}). Se lee de la fila (no de un caché único) para que dos configs
+     * ticando a la vez no se pisen el reloj.
+     */
+    public Optional<LocalDateTime> currentSimulationTime(SimulationConfig config) {
+        return Optional.ofNullable(config == null ? null : config.getRuntimeSimulatedNow());
     }
 
     public LocalDateTime effectiveNow() {
-        SimulationConfig config = getConfig();
-        LocalDateTime simulatedNow = projectedSimulationTime(config);
+        return effectiveNow(getConfig());
+    }
+
+    public LocalDateTime effectiveNow(SimulationConfig config) {
+        LocalDateTime simulatedNow = displaySimulationTime(config, projectedSimulationTime(config));
+        if (config != null
+                && (config.getScenario() == com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION
+                    || config.getScenario() == com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST)) {
+            LocalDateTime plannedThrough = periodPlannedThrough().orElse(null);
+            if (plannedThrough == null) {
+                simulatedNow = config.getRuntimeSimulatedNow() != null
+                        ? config.getRuntimeSimulatedNow()
+                        : effectiveScenarioStart(config);
+            } else if (simulatedNow != null && simulatedNow.isAfter(plannedThrough)) {
+                simulatedNow = plannedThrough;
+            }
+        }
         if (simulatedNow != null) {
             return simulatedNow;
         }
@@ -653,30 +770,28 @@ public class SimulationRuntimeService {
     }
 
     public void setSimulationTime(LocalDateTime simulatedNow) {
-        if (simulatedNow != null) {
-            runtime.put(KEY_SIM_TIME, simulatedNow);
-            persistRuntimeSnapshot(simulatedNow, lastTickAt().orElse(null));
+        setSimulationTime(getConfig(), simulatedNow);
+    }
+
+    public void setSimulationTime(SimulationConfig config, LocalDateTime simulatedNow) {
+        if (config != null && simulatedNow != null) {
+            persistRuntimeSnapshot(config, simulatedNow, config.getRuntimeLastTickAt());
         }
     }
 
     public void restoreRuntime(LocalDateTime simulatedNow, LocalDateTime lastTickAt) {
-        if (simulatedNow != null) {
-            runtime.put(KEY_SIM_TIME, simulatedNow);
-        } else {
-            runtime.remove(KEY_SIM_TIME);
-        }
-
         if (lastTickAt != null) {
             runtime.put(KEY_LAST_TICK, lastTickAt);
         } else {
             runtime.remove(KEY_LAST_TICK);
         }
-
         runtime.put(KEY_PAUSED, Boolean.FALSE);
+        // El reloj efectivo vive en la FILA del config (per-config) — persistirlo ahí, no solo en caché.
+        persistRuntimeSnapshot(getConfig(), simulatedNow, lastTickAt);
     }
 
     public void setSpeed(int speed) {
-        runtime.put(KEY_SPEED, Math.max(1, Math.min(5000, speed)));
+        runtime.put(KEY_SPEED, Math.max(1, Math.min(20, speed)));
         runtime.put(KEY_LAST_TICK, LocalDateTime.now());
     }
 
@@ -718,11 +833,18 @@ public class SimulationRuntimeService {
 
     @Transactional(readOnly = true)
     public SimulationKpisDto computeKpis() {
-        SimulationConfig config = getConfig();
+        return computeKpis(getConfig());
+    }
+
+    @Transactional(readOnly = true)
+    public SimulationKpisDto computeKpis(SimulationConfig config) {
         LocalDateTime from = effectiveScenarioStart(config);
         LocalDateTime to = from != null && config.getSimulationDays() != null
                 ? from.plusDays(Math.max(1, config.getSimulationDays()))
                 : null;
+        if (config != null && config.getScenario() == com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST) {
+            to = config.getRuntimeSimulatedNow() != null ? config.getRuntimeSimulatedNow() : resolveScenarioEnd(config);
+        }
 
         long delivered;
         long deliveredOnTime;
@@ -739,19 +861,19 @@ public class SimulationRuntimeService {
             long criticalCount = shipmentRepository.countByStatusAndRegistrationDateBetween(ShipmentStatus.CRITICAL, from, to);
             active = pending + inRoute;
             delayed = delayedCount;
-            critical = delayedCount + criticalCount;
+            critical = criticalCount;
         } else {
             delivered = shipmentRepository.countDeliveredTotal();
             deliveredOnTime = shipmentRepository.countDeliveredOnTimeTotal();
             active = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
-            critical = shipmentRepository.countByStatusIn(java.util.List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
+            critical = shipmentRepository.countByStatus(ShipmentStatus.CRITICAL);
             delayed = shipmentRepository.countByStatus(ShipmentStatus.DELAYED);
         }
 
         double deliveredPct = delivered == 0 ? 0.0 : (deliveredOnTime * 100.0) / delivered;
-        double avgFlightLoad = flightRepository.count() == 0
-                ? 0.0
-                : flightRepository.averageLoadPct();
+        double avgFlightLoad = (from != null && to != null)
+                ? flightRepository.averageOccupiedLoadPctBetween(from, to)
+                : flightRepository.averageOccupiedLoadPct();
         double avgNodeLoad = airportRepository.count() == 0
                 ? 0.0
                 : airportRepository.averageOccupancyPct();
@@ -860,7 +982,7 @@ public class SimulationRuntimeService {
     }
 
     private SimulationConfig getConfig() {
-        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = configRepository.findLiveConfigOrFirst();
         return config != null
                 ? config
                 : configRepository.save(SimulationConfig.builder().build());
@@ -874,7 +996,8 @@ public class SimulationRuntimeService {
         if (config == null || config.getScenario() == null || config.getScenario() == com.tasfb2b.model.SimulationScenario.DAY_TO_DAY) {
             return 1L;
         }
-        return Math.max(1, currentSpeed()) * 60L;
+        long requestedSeconds = Math.max(1, currentSpeed()) * 60L;
+        return Math.min(requestedSeconds, consumptionWindowSeconds(config));
     }
 
     public long tickIntervalMs(SimulationConfig config) {
@@ -895,6 +1018,31 @@ public class SimulationRuntimeService {
 
     public long effectiveSpeed(SimulationConfig config) {
         return simulationSecondsPerTick(config);
+    }
+
+    public long planningIntervalSeconds(SimulationConfig config) {
+        if (config == null || config.getScenario() == null) {
+            return 300L;
+        }
+        return switch (config.getScenario()) {
+            case DAY_TO_DAY -> 300L;
+            case PERIOD_SIMULATION, COLLAPSE_TEST -> 300L;
+        };
+    }
+
+    public long consumptionK(SimulationConfig config) {
+        if (config == null || config.getScenario() == null) {
+            return 1L;
+        }
+        return switch (config.getScenario()) {
+            case DAY_TO_DAY -> 1L;
+            case PERIOD_SIMULATION -> 14L;
+            case COLLAPSE_TEST -> 75L;
+        };
+    }
+
+    public long consumptionWindowSeconds(SimulationConfig config) {
+        return Math.max(1L, planningIntervalSeconds(config)) * Math.max(1L, consumptionK(config));
     }
 
     public LocalDateTime effectiveScenarioStart(SimulationConfig config) {
@@ -933,13 +1081,31 @@ public class SimulationRuntimeService {
         };
     }
 
+    public LocalDateTime displaySimulationTime(SimulationConfig config, LocalDateTime candidate) {
+        if (config == null || candidate == null || config.getScenario() == null) {
+            return candidate;
+        }
+        if (config.getScenario() == com.tasfb2b.model.SimulationScenario.COLLAPSE_TEST
+                && config.getCollapseDetectedAtSim() != null
+                && candidate.isAfter(config.getCollapseDetectedAtSim())) {
+            return config.getCollapseDetectedAtSim();
+        }
+        if (config.getScenario() == com.tasfb2b.model.SimulationScenario.PERIOD_SIMULATION) {
+            LocalDateTime periodEnd = resolveScenarioEnd(config);
+            if (periodEnd != null && candidate.isAfter(periodEnd)) {
+                return periodEnd;
+            }
+        }
+        return candidate;
+    }
+
     private LocalDateTime projectedSimulationTime(SimulationConfig config) {
-        LocalDateTime base = currentSimulationTime().orElse(config.getRuntimeSimulatedNow());
+        LocalDateTime base = currentSimulationTime(config).orElse(config == null ? null : config.getRuntimeSimulatedNow());
         if (base == null || config == null || !Boolean.TRUE.equals(config.getIsRunning()) || isPaused()) {
             return base;
         }
 
-        LocalDateTime lastTickAt = lastTickAt().orElse(config.getRuntimeLastTickAt());
+        LocalDateTime lastTickAt = lastTickAt(config).orElse(config.getRuntimeLastTickAt());
         if (lastTickAt == null) {
             return base;
         }
@@ -958,7 +1124,13 @@ public class SimulationRuntimeService {
     }
 
     private void persistRuntimeSnapshot(LocalDateTime simulatedNow, LocalDateTime lastTickAt) {
-        SimulationConfig config = getConfig();
+        persistRuntimeSnapshot(getConfig(), simulatedNow, lastTickAt);
+    }
+
+    private void persistRuntimeSnapshot(SimulationConfig config, LocalDateTime simulatedNow, LocalDateTime lastTickAt) {
+        if (config == null) {
+            return;
+        }
         config.setRuntimeSimulatedNow(simulatedNow);
         config.setRuntimeLastTickAt(lastTickAt);
         configRepository.save(config);

@@ -25,12 +25,15 @@ import type {
   SystemStatus,
 } from './types';
 
-const SIM_POLL_MS = 1_000;
-const MAP_POLL_MS = 1_000;
-const OVERVIEW_POLL_MS = 1_000;
-const SYSTEM_POLL_MS = 5_000;
+// Intervalos de polling. El reloj mostrado se EXTRAPOLA en cliente entre polls, así que bajar la
+// frecuencia no resta fluidez al reloj pero sí recorta re-renders del dashboard (mapa incluido) y
+// tráfico → la UI deja de sentirse trabada en cada click / cambio de velocidad.
+const SIM_POLL_MS = 2_000;
+const MAP_POLL_MS = 2_000;
+const OVERVIEW_POLL_MS = 2_500;
+const SYSTEM_POLL_MS = 6_000;
 const AIRPORTS_POLL_MS = 30_000;
-const UPCOMING_POLL_MS = 2_000;
+const UPCOMING_POLL_MS = 3_000;
 
 function toIsoDate(value: string | null | undefined): string | null {
   if (!value) return null;
@@ -45,7 +48,22 @@ function shiftIsoDate(date: string, deltaDays: number): string {
   return value.toISOString().slice(0, 10);
 }
 
+function normalizeAirportsForMode(airports: Airport[], mode: 'live' | 'sim'): Airport[] {
+  if (mode !== 'live') return airports;
+  return airports.map((airport) => ({
+    ...airport,
+    currentStorageLoad: 0,
+    availableCapacity: airport.maxStorageCapacity,
+    occupancyPct: 0,
+    status: 'SIN_USO',
+  }));
+}
+
 function periodEndMs(state: SimulationState | null): number | null {
+  if (state?.periodEndAt) {
+    const explicitEnd = new Date(state.periodEndAt).getTime();
+    return Number.isNaN(explicitEnd) ? null : explicitEnd;
+  }
   if (!state?.effectiveScenarioStartAt || state.scenario !== 'PERIOD_SIMULATION') {
     return null;
   }
@@ -53,6 +71,18 @@ function periodEndMs(state: SimulationState | null): number | null {
   if (Number.isNaN(start)) return null;
   const days = Math.max(1, state.simulationDays || 1);
   return start + days * 24 * 60 * 60 * 1000;
+}
+
+function planningFrontierMs(state: SimulationState | null): number | null {
+  if (!state || (state.scenario !== 'PERIOD_SIMULATION' && state.scenario !== 'COLLAPSE_TEST')) {
+    return periodEndMs(state);
+  }
+  const end = periodEndMs(state);
+  const plannedThrough = state.periodPlannedThrough ? new Date(state.periodPlannedThrough).getTime() : Number.NaN;
+  const frontier = Number.isFinite(plannedThrough) ? plannedThrough : null;
+  if (end == null) return frontier;
+  if (frontier == null) return end;
+  return Math.min(end, frontier);
 }
 
 interface SimulationCtx {
@@ -76,6 +106,8 @@ interface SimulationCtx {
 
   /** Projected simulation time on the client (extrapolated every 250 ms). */
   simulatedNowMs: number | null;
+  simulatedClockWaitingForPlanning: boolean;
+  simulatedClockPlannedThroughMs: number | null;
 }
 
 const ctx = createContext<SimulationCtx>({
@@ -91,9 +123,11 @@ const ctx = createContext<SimulationCtx>({
   mapLiveFlights: [],
   upcomingFlights: [],
   simulatedNowMs: null,
+  simulatedClockWaitingForPlanning: false,
+  simulatedClockPlannedThroughMs: null,
 });
 
-export function SimulationProvider({ children }: { children: ReactNode }) {
+export function SimulationProvider({ children, mode = 'live' }: { children: ReactNode; mode?: 'live' | 'sim' }) {
   const [sim, setSimRaw] = useState<SimulationState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const simRef = useRef(sim);
@@ -106,6 +140,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const [mapLiveFlights, setMapLiveFlights] = useState<MapLiveFlight[]>([]);
   const [upcomingFlights, setUpcomingFlights] = useState<Flight[]>([]);
   const [simulatedNowMs, setSimulatedNowMs] = useState<number | null>(null);
+  const [simulatedClockWaitingForPlanning, setSimulatedClockWaitingForPlanning] = useState(false);
 
   const setSim = useCallback((next: SimulationState) => {
     simRef.current = next;
@@ -115,13 +150,13 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async (): Promise<SimulationState | null> => {
     try {
-      const state = await simulationApi.getState();
+      const state = await simulationApi.getState(mode);
       setSim(state);
       return state;
     } catch {
       return simRef.current;
     }
-  }, [setSim]);
+  }, [setSim, mode]);
 
   // -- Simulation state polling (1s) ---------------------------------------------------
   useEffect(() => {
@@ -145,7 +180,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       try {
         const [nextSystem, nextRisk] = await Promise.all([
-          dashboardApi.getSystemStatus(),
+          dashboardApi.getSystemStatus(mode),
           simulationApi.getCollapseRisk(),
         ]);
         if (!cancelled) {
@@ -164,7 +199,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [simRunning]);
+  }, [simRunning, mode]);
 
   // -- Airports catalog (30s — rarely changes) ------------------------------------------
   useEffect(() => {
@@ -172,7 +207,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       try {
         const next = await airportsApi.getAll();
-        if (!cancelled) setAirports(next);
+        if (!cancelled) setAirports(normalizeAirportsForMode(next, mode));
       } catch {
         /* keep last */
       }
@@ -183,7 +218,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [mode]);
 
   // -- Overview (3s when sim is active; keeps last value across pauses / nav) -----------
   useEffect(() => {
@@ -191,7 +226,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const load = async () => {
       try {
-        const next = await dashboardApi.getOverview();
+        const next = await dashboardApi.getOverview(mode);
         if (!cancelled) setOverview(next);
       } catch {
         /* keep last */
@@ -203,7 +238,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [simRunning]);
+  }, [simRunning, mode]);
 
   // -- Map live (1s when sim is active) -------------------------------------------------
   useEffect(() => {
@@ -217,8 +252,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     const load = async () => {
       try {
         const [shipments, flights] = await Promise.all([
-          dashboardApi.getMapLive(),
-          dashboardApi.getMapLiveFlights(),
+          dashboardApi.getMapLive(undefined, mode),
+          dashboardApi.getMapLiveFlights(undefined, mode),
         ]);
         if (cancelled) return;
         setMapLive(shipments);
@@ -233,7 +268,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [simRunning]);
+  }, [simRunning, mode]);
 
   const anchorDate = useMemo(
     () => toIsoDate(sim?.simulatedNow ?? sim?.effectiveScenarioStartAt),
@@ -292,7 +327,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
     const simMs = new Date(sim.simulatedNow).getTime();
     if (Number.isNaN(simMs)) return;
-    const maxSimMs = periodEndMs(sim);
+    const maxSimMs = planningFrontierMs(sim);
     const boundedSimMs = maxSimMs == null ? simMs : Math.min(simMs, maxSimMs);
     const tickIntervalMs = Math.max(1, sim.tickIntervalMs ?? 1_000);
     const wallNow = Date.now();
@@ -307,14 +342,14 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
     const extrapolated = current.simMs + (wallNow - current.wallMs) * factor;
     const boundedExtrapolated = maxSimMs == null ? extrapolated : Math.min(extrapolated, maxSimMs);
-    const driftMs = Math.abs(boundedSimMs - boundedExtrapolated);
+    const backendLeadMs = boundedSimMs - boundedExtrapolated;
     // Tolerance = one poll's worth of simulated time ± 1.5 s guard
     const tolerance = Math.max(1_500, factor * 1_500);
-    if (driftMs > tolerance) {
+    if (backendLeadMs > tolerance) {
       clockAnchorRef.current = { simMs: boundedSimMs, wallMs: wallNow, secondsPerRealSecond: factor };
       setSimulatedNowMs(boundedSimMs);
     }
-  }, [sim?.running, sim?.paused, sim?.simulatedNow, sim?.simulationSecondsPerTick, sim?.tickIntervalMs]);
+  }, [sim?.running, sim?.paused, sim?.simulatedNow, sim?.simulationSecondsPerTick, sim?.tickIntervalMs, sim?.periodPlannedThrough, sim?.periodEndAt]);
 
   useEffect(() => {
     if (!sim?.running || sim?.paused) return;
@@ -323,12 +358,38 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       if (!anchor) return;
       const elapsedMs = Date.now() - anchor.wallMs;
       const projected = anchor.simMs + elapsedMs * anchor.secondsPerRealSecond;
-      const maxSimMs = periodEndMs(simRef.current);
+      const maxSimMs = planningFrontierMs(simRef.current);
       const boundedProjected = maxSimMs == null ? projected : Math.min(projected, maxSimMs);
       setSimulatedNowMs(boundedProjected);
+      const current = simRef.current;
+      const planAhead = current?.scenario === 'PERIOD_SIMULATION' || current?.scenario === 'COLLAPSE_TEST';
+      setSimulatedClockWaitingForPlanning(Boolean(
+        planAhead
+        && current?.running
+        && !current?.paused
+        && (current?.periodPlanningBacklog ?? 0) > 0
+        && maxSimMs != null
+        && projected >= maxSimMs - 1,
+      ));
     }, 250);
     return () => clearInterval(interval);
   }, [sim?.running, sim?.paused]);
+
+  useEffect(() => {
+    if (!sim?.running || sim.paused) {
+      setSimulatedClockWaitingForPlanning(false);
+      return;
+    }
+    const maxSimMs = planningFrontierMs(sim);
+    const planAhead = sim.scenario === 'PERIOD_SIMULATION' || sim.scenario === 'COLLAPSE_TEST';
+    setSimulatedClockWaitingForPlanning(Boolean(
+      planAhead
+      && sim.periodPlanningBacklog > 0
+      && maxSimMs != null
+      && simulatedNowMs != null
+      && simulatedNowMs >= maxSimMs - 1,
+    ));
+  }, [sim, simulatedNowMs]);
 
   const value = useMemo<SimulationCtx>(() => ({
     sim,
@@ -343,6 +404,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     mapLiveFlights,
     upcomingFlights,
     simulatedNowMs,
+    simulatedClockWaitingForPlanning,
+    simulatedClockPlannedThroughMs: planningFrontierMs(sim),
   }), [
     sim,
     loaded,
@@ -356,6 +419,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     mapLiveFlights,
     upcomingFlights,
     simulatedNowMs,
+    simulatedClockWaitingForPlanning,
   ]);
 
   return <ctx.Provider value={value}>{children}</ctx.Provider>;

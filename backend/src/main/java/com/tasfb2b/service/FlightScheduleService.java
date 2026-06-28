@@ -141,7 +141,7 @@ public class FlightScheduleService {
     @Transactional
     public void ensureFlightsForSimulationWindow(LocalDateTime anchor) {
         if (anchor == null) return;
-        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = simulationConfigRepository.findLiveConfigOrFirst();
         int days = config == null || config.getSimulationDays() == null ? 3 : Math.max(1, config.getSimulationDays());
         LocalDateTime from = anchor.toLocalDate().atStartOfDay();
         LocalDateTime to = anchor.toLocalDate().plusDays(days + 3L).atStartOfDay();

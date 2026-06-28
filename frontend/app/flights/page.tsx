@@ -30,6 +30,10 @@ function toDateInput(iso: string | null | undefined): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function todayUtcDateInput(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export default function FlightsPage() {
   return (
     <Suspense fallback={<div className="app-page"><section className="surface-panel" style={{ padding: 16 }}>Cargando vuelos...</section></div>}>
@@ -49,12 +53,12 @@ function FlightsPageContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [status, setStatus] = useState<FlightStatus>('IN_FLIGHT');
+  const [status, setStatus] = useState<FlightStatus>('SCHEDULED');
   const [date, setDate] = useState('');
   const [code, setCode] = useState('');
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
-  const [upcomingOnly, setUpcomingOnly] = useState(true);
+  const [upcomingOnly, setUpcomingOnly] = useState(false);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<FlightDetailResponse | null>(null);
@@ -63,11 +67,15 @@ function FlightsPageContent() {
   const [cancelInfo, setCancelInfo] = useState<string | null>(null);
   const userTouchedDateRef = useRef(false);
 
-  // Default date = sim's current day until the user edits it explicitly.
+  // Fecha inicial = día actual de la sim, fijada UNA sola vez (cuando aún está vacía). NO seguir el
+  // reloj en cada tick: eso hacía SALTAR el filtro de fecha cada vez que la sim cambiaba de día
+  // (cada ~70s a 20×) → refetch completo + reset a página 1 = "se recarga a cada rato". Ahora la
+  // fecha queda estable y bajo control del usuario (botón "Hoy (sim)" para volver al día actual).
   useEffect(() => {
-    const next = toDateInput(sim?.simulatedNow ?? sim?.effectiveScenarioStartAt);
-    if (next && !userTouchedDateRef.current) setDate(next);
-  }, [sim?.simulatedNow, sim?.effectiveScenarioStartAt]);
+    if (date || userTouchedDateRef.current) return;
+    const next = toDateInput(sim?.simulatedNow ?? sim?.effectiveScenarioStartAt) || todayUtcDateInput();
+    setDate(next);
+  }, [sim?.simulatedNow, sim?.effectiveScenarioStartAt, date]);
 
   useEffect(() => {
     const raw = searchParams.get('selected');
@@ -86,9 +94,9 @@ function FlightsPageContent() {
     }
   }, [searchParams]);
 
-  const load = useCallback(async (targetPage: number) => {
+  const load = useCallback(async (targetPage: number, silent = false) => {
     if (!date) return; // do not fire empty-date queries on mount
-    setLoading(true);
+    if (!silent) setLoading(true); // refresco de fondo (polling) = sin spinner → sin flicker
     try {
       const result = await flightsApi.search({
         status,
@@ -156,7 +164,7 @@ function FlightsPageContent() {
   useEffect(() => {
     if (!sim?.running) return;
     const timer = setInterval(() => {
-      void load(page);
+      void load(page, true);
       if (selectedId) {
         setDetailLoading(true);
         flightsApi.getById(selectedId)
@@ -213,7 +221,8 @@ function FlightsPageContent() {
               <option value="COMPLETED">Completados</option>
               <option value="CANCELLED">Cancelados</option>
             </select>
-            <input type="date" value={date} onChange={(e) => { userTouchedDateRef.current = true; setDate(e.target.value); }} className="shipments-search" style={{ width: 170 }} />
+            <input type="date" value={date} onChange={(e) => { userTouchedDateRef.current = true; setDate(e.target.value); }} className="shipments-search" style={{ width: 170 }} title="Día simulado a mostrar (no cambia solo; usá «Hoy» para saltar al día actual)" />
+            <button className="chip" title="Ir al día actual de la simulación" onClick={() => { userTouchedDateRef.current = true; const d = toDateInput(sim?.simulatedNow ?? sim?.effectiveScenarioStartAt) || todayUtcDateInput(); setDate(d); }}>Hoy</button>
             <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="Código" className="shipments-search" style={{ width: 140 }} />
             <input value={origin} onChange={(e) => setOrigin(e.target.value.toUpperCase())} placeholder="Origen ICAO" className="shipments-search" style={{ width: 130 }} />
             <input value={destination} onChange={(e) => setDestination(e.target.value.toUpperCase())} placeholder="Destino ICAO" className="shipments-search" style={{ width: 130 }} />
@@ -328,6 +337,13 @@ function FlightsPageContent() {
               </div>
 
               <div style={{ marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Link
+                  href={`/simulaciones?flight=${detail.flight.id}`}
+                  className="chip"
+                  style={{ textDecoration: 'none' }}
+                >
+                  Ver en mapa
+                </Link>
                 <button
                   className="chip"
                   disabled={cancelLoading || detail.flight.status === 'COMPLETED' || detail.flight.status === 'CANCELLED'}

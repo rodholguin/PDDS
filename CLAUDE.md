@@ -79,3 +79,8 @@ Sistema de simulación logística de traslado de maletas entre aeropuertos
   equipaje afectado. No hay cancelación automática.
 - `FutureDemandProjectionService` / `DemandGenerationService` quedan como beans inertes (sin
   invocarse); no se borraron por dependencias en tests (`@MockBean`).
+
+## Base de conocimiento de evaluación
+- Para futuras sesiones, usar `documentacion/evaluacion-sw-base-conocimiento.md` como fuente de verdad
+  sobre el Excel `c1inf54.983.Eq3C.AUTO.Eval.Sw.xlsx`, la interpretación de "almacenes" como aeropuertos
+  y el plan priorizado de alineación con la rúbrica.

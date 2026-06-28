@@ -11,6 +11,7 @@ public record MapLiveShipmentDto(
         Double nextLongitude,
         double progressPct,
         Double originLatitude,
-        Double originLongitude
+        Double originLongitude,
+        String currentFlightCode
 ) {
 }

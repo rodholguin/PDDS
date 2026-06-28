@@ -140,7 +140,7 @@ public class OperationalAlertService {
     }
 
     private LocalDateTime currentOperationalNow() {
-        var config = simulationConfigRepository.findTopByOrderByIdAsc();
+        var config = simulationConfigRepository.findLiveConfigOrFirst();
         return config != null && config.getRuntimeSimulatedNow() != null
                 ? config.getRuntimeSimulatedNow()
                 : LocalDateTime.now();

@@ -26,8 +26,10 @@ public class PeriodSimulationBootstrapService {
 
     private static final Logger log = LoggerFactory.getLogger(PeriodSimulationBootstrapService.class);
     private static final int BATCH_SIZE = 64;
-    private static final long SEED_LEAD_HOURS = 6L;
-
+    // Semilla SÍNCRONA mínima al iniciar: solo se planifican los envíos de las primeras 2h
+    // para que "Iniciar" responda rápido. El planner asíncrono (processSimPlanningBacklog,
+    // ~1k envíos/s) completa el resto de inmediato, y el guard de plannedThrough evita que el
+    // reloj adelante a la planificación. Antes eran 6h (~7s de bloqueo en el arranque).
     private final ShipmentRepository shipmentRepository;
     private final FlightRepository flightRepository;
     private final RoutePlannerService routePlannerService;
@@ -69,7 +71,8 @@ public class PeriodSimulationBootstrapService {
         if (periodEnd == null) {
             periodEnd = periodStart.plusDays(Math.max(1, config.getSimulationDays() == null ? 5 : config.getSimulationDays()));
         }
-        LocalDateTime seedTarget = periodStart.plusHours(SEED_LEAD_HOURS).isAfter(periodEnd) ? periodEnd : periodStart.plusHours(SEED_LEAD_HOURS);
+        LocalDateTime seedTargetCandidate = periodStart.plusSeconds(runtimeService.consumptionWindowSeconds(config));
+        final LocalDateTime seedTarget = seedTargetCandidate.isAfter(periodEnd) ? periodEnd : seedTargetCandidate;
         long total = shipmentRepository.countPendingWithoutRouteForPlanningInPeriod(periodStart, seedTarget);
         runtimeService.markBootstrapStarted(total, "Preplanificando rutas del periodo");
         runtimeService.markPeriodPlanningActive(seedTarget, shipmentRepository.countPendingWithoutRouteForPlanningInPeriod(periodStart, periodEnd),

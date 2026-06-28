@@ -43,10 +43,31 @@ function ImportIcon() {
   );
 }
 
+function RegistroIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2" />
+      <path d="M9 4h6a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" />
+      <path d="M12 11v5" />
+      <path d="M9.5 13.5h5" />
+    </svg>
+  );
+}
+
 function FlightIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2 16l20-8-8 20-2-8-8-4z" />
+    </svg>
+  );
+}
+
+function SimIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 3h6" />
+      <path d="M10 3v6l-5.2 8.3A2 2 0 0 0 6.5 20.5h11a2 2 0 0 0 1.7-3.2L14 9V3" />
+      <path d="M7.5 14h9" />
     </svg>
   );
 }
@@ -60,12 +81,14 @@ function BrandMark() {
 }
 
 const NAV_MAIN = [
-  { href: '/', label: 'Inicio', Icon: HomeIcon },
-  { href: '/shipments', label: 'Envios', Icon: ShipmentIcon },
+  { href: '/operaciones', label: 'Operaciones', Icon: HomeIcon },
+  { href: '/registro', label: 'Registro', Icon: RegistroIcon },
+  { href: '/shipments', label: 'Envíos', Icon: ShipmentIcon },
   { href: '/import', label: 'Importar', Icon: ImportIcon },
 ];
 
 const NAV_OPERATIONS = [
+  { href: '/simulaciones', label: 'Simulaciones', Icon: SimIcon },
   { href: '/flights', label: 'Vuelos', Icon: FlightIcon },
   { href: '/reports', label: 'Reportes', Icon: ReportIcon },
 ];
@@ -114,16 +137,17 @@ export default function Sidebar() {
       </div>
 
       <div className="sidebar-content">
-        <NavSection title="PRINCIPAL" items={NAV_MAIN} pathname={pathname} />
-        <NavSection title="OPERACIONES" items={NAV_OPERATIONS} pathname={pathname} />
+        <NavSection title="Principal" items={NAV_MAIN} pathname={pathname} />
+        <NavSection title="Operaciones" items={NAV_OPERATIONS} pathname={pathname} />
       </div>
 
       <div className="sidebar-footer">
-        <div className="sidebar-avatar" aria-hidden="true">ER</div>
+        <div className="sidebar-avatar" aria-hidden="true">OP</div>
         <div>
-          <p className="sidebar-user-name">Esteban Ramirez</p>
-          <p className="sidebar-user-role">Operador Logistico</p>
+          <p className="sidebar-user-name">Operador</p>
+          <p className="sidebar-user-role">Tasf.B2B · PUCP</p>
         </div>
+        <p className="sidebar-version">v0.1.0</p>
       </div>
     </aside>
   );

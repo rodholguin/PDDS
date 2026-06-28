@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { alertsApi } from '@/lib/api/alertsApi';
 import { shipmentsApi, type ShipmentCreate } from '@/lib/api/shipmentsApi';
 import { useSimulation } from '@/lib/SimulationContext';
@@ -107,7 +108,7 @@ const EMPTY_FORM: CreateForm = {
   algorithmName: 'Genetic Algorithm',
 };
 
-export default function ShipmentsPage() {
+function ShipmentsPageContent() {
   const { sim, loaded: simLoaded } = useSimulation();
 
   const [rows, setRows] = useState<Shipment[]>([]);
@@ -140,6 +141,8 @@ export default function ShipmentsPage() {
   const dateInitialized = useRef(false);
   const simActive = Boolean(sim?.running || sim?.paused);
   const [upcomingOnly, setUpcomingOnly] = useState(false);
+  const searchParams = useSearchParams();
+  const selectedFromUrl = searchParams.get('selected');
   const visibleRows = rows;
 
   useEffect(() => {
@@ -152,15 +155,17 @@ export default function ShipmentsPage() {
 
   useEffect(() => {
     if (!simLoaded || !simActive) return;
-    const nextDate = todaySimDate(sim);
-    if (nextDate && !dateDirtyRef.current) setDate(nextDate);
+    // NO seguir el reloj con el filtro de fecha: re-fijarlo en cada tick hacía saltar el filtro y
+    // refetch + reset de página cada vez que la sim cambiaba de día (= "se recarga a cada rato").
+    // La fecha inicial ya se fija una vez arriba; el usuario la controla (botón "Hoy (sim)").
+    // Solo mantenemos el default de fecha del formulario de creación de envíos.
     if (!createDateDirtyRef.current) {
       setCreateForm((prev) => ({ ...prev, registrationDate: registrationDefault(sim) }));
     }
   }, [sim?.simulatedNow, sim?.effectiveScenarioStartAt, sim?.running, sim?.paused, simLoaded, simActive]);
 
-  const load = useCallback(async (targetPage: number) => {
-    setLoading(true);
+  const load = useCallback(async (targetPage: number, silent = false) => {
+    if (!silent) setLoading(true); // refresco de fondo (polling) = sin spinner → sin flicker
     try {
       const result = upcomingOnly
         ? await shipmentsApi.upcoming({
@@ -200,19 +205,25 @@ export default function ShipmentsPage() {
   }, [code, date, destination, origin, simActive, status, upcomingOnly]);
 
   useEffect(() => {
-    if (!date) return;
     void load(0);
-  }, [date, load]);
+  }, [load]);
 
   useEffect(() => {
     if (rows.length === 0) {
       setSelectedId(null);
       return;
     }
+    if (selectedFromUrl != null) {
+      const urlId = Number(selectedFromUrl);
+      if (rows.some((row) => row.id === urlId)) {
+        setSelectedId(urlId);
+        return;
+      }
+    }
     if (!selectedId || !rows.some((row) => row.id === selectedId)) {
       setSelectedId(rows[0].id);
     }
-  }, [rows, selectedId]);
+  }, [rows, selectedId, selectedFromUrl]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -229,7 +240,7 @@ export default function ShipmentsPage() {
   useEffect(() => {
     if (!sim?.running || !date) return;
     const timer = setInterval(() => {
-      void load(page);
+      void load(page, true);
       if (selectedId) {
         setDetailLoading(true);
         shipmentsApi.getById(selectedId)
@@ -357,7 +368,8 @@ export default function ShipmentsPage() {
               <option value="DELAYED">Atrasados</option>
               <option value="DELIVERED">Entregados</option>
             </select>
-            <input type="date" value={date} onChange={(e) => { dateDirtyRef.current = true; setDate(e.target.value); }} className="shipments-search" style={{ width: 170 }} />
+            <input type="date" value={date} onChange={(e) => { dateDirtyRef.current = true; setDate(e.target.value); }} className="shipments-search" style={{ width: 170 }} title="Día simulado a mostrar (no cambia solo; usá «Hoy» para saltar al día actual)" />
+            <button className="chip" title="Ir al día actual de la simulación" onClick={() => { dateDirtyRef.current = true; const d = todaySimDate(sim); if (d) setDate(d); }}>Hoy</button>
             <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} placeholder="Código" className="shipments-search" style={{ width: 150 }} />
             <input value={origin} onChange={(e) => setOrigin(e.target.value.toUpperCase())} placeholder="Origen ICAO" className="shipments-search" style={{ width: 140 }} />
             <input value={destination} onChange={(e) => setDestination(e.target.value.toUpperCase())} placeholder="Destino ICAO" className="shipments-search" style={{ width: 140 }} />
@@ -543,6 +555,7 @@ function ShipmentDetailPanel({
         <button className="chip" disabled={actionLoading !== null} onClick={() => onAction('receipt')}>Descargar comprobante</button>
         <button className="chip" disabled={actionLoading !== null} onClick={() => onAction('history')}>Ver historial de planificación</button>
         <button className="chip" disabled={actionLoading !== null} onClick={() => onAction('alert')}>Crear alerta</button>
+        <Link href={`/simulaciones?shipment=${detail.id}`} className="chip" style={{ color: '#c4b5fd' }}>Ver en mapa</Link>
       </div>
 
       <div style={{ marginTop: 12, display: 'grid', rowGap: 8 }}>
@@ -700,3 +713,11 @@ const fieldStyle = {
   padding: '0 10px',
   fontSize: 13,
 } as const;
+
+export default function ShipmentsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 40, color: '#9ca3bf' }}>Cargando...</div>}>
+      <ShipmentsPageContent />
+    </Suspense>
+  );
+}

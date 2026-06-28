@@ -26,9 +26,11 @@ export interface ShipmentDashboardFilter {
 export const dashboardApi = {
   getKpis: () => api<DashboardKpis>('/api/dashboard/kpis'),
 
-  getSystemStatus: () => api<SystemStatus>('/api/dashboard/system-status'),
+  getSystemStatus: (mode?: 'live' | 'sim') =>
+    api<SystemStatus>(`/api/dashboard/system-status${mode === 'sim' ? '?mode=sim' : ''}`),
 
-  getOverview: () => api<DashboardOverview>('/api/dashboard/overview'),
+  getOverview: (mode?: 'live' | 'sim') =>
+    api<DashboardOverview>(`/api/dashboard/overview${mode === 'sim' ? '?mode=sim' : ''}`),
 
   getShipmentSummaries: (filter?: ShipmentDashboardFilter) => {
     const query = new URLSearchParams();
@@ -51,9 +53,19 @@ export const dashboardApi = {
 
   getRoutesNetwork: () => api<RouteNetworkEdge[]>('/api/dashboard/routes-network'),
 
-  getMapLive: (limit?: number) =>
-    api<MapLiveShipment[]>(`/api/dashboard/map-live${typeof limit === 'number' ? `?limit=${encodeURIComponent(String(limit))}` : ''}`),
+  getMapLive: (limit?: number, mode?: 'live' | 'sim') => {
+    const p = new URLSearchParams();
+    if (typeof limit === 'number') p.set('limit', String(limit));
+    if (mode) p.set('mode', mode);
+    const q = p.toString();
+    return api<MapLiveShipment[]>(`/api/dashboard/map-live${q ? `?${q}` : ''}`);
+  },
 
-  getMapLiveFlights: (limit?: number) =>
-    api<MapLiveFlight[]>(`/api/dashboard/map-live-flights${typeof limit === 'number' ? `?limit=${encodeURIComponent(String(limit))}` : ''}`),
+  getMapLiveFlights: (limit?: number, mode?: 'live' | 'sim') => {
+    const p = new URLSearchParams();
+    if (typeof limit === 'number') p.set('limit', String(limit));
+    if (mode) p.set('mode', mode);
+    const q = p.toString();
+    return api<MapLiveFlight[]>(`/api/dashboard/map-live-flights${q ? `?${q}` : ''}`);
+  },
 };

@@ -1,5 +1,4 @@
 import type {
-  BenchmarkJobState,
   DataImportLog,
   DatasetImportResult,
   DatasetStatus,
@@ -27,18 +26,6 @@ export const importApi = {
 
   getDatasetStatus: () =>
     api<DatasetStatus>('/api/import/dataset-status'),
-
-  downloadScenarioDemandTemplate: () =>
-    download('/api/import/template/shipments-scenarios', 'demand-scenarios.csv'),
-
-  startBenchmarkJob: () =>
-    api<{ message: string; jobId: string }>('/api/import/benchmark/start', { method: 'POST' }),
-
-  getBenchmarkJobStatus: (jobId: string) =>
-    api<BenchmarkJobState>(`/api/import/benchmark/status/${encodeURIComponent(jobId)}`),
-
-  getLatestBenchmarkStatus: () =>
-    api<BenchmarkJobState | { status: 'IDLE'; message: string }>('/api/import/benchmark/status'),
 
   importEnviosDataset: (payload?: {
     seed?: number;

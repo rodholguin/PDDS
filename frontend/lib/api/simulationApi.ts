@@ -19,12 +19,6 @@ export interface SimConfigUpdate {
   interNodeCapacity?: number;
   normalThresholdPct?: number;
   warningThresholdPct?: number;
-  slaWarnPct?: number;
-  slaCritPct?: number;
-  riskShipmentsWarnPct?: number;
-  riskShipmentsCritPct?: number;
-  criticalNodesWarnPct?: number;
-  criticalNodesCritPct?: number;
   scenarioStartDate?: string;
   primaryAlgorithm?: AlgorithmType;
   secondaryAlgorithm?: AlgorithmType;
@@ -39,7 +33,21 @@ export interface SimulationEventPayload {
 }
 
 export const simulationApi = {
-  getState: () => api<SimulationState>('/api/simulation/state'),
+  getState: (mode?: 'live' | 'sim') =>
+    api<SimulationState>(`/api/simulation/state${mode === 'sim' ? '?mode=sim' : ''}`),
+
+  /** Estado liviano de la SIMULACIÓN (id=2), que corre en paralelo a la operación viva. */
+  simState: () =>
+    api<{
+      exists: boolean;
+      scenario?: SimScenario;
+      running?: boolean;
+      simulatedNow?: string;
+      scenarioStartAt?: string;
+      simulationDays?: number;
+      collapseDetectedAtSim?: string;
+      collapseShipmentCode?: string;
+    }>('/api/simulation/sim-state'),
 
   configure: (body: SimConfigUpdate) =>
     api<SimulationState>('/api/simulation/configure', {
@@ -77,12 +85,6 @@ export const simulationApi = {
   getCollapseRisk: () => api<CollapseRisk>('/api/simulation/collapse-risk'),
 
   getResults: () => api<SimulationResults>('/api/simulation/results'),
-
-  seedStatistical: (avg: number, variance: number) =>
-    api<{ message: string; avg: number; variance: number; created: number; state: SimulationState }>(
-      `/api/simulation/seed-statistical?avg=${encodeURIComponent(String(avg))}&variance=${encodeURIComponent(String(variance))}`,
-      { method: 'POST' }
-    ),
 
   exportResults: (format: 'csv' | 'pdf') =>
     download(`/api/simulation/results/export?format=${encodeURIComponent(format)}`, `simulation-results.${format}`),

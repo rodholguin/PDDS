@@ -14,6 +14,7 @@ import com.tasfb2b.model.ShipmentAuditType;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.TravelStop;
+import com.tasfb2b.repository.AirportRepository;
 import com.tasfb2b.repository.ShipmentAuditLogRepository;
 import com.tasfb2b.repository.FlightRepository;
 import com.tasfb2b.repository.ShipmentRepository;
@@ -21,6 +22,7 @@ import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.RoutePlannerService;
 import com.tasfb2b.service.ShipmentAuditService;
 import com.tasfb2b.service.ShipmentOrchestratorService;
+import com.tasfb2b.service.SimulationRuntimeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -41,11 +43,16 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -65,6 +72,8 @@ public class ShipmentController {
     private final RoutePlannerService routePlannerService;
     private final ShipmentAuditService shipmentAuditService;
     private final ShipmentOrchestratorService shipmentOrchestratorService;
+    private final SimulationRuntimeService simulationRuntimeService;
+    private final AirportRepository airportRepository;
 
     @GetMapping
     @Operation(summary = "Listar envíos con paginación y filtros")
@@ -79,6 +88,15 @@ public class ShipmentController {
             @RequestParam(required = false, defaultValue = "false") boolean currentOnly,
             @PageableDefault(size = 20, sort = "registrationDate") Pageable pageable
     ) {
+        // DAY_TO_DAY (operación EN VIVO): tabla LIMPIA → listar SOLO envíos LIVE (los ~9.5M HISTORICAL quedan
+        // ocultos). Se respeta el filtro de status; los filtros avanzados sobre el set LIVE (chico) son
+        // refinamiento futuro.
+        if (simulationRuntimeService.isLiveOperationScenario()) {
+            Page<Shipment> livePage = status != null
+                    ? shipmentRepository.findBySourceAndStatus(com.tasfb2b.model.ShipmentSource.LIVE, status, pageable)
+                    : shipmentRepository.findBySource(com.tasfb2b.model.ShipmentSource.LIVE, pageable);
+            return ResponseEntity.ok(livePage);
+        }
         boolean hasAdvancedFilters = airline != null || origin != null || destination != null || code != null;
         LocalDateTime dateFrom = null;
         LocalDateTime dateTo = null;
@@ -251,6 +269,95 @@ public class ShipmentController {
         return ResponseEntity
                 .created(URI.create("/api/shipments/" + shipment.getId()))
                 .body(toDetailDto(shipment, plannedStops));
+    }
+
+    @PostMapping(value = "/upload-live", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Cargar un .txt de envíos (formato dataset) a la operación EN VIVO (DAY_TO_DAY, tag LIVE)")
+    public ResponseEntity<Map<String, Object>> uploadLive(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "originIcao", required = false) String originIcao) {
+        // El origen es el del archivo (cada aeropuerto llena su propio .txt). Si no llega explícito, se
+        // detecta del NOMBRE del archivo (p. ej. _envios_SPIM_.txt o SPIM.txt). El destino va en cada línea.
+        String origin = (originIcao != null && !originIcao.isBlank())
+                ? originIcao.trim().toUpperCase()
+                : resolveOriginFromFilename(file.getOriginalFilename());
+        if (origin == null) {
+            return ResponseEntity.ok(Map.of(
+                    "created", 0, "failed", 0,
+                    "errors", List.of("No pude detectar el aeropuerto de origen. Nombra el archivo con el código ICAO del origen, p. ej. SPIM.txt o _envios_SPIM_.txt")));
+        }
+        Airport originAirport = airportRepository.findByIcaoCode(origin).orElse(null);
+        if (originAirport == null) {
+            return ResponseEntity.ok(Map.of(
+                    "created", 0, "failed", 0, "origin", origin,
+                    "errors", List.of("Aeropuerto de origen no encontrado: " + origin)));
+        }
+        int gmt = originAirport.getGmtOffset() == null ? 0 : originAirport.getGmtOffset();
+        DateTimeFormatter ymd = DateTimeFormatter.ofPattern("yyyyMMdd");
+
+        int created = 0;
+        int failed = 0;
+        int lineNo = 0;
+        List<String> errors = new ArrayList<>();
+        List<ShipmentDetailDto> createdShipments = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                lineNo++;
+                String raw = line.trim();
+                if (raw.isEmpty()) {
+                    continue;
+                }
+                try {
+                    // Formato dataset: id-aaaammdd-hh-mm-dest-###-IdClien (la hora es LOCAL del origen → UTC).
+                    String[] p = raw.split("-");
+                    if (p.length < 7) {
+                        throw new IllegalArgumentException("se esperaban 7 campos separados por '-'");
+                    }
+                    LocalDate date = LocalDate.parse(p[1].trim(), ymd);
+                    LocalDateTime localDt = date.atTime(Integer.parseInt(p[2].trim()), Integer.parseInt(p[3].trim()));
+                    LocalDateTime utc = localDt.minusMinutes((long) gmt * 60);
+                    String dest = p[4].trim().toUpperCase();
+                    int qty = Integer.parseInt(p[5].trim());
+                    String client = p[6].trim();
+                    Shipment shipment = shipmentOrchestratorService.createAndPlan(
+                            new ShipmentCreateDto(client, origin, dest, qty, utc, null));
+                    List<TravelStop> stops = travelStopRepository.findByShipmentOrderByStopOrderAsc(shipment);
+                    createdShipments.add(toDetailDto(shipment, stops));
+                    created++;
+                } catch (Exception ex) {
+                    failed++;
+                    if (errors.size() < 12) {
+                        errors.add("Línea " + lineNo + " («" + raw + "»): " + ex.getMessage());
+                    }
+                }
+            }
+        } catch (IOException ex) {
+            throw new IllegalStateException("No se pudo leer el archivo: " + ex.getMessage(), ex);
+        }
+        return ResponseEntity.ok(Map.of(
+                "origin", origin,
+                "created", created,
+                "failed", failed,
+                "errors", errors,
+                "shipments", createdShipments
+        ));
+    }
+
+    /** Detecta el ICAO de origen en el nombre del archivo: primer token de 4 letras que sea un aeropuerto válido. */
+    private String resolveOriginFromFilename(String filename) {
+        if (filename == null) {
+            return null;
+        }
+        for (String token : filename.split("[^A-Za-z0-9]+")) {
+            String t = token.trim().toUpperCase();
+            if (t.length() == 4 && t.chars().allMatch(Character::isLetter)
+                    && airportRepository.findByIcaoCode(t).isPresent()) {
+                return t;
+            }
+        }
+        return null;
     }
 
     @PostMapping("/check-feasibility")

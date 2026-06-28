@@ -60,6 +60,8 @@ public class ShipmentOrchestratorService {
                 .registrationDate(registrationDate)
                 .status(ShipmentStatus.PENDING)
                 .progressPercentage(0.0)
+                // Registro manual = operación EN VIVO (DAY_TO_DAY). El import del dataset queda HISTORICAL (default).
+                .source(com.tasfb2b.model.ShipmentSource.LIVE)
                 .build();
 
         shipmentRepository.save(shipment);
@@ -127,7 +129,7 @@ public class ShipmentOrchestratorService {
     }
 
     private String activeAlgorithmName() {
-        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = simulationConfigRepository.findLiveConfigOrFirst();
         if (config == null) {
             return "Genetic Algorithm";
         }

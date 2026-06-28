@@ -52,9 +52,14 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
             LocalDateTime toInclusive
     );
 
+    // Cota inferior de despegue (`departureFrom` = reloj - ~1 día): un vuelo en aire AHORA tiene
+    // arrival > simNow y duración <= 21h (máx del dataset), así que despegó hace <24h. Sin esta cota la
+    // query escaneaba TODOS los vuelos hasta el horizonte (crece con la corrida) → ~1.5s/tick (el cuello
+    // del motor). Acotada a ~1 día de vuelos (índice idx_flight_departure) el tick baja a decenas de ms.
     @Query("""
             SELECT f.id FROM Flight f
             WHERE f.status = 'SCHEDULED'
+              AND f.scheduledDeparture >= :departureFrom
               AND f.scheduledDeparture <= :horizon
               AND f.scheduledArrival > :simulatedNow
               AND EXISTS (
@@ -63,7 +68,8 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
                       AND ts.stopStatus = 'PENDING'
               )
             """)
-    List<Long> findRecoverableScheduledFlightIds(@Param("simulatedNow") LocalDateTime simulatedNow,
+    List<Long> findRecoverableScheduledFlightIds(@Param("departureFrom") LocalDateTime departureFrom,
+                                                 @Param("simulatedNow") LocalDateTime simulatedNow,
                                                  @Param("horizon") LocalDateTime horizon);
 
     @Query("""
@@ -95,6 +101,16 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
     List<Flight> findSchedulableFlightsBetween(@Param("from") LocalDateTime from,
                                                @Param("to") LocalDateTime to);
 
+    @Query("""
+            SELECT f FROM Flight f
+            WHERE f.status = 'CANCELLED'
+              AND f.scheduledDeparture >= :from
+              AND f.scheduledDeparture <= :now
+            ORDER BY f.scheduledDeparture DESC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findRecentlyCancelled(@Param("now") LocalDateTime now, @Param("from") LocalDateTime from);
+
     @Override
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     List<Flight> findAll();
@@ -108,7 +124,12 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
      * Se usa para hallar el día patrón de forma estable: una vez que existen clones (p.ej. de enero),
      * el "vuelo más temprano" pasa a ser un clone y la búsqueda de templates fallaría.
      */
-    @Query("SELECT MIN(f.scheduledDeparture) FROM Flight f WHERE f.scheduledDeparture IS NOT NULL AND f.flightCode NOT LIKE '%R____-__-__'")
+    @Query(value = """
+            SELECT MIN(f.scheduled_departure)
+            FROM flight f
+            WHERE f.scheduled_departure IS NOT NULL
+              AND f.flight_code !~ 'R[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+            """, nativeQuery = true)
     LocalDateTime findEarliestTemplateDeparture();
 
     @Query("""
@@ -121,14 +142,15 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
     List<Flight> findFlightsWithinWindow(@Param("from") LocalDateTime from,
                                          @Param("to") LocalDateTime to);
 
-    @Query("""
-            SELECT f FROM Flight f
-            WHERE f.scheduledDeparture >= :templateFrom
-              AND f.scheduledDeparture < :templateTo
-              AND f.scheduledArrival IS NOT NULL
-            ORDER BY f.flightCode ASC
-            """)
-    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    @Query(value = """
+            SELECT *
+            FROM flight f
+            WHERE f.scheduled_departure >= :templateFrom
+              AND f.scheduled_departure < :templateTo
+              AND f.scheduled_arrival IS NOT NULL
+              AND f.flight_code !~ 'R[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+            ORDER BY f.flight_code ASC
+            """, nativeQuery = true)
     List<Flight> findTemplateFlightsWithinWindow(@Param("templateFrom") LocalDateTime templateFrom,
                                                  @Param("templateTo") LocalDateTime templateTo);
 
@@ -138,6 +160,27 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
             WHERE f.maxCapacity > 0
             """)
     double averageLoadPct();
+
+    @Query("""
+            SELECT COALESCE(AVG(((f.currentLoad + COALESCE(f.reservedLoad, 0)) * 100.0) / NULLIF(f.maxCapacity, 0)), 0.0)
+            FROM Flight f
+            WHERE f.maxCapacity > 0
+              AND f.status <> 'CANCELLED'
+              AND (f.currentLoad + COALESCE(f.reservedLoad, 0)) > 0
+            """)
+    double averageOccupiedLoadPct();
+
+    @Query("""
+            SELECT COALESCE(AVG(((f.currentLoad + COALESCE(f.reservedLoad, 0)) * 100.0) / NULLIF(f.maxCapacity, 0)), 0.0)
+            FROM Flight f
+            WHERE f.maxCapacity > 0
+              AND f.status <> 'CANCELLED'
+              AND f.scheduledDeparture >= :from
+              AND f.scheduledDeparture < :to
+              AND (f.currentLoad + COALESCE(f.reservedLoad, 0)) > 0
+            """)
+    double averageOccupiedLoadPctBetween(@Param("from") LocalDateTime from,
+                                         @Param("to") LocalDateTime to);
 
     /** Cantidad de vuelos activos en un instante dado (en vuelo). */
     @Query("""
@@ -166,8 +209,8 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
               AND f.scheduledArrival > :now
               AND f.scheduledDeparture >= :dayStart
               AND f.scheduledDeparture < :dayEnd
-              AND f.status = 'IN_FLIGHT'
               AND f.status <> 'CANCELLED'
+              AND f.currentLoad > 0
             ORDER BY f.scheduledDeparture ASC
             """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
@@ -181,7 +224,6 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
               AND f.scheduledArrival > :now
               AND f.scheduledDeparture >= :dayStart
               AND f.scheduledDeparture < :dayEnd
-              AND f.status = 'IN_FLIGHT'
               AND f.status <> 'CANCELLED'
               AND f.currentLoad > 0
             """)
@@ -194,8 +236,8 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
             WHERE f.scheduledDeparture <= :now
               AND f.scheduledArrival > :now
               AND f.scheduledDeparture >= :from
-              AND f.status = 'IN_FLIGHT'
               AND f.status <> 'CANCELLED'
+              AND f.currentLoad > 0
             ORDER BY f.scheduledDeparture ASC
             """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
@@ -203,12 +245,25 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
                                         @Param("from") LocalDateTime from);
 
     @Query("""
+            SELECT DISTINCT f FROM TravelStop ts
+            JOIN ts.flight f
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :from
+              AND f.status <> 'CANCELLED'
+            ORDER BY f.scheduledDeparture ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Flight> findPlannedVisibleFlightsSince(@Param("now") LocalDateTime now,
+                                                @Param("from") LocalDateTime from);
+
+    @Query("""
             SELECT COUNT(f) FROM Flight f
             WHERE f.scheduledDeparture <= :now
               AND f.scheduledArrival > :now
               AND f.scheduledDeparture >= :from
-              AND f.status = 'IN_FLIGHT'
               AND f.status <> 'CANCELLED'
+              AND f.currentLoad > 0
             """)
     long countActiveFlightsSince(@Param("now") LocalDateTime now,
                                  @Param("from") LocalDateTime from);
@@ -279,12 +334,15 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
             """)
     List<Flight> findScheduledFlights(@Param("from") LocalDateTime from);
 
+    // "Próximos vuelos": vuelos PROGRAMADOS con equipaje ASIGNADO en la ventana. Un vuelo aún no despegado
+    // lleva el equipaje como reservedLoad (currentLoad recién se llena al despegar), así que filtrar por
+    // currentLoad>0 daba 0 → el KPI no mostraba nada. Se cuenta currentLoad + reservedLoad.
     @Query("""
             SELECT COUNT(f) FROM Flight f
             WHERE f.status = 'SCHEDULED'
               AND f.scheduledDeparture >= :from
               AND f.scheduledDeparture < :to
-              AND f.currentLoad > 0
+              AND (f.currentLoad + COALESCE(f.reservedLoad, 0)) > 0
             """)
     long countLoadedScheduledFlightsBetween(@Param("from") LocalDateTime from,
                                             @Param("to") LocalDateTime to);
@@ -372,6 +430,34 @@ public interface FlightRepository extends JpaRepository<Flight, Long>, JpaSpecif
     @Transactional
     @Query(value = "UPDATE flight SET status = 'SCHEDULED', current_load = 0, reserved_load = 0 WHERE status <> 'SCHEDULED' OR current_load <> 0 OR reserved_load <> 0", nativeQuery = true)
     int resetOperationalStateFast();
+
+    /** Reset operativo acotado a una VENTANA: la simulación resetea solo SUS vuelos (los de hoy/LIVE intactos). */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = "UPDATE flight SET status = 'SCHEDULED', current_load = 0, reserved_load = 0 WHERE scheduled_departure >= :start AND scheduled_departure < :end AND (status <> 'SCHEDULED' OR current_load <> 0 OR reserved_load <> 0)", nativeQuery = true)
+    int resetOperationalStateInWindow(@Param("start") java.time.LocalDateTime start, @Param("end") java.time.LocalDateTime end);
+
+    /**
+     * Poda BATCHED de clones de vuelo recurrentes (código R+fecha) SIN uso (ningún travel_stop los referencia)
+     * cuya llegada cae FUERA de la ventana a conservar [keepFrom, keepTo). Borra hasta :batch por llamada →
+     * transacciones cortas, sin spike de WAL/lock. Mantiene la tabla flight acotada: durante una corrida limpia
+     * los ya volados (detrás del reloj); sin sim corriendo limpia los clones lejanos de corridas previas.
+     * Usa idx_flight_clone_arrival. Es la palanca que evita el OOM del planner.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Transactional
+    @Query(value = """
+            DELETE FROM flight WHERE id IN (
+              SELECT id FROM flight
+              WHERE flight_code ~ 'R[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                AND (scheduled_arrival < :keepFrom OR scheduled_arrival >= :keepTo)
+                AND NOT EXISTS (SELECT 1 FROM travel_stop t WHERE t.flight_id = flight.id)
+              LIMIT :batch
+            )
+            """, nativeQuery = true)
+    int deleteUnusedCloneFlightsOutsideWindow(@Param("keepFrom") java.time.LocalDateTime keepFrom,
+                                              @Param("keepTo") java.time.LocalDateTime keepTo,
+                                              @Param("batch") int batch);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Transactional

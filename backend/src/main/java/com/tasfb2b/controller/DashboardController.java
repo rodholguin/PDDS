@@ -139,9 +139,10 @@ public class DashboardController {
 
     @GetMapping("/system-status")
     @Operation(summary = "Distribucion de aeropuertos y vuelos por estado")
-    public ResponseEntity<SystemStatusDto> getSystemStatus() {
+    public ResponseEntity<SystemStatusDto> getSystemStatus(
+            @RequestParam(required = false, defaultValue = "live") String mode) {
         int[] thresholds = getThresholds();
-        SimulationConfig config = currentConfig();
+        SimulationConfig config = currentConfig(mode);
 
         List<Airport> airports = airportRepository.findAll();
         long total = airports.size();
@@ -160,7 +161,7 @@ public class DashboardController {
                 .average()
                 .orElse(0.0);
 
-        LocalDateTime now = effectiveNow();
+        LocalDateTime now = effectiveNow(config);
         LocalDateTime visibleFrom = activeVisibilityStart(config, now);
         List<Flight> visibleFlights = flightRepository.findFlightsWithinWindow(visibleFrom, now.plusDays(1));
         long totalFlights = visibleFlights.size();
@@ -179,11 +180,26 @@ public class DashboardController {
         ));
     }
 
+    // Caché TTL del overview: los KPIs no necesitan frescura por-request y el panel los pollea cada ~2.5s.
+    // Sin caché, cada poll re-ejecuta ~12 counts (varios con seq-scan de travel_stop, que crece con la
+    // corrida) → ~5s y saturaba el pool de conexiones. Con TTL el cómputo pesado ocurre 1 vez cada ~6s.
+    private volatile DashboardOverviewDto cachedOverview;
+    private volatile long cachedOverviewAtMs;
+    private static final long OVERVIEW_CACHE_TTL_MS = 6_000L;
+
     @GetMapping("/overview")
     @Operation(summary = "Resumen operacional extendido del panel principal")
-    public ResponseEntity<DashboardOverviewDto> getOverview() {
-        SimulationConfig config = currentConfig();
-        LocalDateTime now = effectiveNow();
+    public ResponseEntity<DashboardOverviewDto> getOverview(
+            @RequestParam(required = false, defaultValue = "live") String mode) {
+        boolean liveMode = !"sim".equalsIgnoreCase(mode);
+        if (liveMode) {
+            DashboardOverviewDto cachedDto = cachedOverview;
+            if (cachedDto != null && System.currentTimeMillis() - cachedOverviewAtMs < OVERVIEW_CACHE_TTL_MS) {
+                return ResponseEntity.ok(cachedDto);
+            }
+        }
+        SimulationConfig config = currentConfig(mode);
+        LocalDateTime now = effectiveNow(config);
         LocalDateTime todayStart = operationalDayStart(now);
         LocalDateTime tomorrow = todayStart.plusDays(1);
         LocalDateTime yesterdayStart = todayStart.minusDays(1);
@@ -192,7 +208,9 @@ public class DashboardController {
         long activeFlights = isPlanAheadScenario(config)
                 ? flightRepository.countActiveFlightsSince(now, visibleFrom)
                 : flightRepository.countLoadedActiveFlightsAtWithinDay(now, todayStart, tomorrow);
-        long nextScheduledFlights = Math.min(25L, flightRepository.countLoadedScheduledFlightsBetween(now, tomorrow));
+        // Próximos vuelos = vuelos con equipaje que despegan en la PRÓXIMA HORA simulada. La ventana se
+        // desliza con el reloj → el KPI se actualiza solo a cada cambio de hora. Antes era [now, mañana] capado a 25.
+        long nextScheduledFlights = flightRepository.countLoadedScheduledFlightsBetween(now, now.plusHours(1));
         long inRoute = isPlanAheadScenario(config)
                 ? shipmentRepository.countInRouteSince(visibleFrom)
                 : shipmentRepository.countVisibleForMapWithinDay(todayStart, tomorrow);
@@ -234,7 +252,14 @@ public class DashboardController {
                 tomorrow
         );
 
-        return ResponseEntity.ok(new DashboardOverviewDto(
+        LocalDateTime flightOccupancyFrom = isPlanAheadScenario(config) ? visibleFrom : todayStart;
+        LocalDateTime flightOccupancyTo = isPlanAheadScenario(config) ? now.plusHours(1) : tomorrow;
+        double avgFlightOccupancyPct = flightRepository.averageOccupiedLoadPctBetween(flightOccupancyFrom, flightOccupancyTo);
+
+        double avgNodeOccupancyPct = airports.isEmpty() ? 0.0
+                : airports.stream().mapToDouble(Airport::getOccupancyPct).average().orElse(0.0);
+
+        DashboardOverviewDto dto = new DashboardOverviewDto(
                 activeFlights,
                 nextScheduledFlights,
                 inRoute,
@@ -255,8 +280,15 @@ public class DashboardController {
                 avgDeliveryHours,
                 avgCommittedHours,
                 avgDeliveryDeltaHours,
-                replanningsToday
-        ));
+                replanningsToday,
+                avgFlightOccupancyPct,
+                avgNodeOccupancyPct
+        );
+        if (liveMode) {
+            cachedOverview = dto;
+            cachedOverviewAtMs = System.currentTimeMillis();
+        }
+        return ResponseEntity.ok(dto);
     }
 
     @GetMapping("/shipments")
@@ -297,35 +329,28 @@ public class DashboardController {
     @GetMapping("/map-live")
     @Operation(summary = "Feed liviano para aviones en ruta del mapa")
     public ResponseEntity<List<MapLiveShipmentDto>> mapLive(
-            @RequestParam(required = false) Integer limit
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false, defaultValue = "live") String mode
     ) {
-        SimulationConfig config = currentConfig();
-        LocalDateTime now = effectiveNow();
+        SimulationConfig config = currentConfig(mode);
+        LocalDateTime now = effectiveNow(config);
         LocalDateTime visibleFrom = activeVisibilityStart(config, now);
 
         List<Shipment> inRoute = isPlanAheadScenario(config)
-                ? shipmentRepository.findInRouteSince(visibleFrom)
+                ? shipmentRepository.findPlannedInRouteSince(now, visibleFrom)
                 : shipmentRepository.findInRouteWithinDay(operationalDayStart(now), operationalDayStart(now).plusDays(1));
-        if (limit == null || limit <= 0) {
-            inRoute = inRoute.stream()
-                    .sorted(Comparator.comparing(Shipment::getRegistrationDate))
-                    .toList();
-        } else {
-            inRoute = inRoute.stream()
-                    .sorted(Comparator.comparing(Shipment::getRegistrationDate))
-                    .limit(limit)
-                    .toList();
-        }
+        int shipmentLimit = limit == null || limit <= 0 ? 300 : Math.min(limit, 1_000);
+        inRoute = inRoute.stream()
+                .sorted(Comparator.comparing(Shipment::getRegistrationDate))
+                .limit(shipmentLimit)
+                .toList();
 
         if (inRoute.isEmpty()) {
             return ResponseEntity.ok(List.of());
         }
 
         Map<Long, List<TravelStop>> stopsIndex = travelStopRepository
-                .findByStopStatusInAndShipmentStatusInOrderByShipmentIdAscStopOrderAsc(
-                        List.of(StopStatus.PENDING, StopStatus.IN_TRANSIT, StopStatus.COMPLETED),
-                        List.of(ShipmentStatus.IN_ROUTE, ShipmentStatus.DELAYED, ShipmentStatus.CRITICAL)
-                )
+                .findByShipmentInOrderByShipmentIdAscStopOrderAsc(inRoute)
                 .stream()
                 .collect(java.util.stream.Collectors.groupingBy(ts -> ts.getShipment().getId()));
 
@@ -334,9 +359,22 @@ public class DashboardController {
             List<TravelStop> stops = stopsIndex.getOrDefault(shipment.getId(), List.of());
             Position current = computeCurrentPosition(shipment, stops, now);
 
-            Optional<TravelStop> nextStop = stops.stream()
+            Optional<TravelStop> activeStop = activeStopAt(stops, now);
+            Optional<TravelStop> nextStop = activeStop.isPresent() ? activeStop : stops.stream()
                     .filter(stop -> stop.getStopStatus() == StopStatus.IN_TRANSIT || stop.getStopStatus() == StopStatus.PENDING)
                     .findFirst();
+            String currentFlightCode = activeStop.stream()
+                    .map(TravelStop::getFlight)
+                    .filter(java.util.Objects::nonNull)
+                    .map(Flight::getFlightCode)
+                    .findFirst()
+                    .orElseGet(() -> stops.stream()
+                    .filter(stop -> stop.getStopStatus() == StopStatus.IN_TRANSIT)
+                    .map(TravelStop::getFlight)
+                    .filter(java.util.Objects::nonNull)
+                    .map(Flight::getFlightCode)
+                    .findFirst()
+                    .orElse(null));
 
             double nextLat = nextStop.map(stop -> stop.getAirport().getLatitude()).orElse(shipment.getDestinationAirport().getLatitude());
             double nextLon = nextStop.map(stop -> stop.getAirport().getLongitude()).orElse(shipment.getDestinationAirport().getLongitude());
@@ -352,7 +390,8 @@ public class DashboardController {
                     nextLon,
                     shipment.getProgressPercentage() == null ? 0.0 : shipment.getProgressPercentage(),
                     shipment.getOriginAirport().getLatitude(),
-                    shipment.getOriginAirport().getLongitude()
+                    shipment.getOriginAirport().getLongitude(),
+                    currentFlightCode
             ));
         }
 
@@ -360,47 +399,80 @@ public class DashboardController {
     }
 
     @GetMapping("/map-live-flights")
-    @Operation(summary = "Feed liviano de vuelos activos para el mapa")
-    public ResponseEntity<List<MapLiveFlightDto>> mapLiveFlights(@RequestParam(required = false) Integer limit) {
-        SimulationConfig config = currentConfig();
-        LocalDateTime now = effectiveNow();
+    @Operation(summary = "Feed liviano de vuelos activos + cancelados recientes para el mapa")
+    public ResponseEntity<List<MapLiveFlightDto>> mapLiveFlights(
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false, defaultValue = "live") String mode) {
+        SimulationConfig config = currentConfig(mode);
+        LocalDateTime now = effectiveNow(config);
         LocalDateTime visibleFrom = activeVisibilityStart(config, now);
+
+        // En escenarios plan-ahead, el mapa deriva los vuelos visibles de la ruta planificada:
+        // si el reloj está entre salida/llegada de una pierna con TravelStops, el avión debe mostrarse.
+        // No dependemos de Flight.status/currentLoad porque pueden quedar rezagados respecto al reloj visual.
         List<Flight> active = (isPlanAheadScenario(config)
-                ? flightRepository.findActiveFlightsSince(now, visibleFrom)
+                ? flightRepository.findPlannedVisibleFlightsSince(now, visibleFrom)
                 : flightRepository.findActiveFlightsAtWithinDay(now, operationalDayStart(now), operationalDayStart(now).plusDays(1))).stream()
-                .filter(flight -> flight.getCurrentLoad() != null && flight.getCurrentLoad() > 0)
+                .filter(flight -> isPlanAheadScenario(config)
+                        || (flight.getCurrentLoad() != null && flight.getCurrentLoad() > 0))
                 .toList();
 
-        List<Flight> rows = (limit == null || limit <= 0) ? active : active.stream().limit(limit).toList();
+        // Vuelos cancelados recientes (última hora de tiempo simulado)
+        LocalDateTime recentCutoff = now.minusHours(1);
+        List<Flight> cancelled = flightRepository.findRecentlyCancelled(now, recentCutoff);
+
+        // Combinar: activos primero, luego cancelados
+        List<Flight> rows = new ArrayList<>(active);
+        rows.addAll(cancelled);
+
+        int flightLimit = limit == null || limit <= 0 ? 180 : Math.min(limit, 500);
+        if (rows.size() > flightLimit) {
+            rows = rows.subList(0, flightLimit);
+        }
+
         List<MapLiveFlightDto> dto = new ArrayList<>();
         for (Flight flight : rows) {
             Airport origin = flight.getOriginAirport();
             Airport destination = flight.getDestinationAirport();
-            long total = Math.max(1L, Duration.between(flight.getScheduledDeparture(), flight.getScheduledArrival()).toSeconds());
-            long elapsed = Math.max(0L, Duration.between(flight.getScheduledDeparture(), now).toSeconds());
-            double ratio = Math.max(0.0, Math.min(1.0, elapsed / (double) total));
+            String status = flight.getStatus().name();
 
-            double fromLon = normalizeLongitude(origin.getLongitude());
-            double toLon = nearestWrappedLongitude(normalizeLongitude(destination.getLongitude()), fromLon);
-            double lon = normalizeLongitude(fromLon + (toLon - fromLon) * ratio);
-
-            double fromMercY = mercatorY(origin.getLatitude());
-            double toMercY = mercatorY(destination.getLatitude());
-            double lat = inverseMercatorY(fromMercY + (toMercY - fromMercY) * ratio);
-
-            dto.add(new MapLiveFlightDto(
-                    flight.getId(),
-                    flight.getFlightCode(),
-                    origin.getIcaoCode(),
-                    destination.getIcaoCode(),
-                    lat,
-                    lon,
-                    origin.getLatitude(),
-                    origin.getLongitude(),
-                    destination.getLatitude(),
-                    destination.getLongitude(),
-                    flight.getLoadPct()
-            ));
+            if (flight.getStatus() == FlightStatus.CANCELLED) {
+                // Vuelo cancelado: se muestra en la posición del aeropuerto origen
+                dto.add(new MapLiveFlightDto(
+                        flight.getId(),
+                        flight.getFlightCode(),
+                        origin.getIcaoCode(),
+                        destination.getIcaoCode(),
+                        origin.getLatitude(), // currentLatitude = origen
+                        origin.getLongitude(), // currentLongitude = origen
+                        origin.getLatitude(),
+                        origin.getLongitude(),
+                        destination.getLatitude(),
+                        destination.getLongitude(),
+                        flight.getScheduledDeparture(),
+                        flight.getScheduledArrival(),
+                        0.0,
+                        status
+                ));
+            } else {
+                // Vuelo activo: interpolar posición en la ruta
+                dto.add(new MapLiveFlightDto(
+                        flight.getId(),
+                        flight.getFlightCode(),
+                        origin.getIcaoCode(),
+                        destination.getIcaoCode(),
+                        origin.getLatitude(),
+                        origin.getLongitude(),
+                        origin.getLatitude(),
+                        origin.getLongitude(),
+                        destination.getLatitude(),
+                        destination.getLongitude(),
+                        flight.getScheduledDeparture(),
+                        flight.getScheduledArrival(),
+                        visibleFlightLoadPct(flight, isPlanAheadScenario(config)),
+                        status
+                ));
+            }
         }
         return ResponseEntity.ok(dto);
     }
@@ -633,8 +705,13 @@ public class DashboardController {
             );
         }
 
+        Optional<TravelStop> activeBySchedule = activeStopAt(stops, now);
         for (TravelStop stop : stops) {
-            if (stop.getStopStatus() != StopStatus.IN_TRANSIT) continue;
+            if (activeBySchedule.isPresent()) {
+                if (!activeBySchedule.get().getId().equals(stop.getId())) continue;
+            } else if (stop.getStopStatus() != StopStatus.IN_TRANSIT) {
+                continue;
+            }
 
             Airport destination = stop.getAirport();
             Airport previous = previousAirport(stops, stop.getStopOrder())
@@ -670,6 +747,16 @@ public class DashboardController {
                         shipment.getOriginAirport().getLongitude(),
                         shipment.getOriginAirport().getIcaoCode()
                 ));
+    }
+
+    private Optional<TravelStop> activeStopAt(List<TravelStop> stops, LocalDateTime now) {
+        return stops.stream()
+                .filter(stop -> stop.getFlight() != null)
+                .filter(stop -> stop.getFlight().getScheduledDeparture() != null)
+                .filter(stop -> stop.getFlight().getScheduledArrival() != null)
+                .filter(stop -> !stop.getFlight().getScheduledDeparture().isAfter(now))
+                .filter(stop -> stop.getFlight().getScheduledArrival().isAfter(now))
+                .min(Comparator.comparingInt(TravelStop::getStopOrder));
     }
 
     private Optional<Airport> previousAirport(List<TravelStop> stops, int currentOrder) {
@@ -740,11 +827,19 @@ public class DashboardController {
     }
 
     private LocalDateTime effectiveNow() {
-        return simulationRuntimeService.currentSimulationTime().orElse(LocalDateTime.now());
+        return effectiveNow(currentConfig());
+    }
+
+    /** Reloj per-config: live = id=1 (hora real), sim = fila PERIOD/COLLAPSE (reloj simulado). */
+    private LocalDateTime effectiveNow(SimulationConfig config) {
+        return simulationRuntimeService.effectiveNow(config);
     }
 
     private LocalDateTime operationalDayStart(LocalDateTime now) {
-        SimulationConfig config = currentConfig();
+        return operationalDayStart(currentConfig(), now);
+    }
+
+    private LocalDateTime operationalDayStart(SimulationConfig config, LocalDateTime now) {
         LocalDateTime configuredStart = config == null ? null : config.getEffectiveScenarioStartAt();
 
         if (configuredStart == null) {
@@ -759,7 +854,24 @@ public class DashboardController {
     }
 
     private SimulationConfig currentConfig() {
-        return configRepository.findTopByOrderByIdAsc();
+        return configRepository.findLiveConfigOrFirst();
+    }
+
+    /** Config del runtime a mostrar: "sim" → fila PERIOD/COLLAPSE; cualquier otro → operación viva (id=1). */
+    private SimulationConfig currentConfig(String mode) {
+        if ("sim".equalsIgnoreCase(mode)) {
+            SimulationConfig sim = configRepository.findFirstByScenarioInAndIsRunningTrue(java.util.List.of(
+                    SimulationScenario.PERIOD_SIMULATION, SimulationScenario.COLLAPSE_TEST)).orElse(null);
+            if (sim != null) {
+                return sim;
+            }
+            sim = configRepository.findFirstByScenarioIn(java.util.List.of(
+                    SimulationScenario.PERIOD_SIMULATION, SimulationScenario.COLLAPSE_TEST)).orElse(null);
+            if (sim != null) {
+                return sim;
+            }
+        }
+        return currentConfig();
     }
 
     private boolean isPlanAheadScenario(SimulationConfig config) {
@@ -770,6 +882,18 @@ public class DashboardController {
         return config != null
                 && (config.getScenario() == SimulationScenario.PERIOD_SIMULATION
                     || config.getScenario() == SimulationScenario.COLLAPSE_TEST);
+    }
+
+    private double visibleFlightLoadPct(Flight flight, boolean planAhead) {
+        if (flight.getMaxCapacity() == null || flight.getMaxCapacity() <= 0) {
+            return 0.0;
+        }
+        int current = flight.getCurrentLoad() == null ? 0 : flight.getCurrentLoad();
+        if (!planAhead) {
+            return flight.getLoadPct();
+        }
+        int reserved = flight.getReservedLoad() == null ? 0 : flight.getReservedLoad();
+        return Math.min(100.0, (Math.max(current, reserved) * 100.0) / flight.getMaxCapacity());
     }
 
     private LocalDateTime activeVisibilityStart(SimulationConfig config, LocalDateTime fallbackNow) {
@@ -796,7 +920,7 @@ public class DashboardController {
     }
 
     private int[] getThresholds() {
-        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = configRepository.findLiveConfigOrFirst();
         return config == null ? new int[]{70, 90} : thresholdsFromConfig(config);
     }
 

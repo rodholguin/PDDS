@@ -28,7 +28,6 @@ public class OperationalBootstrapService {
     private final ShipmentOrchestratorService shipmentOrchestratorService;
     private final SimulationConfigRepository simulationConfigRepository;
     private final DataImportService dataImportService;
-    private final AlgorithmProfileService algorithmProfileService;
 
     @EventListener(ApplicationReadyEvent.class)
     public void bootstrap() {
@@ -39,12 +38,14 @@ public class OperationalBootstrapService {
     }
 
     private void ensureSimulationConfig() {
-        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = simulationConfigRepository.findFirstByScenario(SimulationScenario.DAY_TO_DAY).orElse(null);
         if (config == null) {
-            config = simulationConfigRepository.save(SimulationConfig.builder().build());
+            config = simulationConfigRepository.save(SimulationConfig.builder()
+                    .scenario(SimulationScenario.DAY_TO_DAY)
+                    .build());
         }
 
-        if (config.getScenario() == null) config.setScenario(SimulationScenario.DAY_TO_DAY);
+        config.setScenario(SimulationScenario.DAY_TO_DAY);
         if (config.getSimulationDays() == null) config.setSimulationDays(5);
         if (config.getExecutionMinutes() == null) config.setExecutionMinutes(60);
         if (config.getNormalThresholdPct() == null) config.setNormalThresholdPct(70);
@@ -65,8 +66,6 @@ public class OperationalBootstrapService {
         config.setPrimaryAlgorithm(AlgorithmType.GENETIC);
         config.setSecondaryAlgorithm(AlgorithmType.GENETIC);
         simulationConfigRepository.save(config);
-
-        algorithmProfileService.applyForPrimary(config.getPrimaryAlgorithm());
     }
 
     private void ensureRealDatasetLoaded() {

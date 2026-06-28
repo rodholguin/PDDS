@@ -21,8 +21,20 @@ public class SimulationRuntimeBootstrapService {
 
     @EventListener(ApplicationReadyEvent.class)
     public void rehydrateRuntimeIfNeeded() {
-        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = simulationConfigRepository.findFirstByScenario(com.tasfb2b.model.SimulationScenario.DAY_TO_DAY).orElse(null);
         if (config == null) {
+            return;
+        }
+
+        // DAY_TO_DAY es la operación EN VIVO (NO una simulación): no requiere arranque manual. Debe
+        // auto-arrancar aunque no exista ancla previa, usando la hora real cotidiana.
+        if (config.getScenario() == com.tasfb2b.model.SimulationScenario.DAY_TO_DAY) {
+            LocalDateTime now = LocalDateTime.now();
+            config.setRuntimeSimulatedNow(now);
+            config.setRuntimeLastTickAt(now);
+            config.setIsRunning(true);
+            simulationConfigRepository.save(config);
+            log.info("DAY_TO_DAY (operación en vivo) auto-arrancada en hora real {}", now);
             return;
         }
 

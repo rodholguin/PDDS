@@ -62,6 +62,17 @@ public class SimulationExportService {
     private List<String[]> buildRows(SimulationResultsDto results) {
         List<String[]> rows = new ArrayList<>();
         SimulationKpisDto kpis = results.kpis();
+        rows.add(new String[]{"scenario", value(results.scenario())});
+        rows.add(new String[]{"scenarioStartAt", value(results.scenarioStartAt())});
+        rows.add(new String[]{"scenarioEndAt", value(results.scenarioEndAt())});
+        rows.add(new String[]{"collapseDetectedAt", value(results.collapseDetectedAt())});
+        rows.add(new String[]{"collapseShipmentCode", value(results.collapseShipmentCode())});
+        rows.add(new String[]{"collapseSurvivalSeconds", String.valueOf(results.collapseSurvivalSeconds())});
+        rows.add(new String[]{"totalShipments", String.valueOf(results.totalShipments())});
+        rows.add(new String[]{"plannedShipments", String.valueOf(results.plannedShipments())});
+        rows.add(new String[]{"failedPlanningShipments", String.valueOf(results.failedPlanningShipments())});
+        rows.add(new String[]{"periodPlanningBacklog", String.valueOf(results.periodPlanningBacklog())});
+        rows.add(new String[]{"lastPlanningDurationMs", String.valueOf(results.lastPlanningDurationMs())});
         rows.add(new String[]{"benchmarkWinner", value(results.benchmarkWinner())});
         rows.add(new String[]{"deliveredOnTimePct", String.format("%.2f", kpis.deliveredOnTimePct())});
         rows.add(new String[]{"avgFlightOccupancyPct", String.format("%.2f", kpis.avgFlightOccupancyPct())});

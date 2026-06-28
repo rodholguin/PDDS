@@ -9,8 +9,29 @@ const SELECTED_FLOWN_SOURCE = 'trajectory-selected-flown';
 const SELECTED_REMAINING_SOURCE = 'trajectory-selected-remaining';
 const AIRPORT_INBOUND_FLOWN_SOURCE = 'trajectory-airport-inbound-flown';
 const AIRPORT_INBOUND_REMAINING_SOURCE = 'trajectory-airport-inbound-remaining';
+const ALL_REMAINING_SOURCE = 'trajectory-all-remaining';
 
 const EMPTY_FC: FeatureCollection<LineString> = { type: 'FeatureCollection', features: [] };
+
+// C31/C33/C34: tramo origen-destino de CADA vuelo activo. Dibujamos la porción
+// restante (posición actual → destino), que se acorta sola y desaparece al llegar
+// — equivalente a "la línea se borra luego de ser recorrida".
+function buildAllSegmentsFC(flights: MapLiveFlight[]): FeatureCollection<LineString> {
+  return {
+    type: 'FeatureCollection',
+    features: flights.map((f) => ({
+      type: 'Feature' as const,
+      geometry: {
+        type: 'LineString' as const,
+        coordinates: [
+          [f.currentLongitude, f.currentLatitude],
+          [f.destinationLongitude, f.destinationLatitude],
+        ],
+      },
+      properties: {},
+    })),
+  };
+}
 
 // Straight lat/lon segments — matches the linear interpolation the simulation
 // uses to move planes, so lines pass exactly through the plane icon.
@@ -109,9 +130,26 @@ function FlightTrajectoryLayerComponent({ selectedFlight, selectedAirportIcao, f
     () => buildAirportInboundRemainingFC(selectedAirportIcao, flights),
     [selectedAirportIcao, flights],
   );
+  const allSegmentsFC = useMemo(() => buildAllSegmentsFC(flights), [flights]);
 
   return (
     <>
+      {/* Tramo pendiente de cada vuelo activo (C34): línea punteada tenue, debajo de todo. */}
+      <Source id={ALL_REMAINING_SOURCE} type="geojson" data={allSegmentsFC}>
+        <Layer
+          id="trajectory-all-remaining-line"
+          type="line"
+          source={ALL_REMAINING_SOURCE}
+          layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+          paint={{
+            'line-color': '#5b6b8c',
+            'line-width': 1.4,
+            'line-opacity': 0.35,
+            'line-dasharray': [2, 4],
+          }}
+        />
+      </Source>
+
       {/* Airport selected: flown legs (origin → current), dashed blue */}
       <Source id={AIRPORT_INBOUND_FLOWN_SOURCE} type="geojson" data={airportFlownFC}>
         <Layer

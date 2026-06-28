@@ -50,6 +50,12 @@ public class RoutePlannerService {
     private final FlightScheduleService flightScheduleService;
     private final OperationalAlertService operationalAlertService;
 
+    private volatile long lastPlanningDurationMs = 0;
+
+    public long getLastPlanningDurationMs() {
+        return lastPlanningDurationMs;
+    }
+
     public RoutePlannerService(
             GeneticAlgorithm geneticAlgorithm,
             AntColonyOptimization antColonyOptimization,
@@ -166,51 +172,56 @@ public class RoutePlannerService {
                                           boolean recordPlanningAudit,
                                           boolean fastPlanningMode,
                                           PlanningContext planning) {
-        RouteOptimizer optimizer = resolveOptimizer(algorithmName);
+        long startNanos = System.nanoTime();
+        try {
+            RouteOptimizer optimizer = resolveOptimizer(algorithmName);
 
-        List<TravelStop> stops;
-        CandidatePlan selected;
-        if (fastPlanningMode) {
-            selected = selectBootstrapCandidate(shipment, planning);
-            stops = selected.stops();
-        } else {
-            CandidatePlan gaCandidate = planning.fastPathCandidate() != null
-                    ? new CandidatePlan("MULTI_HOP_SKIPPED", List.of(), Double.POSITIVE_INFINITY, null, null)
-                    : evaluateCandidate(shipment, "MULTI_HOP", optimizer.planRouteFromCandidates(shipment, planning.candidateFlights(), airports));
-            selected = planning.fastPathCandidate() != null
-                    ? planning.fastPathCandidate()
-                    : selectBestCandidate(planning.directCandidate(), gaCandidate);
-            stops = selected.stops();
-        }
+            List<TravelStop> stops;
+            CandidatePlan selected;
+            if (fastPlanningMode) {
+                selected = selectBootstrapCandidate(shipment, planning);
+                stops = selected.stops();
+            } else {
+                CandidatePlan gaCandidate = planning.fastPathCandidate() != null
+                        ? new CandidatePlan("MULTI_HOP_SKIPPED", List.of(), Double.POSITIVE_INFINITY, null, null)
+                        : evaluateCandidate(shipment, "MULTI_HOP", optimizer.planRouteFromCandidates(shipment, planning.candidateFlights(), airports));
+                selected = planning.fastPathCandidate() != null
+                        ? planning.fastPathCandidate()
+                        : selectBestCandidate(planning.directCandidate(), gaCandidate);
+                stops = selected.stops();
+            }
 
-        if (stops.isEmpty()) {
-            shipment.setStatus(ShipmentStatus.CRITICAL);
+            if (stops.isEmpty()) {
+                shipment.setStatus(ShipmentStatus.CRITICAL);
+                shipment.setProgressPercentage(0.0);
+                shipmentRepository.save(shipment);
+                operationalAlertService.ensureShipmentAlert(shipment, "NO_ROUTE", "No se encontró ruta factible para el envío");
+                return stops;
+            }
+
+            stops.forEach(stop -> stop.setShipment(shipment));
+            travelStopRepository.saveAll(stops);
+
+            allocateFlightLoads(shipment, stops, persistFlightLoadImmediately);
+
+            shipment.setStatus(ShipmentStatus.PENDING);
             shipment.setProgressPercentage(0.0);
             shipmentRepository.save(shipment);
-            operationalAlertService.ensureShipmentAlert(shipment, "NO_ROUTE", "No se encontró ruta factible para el envío");
+
+            if (recordPlanningAudit) {
+                shipmentAuditService.log(
+                        shipment,
+                        ShipmentAuditType.ROUTE_PLANNED,
+                        buildPlanningMessage(algorithmName, selected),
+                        shipment.getOriginAirport(),
+                        null
+                );
+            }
+
             return stops;
+        } finally {
+            lastPlanningDurationMs = (System.nanoTime() - startNanos) / 1_000_000;
         }
-
-        stops.forEach(stop -> stop.setShipment(shipment));
-        travelStopRepository.saveAll(stops);
-
-        allocateFlightLoads(shipment, stops, persistFlightLoadImmediately);
-
-        shipment.setStatus(ShipmentStatus.PENDING);
-        shipment.setProgressPercentage(0.0);
-        shipmentRepository.save(shipment);
-
-        if (recordPlanningAudit) {
-            shipmentAuditService.log(
-                    shipment,
-                    ShipmentAuditType.ROUTE_PLANNED,
-                    buildPlanningMessage(algorithmName, selected),
-                    shipment.getOriginAirport(),
-                    null
-            );
-        }
-
-        return stops;
     }
 
     @Transactional(readOnly = true)
@@ -487,7 +498,10 @@ public class RoutePlannerService {
                 .count();
 
         double criticalFraction = (double) criticalCount / airports.size();
-        long activeShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.PENDING, ShipmentStatus.IN_ROUTE));
+        // Solo IN_ROUTE (en tránsito) cuenta como "activo". Antes incluía PENDING, que con plan-ahead son
+        // los ~9.1M envíos FUTUROS aún sin procesar → COUNT lentísimo (~5-15s, escalaba con el dataset) que
+        // hacía el endpoint /collapse-risk inservible y saturaba el pool. IN_ROUTE está acotado e indexado.
+        long activeShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.IN_ROUTE));
         long problematicShipments = shipmentRepository.countByStatusIn(List.of(ShipmentStatus.CRITICAL, ShipmentStatus.DELAYED));
         double problematicFraction = activeShipments == 0
                 ? 0.0
@@ -600,7 +614,7 @@ public class RoutePlannerService {
         if (cached != null && (System.nanoTime() - cachedConfigAtNanos) < CONFIG_CACHE_TTL_NANOS) {
             return cached;
         }
-        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = configRepository.findLiveConfigOrFirst();
         if (config == null) {
             config = configRepository.save(SimulationConfig.builder().build());
         }

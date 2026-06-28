@@ -12,8 +12,10 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # NEXT_PUBLIC_* se hornea en el bundle; debe pasarse en build-time.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8080
+ARG NEXT_PUBLIC_API_URL=
+ARG INTERNAL_API_URL=http://backend:8080
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV INTERNAL_API_URL=$INTERNAL_API_URL
 
 RUN npm run build
 
@@ -24,6 +26,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+ENV INTERNAL_API_URL=http://backend:8080
 
 RUN addgroup -S nextjs && adduser -S nextjs -G nextjs
 

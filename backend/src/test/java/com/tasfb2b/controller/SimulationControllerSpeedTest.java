@@ -5,10 +5,8 @@ import com.tasfb2b.dto.SimulationTimeModeDto;
 import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.repository.ShipmentRepository;
 import com.tasfb2b.repository.SimulationConfigRepository;
-import com.tasfb2b.service.AlgorithmProfileService;
-import com.tasfb2b.service.AlgorithmRaceService;
+import com.tasfb2b.repository.TravelStopRepository;
 import com.tasfb2b.service.CollapseMonitorService;
-import com.tasfb2b.service.FutureDemandProjectionService;
 import com.tasfb2b.service.OperationalBootstrapService;
 import com.tasfb2b.service.FlightScheduleService;
 import com.tasfb2b.service.RoutePlannerService;
@@ -46,14 +44,12 @@ class SimulationControllerSpeedTest {
     @MockBean private RoutePlannerService routePlannerService;
     @MockBean private CollapseMonitorService collapseMonitorService;
     @MockBean private ShipmentRepository shipmentRepository;
+    @MockBean private TravelStopRepository travelStopRepository;
     @MockBean private SimulationRuntimeService runtimeService;
-    @MockBean private AlgorithmRaceService algorithmRaceService;
     @MockBean private OperationalBootstrapService operationalBootstrapService;
     @MockBean private SimulationExportService simulationExportService;
     @MockBean private SimulationEngineService simulationEngineService;
-    @MockBean private AlgorithmProfileService algorithmProfileService;
     @MockBean private FlightScheduleService flightScheduleService;
-    @MockBean private FutureDemandProjectionService futureDemandProjectionService;
     @MockBean private SimulationAsyncOperationsService simulationAsyncOperationsService;
     @MockBean private PeriodSimulationBootstrapService periodSimulationBootstrapService;
     @MockBean private WarmupService warmupService;
@@ -82,10 +78,11 @@ class SimulationControllerSpeedTest {
                 25,
                 10,
                 25,
-                null,
-                null,
-                null,
-                false,
+                 null,
+                 null,
+                 null,
+                 null,
+                 false,
                 null,
                 false,
                 null,
@@ -101,8 +98,11 @@ class SimulationControllerSpeedTest {
                 20,
                 SimulationTimeModeDto.REAL_TIME,
                 1L,
-                1L,
                 1_000L,
+                300L,
+                1L,
+                300L,
+                1L,
                 0L,
                 0L,
                 0L,
@@ -119,6 +119,7 @@ class SimulationControllerSpeedTest {
                 0L,
                 0L,
                 null,
+                0L,
                 0L,
                 0L,
                 null,

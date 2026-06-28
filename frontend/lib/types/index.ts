@@ -1,5 +1,5 @@
 export type Continent = 'AMERICA' | 'EUROPE' | 'ASIA';
-export type AirportStatus = 'NORMAL' | 'ALERTA' | 'CRITICO';
+export type AirportStatus = 'SIN_USO' | 'NORMAL' | 'ALERTA' | 'CRITICO';
 export type FlightStatus = 'SCHEDULED' | 'IN_FLIGHT' | 'COMPLETED' | 'CANCELLED';
 export type ShipmentStatus = 'PENDING' | 'IN_ROUTE' | 'DELIVERED' | 'DELAYED' | 'CRITICAL';
 export type StopStatus = 'PENDING' | 'IN_TRANSIT' | 'COMPLETED';
@@ -20,6 +20,8 @@ export interface Airport {
   currentStorageLoad: number;
   occupancyPct: number;
   status: AirportStatus;
+  /** Huso horario del aeropuerto (offset en horas vs UTC). Para mostrar la hora local en el data-entry. */
+  gmtOffset?: number;
 }
 
 export interface Flight {
@@ -233,6 +235,9 @@ export interface SimulationState {
   timeMode: SimulationTimeMode;
   simulationSecondsPerTick: number;
   tickIntervalMs: number;
+  planningIntervalSeconds: number;
+  consumptionK: number;
+  consumptionWindowSeconds: number;
   effectiveSpeed: number;
   replannings: number;
   injectedEvents: number;
@@ -250,6 +255,7 @@ export interface SimulationState {
   periodPlanningLastBatchFailed: number;
   periodPlanningLastBatchElapsedMs: number;
   periodPlanningLastBatchAt: string | null;
+  lastPlanningDurationMs: number;
   periodTickWaitCount: number;
   periodTickLastElapsedMs: number;
   periodTickLastWaitAt: string | null;
@@ -292,6 +298,22 @@ export interface SimulationResults {
   algorithms: Record<string, OptimizationResult>;
   kpis: SimulationKpis;
   benchmarkWinner: string;
+  scenario?: string;
+  scenarioStartAt?: string;
+  scenarioEndAt?: string;
+  collapseDetectedAt?: string;
+  collapseShipmentCode?: string;
+  collapseSurvivalSeconds?: number;
+  totalShipments?: number;
+  plannedShipments?: number;
+  failedPlanningShipments?: number;
+  activeShipments?: number;
+  delayedShipments?: number;
+  criticalShipments?: number;
+  avgNodeOccupancyPct?: number;
+  periodPlanningBacklog?: number;
+  lastPlanningDurationMs?: number;
+  replannings?: number;
 }
 
 export interface DataImportLog {
@@ -309,35 +331,6 @@ export interface DatasetImportResult {
   message: string;
   airports: DataImportLog;
   flights: DataImportLog;
-}
-
-export interface BenchmarkJobState {
-  jobId: string;
-  status: 'RUNNING' | 'DONE' | 'FAILED' | 'IDLE';
-  message: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  result: {
-    generatedRows: number;
-    createdShipments: number;
-    winner: string;
-    sampleSize: number;
-    results: Record<string, OptimizationResult>;
-    scenarios: Array<{
-      scenario: string;
-      createdShipments: number;
-      cancelledFlights: number;
-      replannings: number;
-      sampleSize: number;
-      winner: string;
-    }>;
-    confidence?: {
-      winner: string;
-      ci95Low: number;
-      ci95High: number;
-      deltaVsRunnerUp: number;
-    };
-  } | null;
 }
 
 export interface EnviosImportResult {
@@ -360,30 +353,6 @@ export interface EnviosImportJobState {
   startedAt: string | null;
   finishedAt: string | null;
   result: EnviosImportResult | null;
-}
-
-export interface DemandGenerationResult {
-  scenario: string;
-  requested: number;
-  created: number;
-  failed: number;
-  seed: number;
-  startedAt: string;
-  finishedAt: string;
-}
-
-export interface FutureDemandGenerationResult {
-  historicalFrom: string;
-  historicalTo: string;
-  projectionStart: string;
-  projectionEnd: string;
-  generatedRows: number;
-  deletedRows: number;
-  noisePct: number;
-  randomSeed: number;
-  projectedDemandReady: boolean;
-  startedAt: string;
-  finishedAt: string;
 }
 
 export interface DatasetStatus {
@@ -436,6 +405,8 @@ export interface DashboardOverview {
   avgCommittedHours: number;
   avgDeliveryDeltaHours: number;
   replanningsToday: number;
+  avgFlightOccupancyPct: number;
+  avgNodeOccupancyPct: number;
 }
 
 export interface RouteNetworkEdge {
@@ -499,7 +470,10 @@ export interface MapLiveFlight {
   originLongitude: number;
   destinationLatitude: number;
   destinationLongitude: number;
+  scheduledDeparture: string | null;
+  scheduledArrival: string | null;
   loadPct: number;
+  status: FlightStatus;
 }
 
 export interface FlightShipmentAssignment {

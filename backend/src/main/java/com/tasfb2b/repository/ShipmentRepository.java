@@ -2,8 +2,9 @@ package com.tasfb2b.repository;
 
 import com.tasfb2b.model.Airport;
 import com.tasfb2b.model.Shipment;
+import com.tasfb2b.model.ShipmentSource;
 import com.tasfb2b.model.ShipmentStatus;
-import com.tasfb2b.repository.projection.FutureRouteBaselineRow;
+
 import com.tasfb2b.repository.projection.ShipmentSummaryRow;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -33,6 +34,20 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
 
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
     Optional<Shipment> findByShipmentCode(String shipmentCode);
+
+    // ── DAY_TO_DAY: separación por origen del envío (LIVE = operación en vivo; HISTORICAL = dataset) ──
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> findBySource(ShipmentSource source, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    Page<Shipment> findBySourceAndStatus(ShipmentSource source, ShipmentStatus status, Pageable pageable);
+
+    boolean existsBySource(ShipmentSource source);
+
+    /** Borra todos los envíos de un origen (DAY_TO_DAY borra los LIVE en su reset, deja los HISTORICAL). */
+    @Modifying
+    @Query("DELETE FROM Shipment s WHERE s.source = :source")
+    int deleteBySource(@Param("source") ShipmentSource source);
 
     /**
      * findById que ADEMÁS trae origen y destino en una sola query (evita 2 lazy-loads por envío en el
@@ -76,18 +91,38 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
      * entregado tarde. Se usa para detectar el "colapso" en el escenario COLLAPSE_TEST.
      * Llamar con {@code PageRequest.of(0, 1)} para obtener solo el primero.
      */
-    @Query("""
-            SELECT s FROM Shipment s
-            WHERE s.deadline IS NOT NULL
-              AND s.registrationDate >= :scenarioStart
-              AND s.deadline <= :horizon
-              AND (s.status NOT IN ('DELIVERED')
-                   OR (s.deliveredAt IS NOT NULL AND s.deliveredAt > s.deadline))
-            ORDER BY s.deadline ASC
-            """)
-    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    @Query(value = """
+            SELECT *
+            FROM shipment s
+            CROSS JOIN LATERAL (
+                SELECT CASE
+                    WHEN s.is_inter_continental THEN s.registration_date + interval '2 days'
+                    ELSE s.registration_date + interval '1 day'
+                END AS effective_deadline
+            ) dl
+            WHERE s.registration_date IS NOT NULL
+              AND s.registration_date >= :scenarioStart
+              AND s.registration_date < :planningCoveredThrough
+              AND dl.effective_deadline <= :horizon
+              AND (
+                   (s.delivered_at IS NOT NULL AND s.delivered_at > dl.effective_deadline)
+                   OR (s.status = 'CRITICAL' AND NOT EXISTS (
+                        SELECT 1
+                        FROM travel_stop ts
+                        WHERE ts.shipment_id = s.id
+                   ))
+                   OR EXISTS (
+                        SELECT 1
+                        FROM travel_stop ts
+                        WHERE ts.shipment_id = s.id
+                          AND ts.scheduled_arrival > dl.effective_deadline
+                   )
+              )
+            ORDER BY dl.effective_deadline ASC, s.registration_date ASC, s.id ASC
+            """, nativeQuery = true)
     List<Shipment> findFirstLateShipment(@Param("scenarioStart") LocalDateTime scenarioStart,
                                          @Param("horizon") LocalDateTime horizon,
+                                         @Param("planningCoveredThrough") LocalDateTime planningCoveredThrough,
                                          Pageable pageable);
 
     /** Envíos que pasan por un aeropuerto (como origen o destino). */
@@ -408,6 +443,20 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     List<Shipment> findInRouteSince(@Param("from") LocalDateTime from);
 
     @Query("""
+            SELECT DISTINCT s FROM TravelStop ts
+            JOIN ts.shipment s
+            JOIN ts.flight f
+            WHERE f.scheduledDeparture <= :now
+              AND f.scheduledArrival > :now
+              AND f.scheduledDeparture >= :from
+              AND f.status <> 'CANCELLED'
+            ORDER BY s.registrationDate ASC
+            """)
+    @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
+    List<Shipment> findPlannedInRouteSince(@Param("now") LocalDateTime now,
+                                           @Param("from") LocalDateTime from);
+
+    @Query("""
             SELECT s FROM Shipment s
             WHERE s.status = 'IN_ROUTE'
               AND s.registrationDate >= :from
@@ -527,6 +576,38 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             """, nativeQuery = true)
     long countPendingWithoutRouteForPlanningInWindow(@Param("windowStart") LocalDateTime windowStart,
                                                      @Param("windowEnd") LocalDateTime windowEnd);
+
+    // ── DAY_TO_DAY (operación EN VIVO): planifican SOLO envíos LIVE ─────────────────────────────────
+    // El path live planifica PENDING-sin-ruta en la ventana del día; sin filtro de source engancharía los
+    // HISTORICAL registrados "hoy" (el dataset cubre la fecha real) y los metería en la operación, saturando
+    // la VM. DAY_TO_DAY opera SOLO los LIVE.
+    @Query(value = """
+            SELECT s.* FROM shipment s
+            WHERE s.status = 'PENDING' AND s.source = 'LIVE' AND s.registration_date <= :horizon
+              AND NOT EXISTS (SELECT 1 FROM travel_stop ts WHERE ts.shipment_id = s.id)
+            ORDER BY s.registration_date ASC LIMIT :batchSize
+            """, nativeQuery = true)
+    List<Shipment> findPendingLiveWithoutRoute(@Param("horizon") LocalDateTime horizon, @Param("batchSize") int batchSize);
+
+    @Query(value = """
+            SELECT s.* FROM shipment s
+            WHERE s.status = 'PENDING' AND s.source = 'LIVE'
+              AND s.registration_date >= :windowStart AND s.registration_date <= :windowEnd
+              AND NOT EXISTS (SELECT 1 FROM travel_stop ts WHERE ts.shipment_id = s.id)
+            ORDER BY s.registration_date ASC LIMIT :batchSize
+            """, nativeQuery = true)
+    List<Shipment> findPendingLiveWithoutRouteInWindow(@Param("windowStart") LocalDateTime windowStart,
+                                                       @Param("windowEnd") LocalDateTime windowEnd,
+                                                       @Param("batchSize") int batchSize);
+
+    @Query(value = """
+            SELECT COUNT(*) FROM shipment s
+            WHERE s.status = 'PENDING' AND s.source = 'LIVE'
+              AND s.registration_date >= :windowStart AND s.registration_date < :windowEnd
+              AND NOT EXISTS (SELECT 1 FROM travel_stop ts WHERE ts.shipment_id = s.id)
+            """, nativeQuery = true)
+    long countPendingLiveWithoutRouteInWindow(@Param("windowStart") LocalDateTime windowStart,
+                                              @Param("windowEnd") LocalDateTime windowEnd);
 
     @Query(value = """
             SELECT s.*
@@ -653,6 +734,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             UPDATE Shipment s
             SET s.status = 'DELAYED'
             WHERE s.status IN ('PENDING', 'IN_ROUTE')
+              AND s.source = :source
               AND s.deadline IS NOT NULL
               AND s.deadline < :now
               AND EXISTS (
@@ -660,7 +742,8 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                     WHERE ts.shipment = s
               )
             """)
-    int markActiveAsDelayedBefore(@Param("now") LocalDateTime now);
+    int markActiveAsDelayedBeforeBySource(@Param("now") LocalDateTime now,
+                                          @Param("source") ShipmentSource source);
 
     @Query("""
             SELECT s FROM Shipment s
@@ -675,6 +758,7 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
     @Query("""
             SELECT s FROM Shipment s
             WHERE s.status = 'DELAYED'
+              AND s.source = :source
               AND s.deadline IS NOT NULL
               AND s.deadline < :now
               AND NOT EXISTS (
@@ -686,27 +770,11 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
             ORDER BY s.deadline ASC
             """)
     @EntityGraph(attributePaths = {"originAirport", "destinationAirport"})
-    List<Shipment> findDelayedOverdueShipmentsWithoutActiveAlert(@Param("now") LocalDateTime now,
+    List<Shipment> findDelayedOverdueShipmentsWithoutActiveAlertBySource(@Param("now") LocalDateTime now,
+                                                                 @Param("source") ShipmentSource source,
                                                                  @Param("type") String type,
                                                                  @Param("statuses") List<com.tasfb2b.model.OperationalAlertStatus> statuses,
                                                                  Pageable pageable);
-
-    @Query(value = """
-            SELECT
-              UPPER(o.icao_code) AS originIcao,
-              UPPER(d.icao_code) AS destinationIcao,
-              EXTRACT(ISODOW FROM s.registration_date)::int AS isoDow,
-              COUNT(*) AS shipmentCount,
-              COALESCE(AVG(s.luggage_count), 0) AS avgLuggage
-            FROM shipment s
-            JOIN airport o ON o.id = s.origin_airport_id
-            JOIN airport d ON d.id = s.destination_airport_id
-            WHERE s.registration_date >= :fromTs
-              AND s.registration_date < :toTs
-            GROUP BY UPPER(o.icao_code), UPPER(d.icao_code), EXTRACT(ISODOW FROM s.registration_date)
-            """, nativeQuery = true)
-    List<FutureRouteBaselineRow> aggregateFutureBaseline(@Param("fromTs") LocalDateTime fromTs,
-                                                         @Param("toTs") LocalDateTime toTs);
 
     @Query("""
             SELECT s FROM Shipment s
@@ -738,6 +806,37 @@ public interface ShipmentRepository extends JpaRepository<Shipment, Long> {
                OR s.deliveredAt IS NOT NULL
             """)
     int resetAllToInitialState();
+
+    /** Reset acotado por source: la simulación resetea solo HISTORICAL; la operación viva (LIVE) queda intacta. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            UPDATE Shipment s
+            SET s.status = 'PENDING',
+                s.progressPercentage = 0.0,
+                s.deliveredAt = null
+            WHERE s.source = :source
+              AND (s.status <> 'PENDING'
+               OR s.progressPercentage <> 0.0
+               OR s.deliveredAt IS NOT NULL)
+            """)
+    int resetToInitialStateBySource(@Param("source") ShipmentSource source);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            UPDATE shipment
+            SET status = 'PENDING',
+                progress_percentage = 0.0,
+                delivered_at = NULL
+            WHERE source = :source
+              AND registration_date >= :from
+              AND registration_date < :to
+              AND (status <> 'PENDING'
+               OR progress_percentage <> 0.0
+               OR delivered_at IS NOT NULL)
+            """, nativeQuery = true)
+    int resetToInitialStateBySourceAndRegistrationBetween(@Param("source") String source,
+                                                          @Param("from") LocalDateTime from,
+                                                          @Param("to") LocalDateTime to);
 
     @Query(value = """
             SELECT COALESCE(MAX(CAST(SUBSTRING(s.shipment_code FROM '[0-9]+$') AS BIGINT)), 0)

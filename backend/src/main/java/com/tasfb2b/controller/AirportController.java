@@ -107,7 +107,7 @@ public class AirportController {
 
     /** Retorna [normalThresholdPct, warningThresholdPct] desde SimulationConfig. */
     private int[] getThresholds() {
-        var config = configRepository.findTopByOrderByIdAsc();
+        var config = configRepository.findLiveConfigOrFirst();
         return config == null ? new int[]{70, 90} : new int[]{config.getNormalThresholdPct(), config.getWarningThresholdPct()};
     }
 }

@@ -48,7 +48,8 @@ services:
       dockerfile: Dockerfile
       args:
         # NEXT_PUBLIC_* se hornea en el bundle en tiempo de build.
-        NEXT_PUBLIC_API_URL: https://1inf54-984-3c.inf.pucp.edu.pe
+        # Para desarrollo local: docker compose build --build-arg NEXT_PUBLIC_API_URL=http://localhost:8081 frontend
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     container_name: tasfb2b-frontend
     restart: unless-stopped
     depends_on:

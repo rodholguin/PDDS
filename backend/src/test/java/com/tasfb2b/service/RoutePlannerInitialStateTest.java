@@ -118,11 +118,10 @@ class RoutePlannerInitialStateTest {
 
         when(antColonyOptimization.getAlgorithmName()).thenReturn("Ant Colony Optimization");
         when(simulatedAnnealingOptimization.getAlgorithmName()).thenReturn("Simulated Annealing");
-        when(geneticAlgorithm.planRoute(any(), anyList(), anyList())).thenReturn(List.of(originStop, destinationStop));
         SimulationConfig config = new SimulationConfig();
         config.setNormalThresholdPct(70);
         config.setWarningThresholdPct(90);
-        when(configRepository.findTopByOrderByIdAsc()).thenReturn(config);
+        when(configRepository.findLiveConfigOrFirst()).thenReturn(config);
         when(travelStopRepository.saveAll(anyList())).thenAnswer(invocation -> invocation.getArgument(0));
         when(shipmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 

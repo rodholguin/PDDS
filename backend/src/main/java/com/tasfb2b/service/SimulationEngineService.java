@@ -5,6 +5,7 @@ import com.tasfb2b.model.Flight;
 import com.tasfb2b.model.FlightStatus;
 import com.tasfb2b.model.Shipment;
 import com.tasfb2b.model.ShipmentAuditType;
+import com.tasfb2b.model.ShipmentSource;
 import com.tasfb2b.model.ShipmentStatus;
 import com.tasfb2b.model.SimulationConfig;
 import com.tasfb2b.model.SimulationScenario;
@@ -32,6 +33,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public class SimulationEngineService {
 
     private static final Logger log = LoggerFactory.getLogger(SimulationEngineService.class);
+    private static final Duration COLLAPSE_SCAN_STEP = Duration.ofDays(1);
 
     private final SimulationConfigRepository simulationConfigRepository;
     private final FlightRepository flightRepository;
@@ -43,6 +45,9 @@ public class SimulationEngineService {
     private final TransactionTemplate transactionTemplate;
     private final AtomicLong tickSequence = new AtomicLong();
     private final AtomicLong nextEligibleTickAtMs = new AtomicLong(0L);
+    // Elegibilidad POR-CONFIG: cada runtime (LIVE id=1 / SIM id=2) marca su próximo tick a su propio ritmo.
+    private final java.util.concurrent.ConcurrentHashMap<Long, Long> nextEligibleByConfigId = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.concurrent.ConcurrentHashMap<Long, LocalDateTime> collapseCheckedThroughByConfigId = new java.util.concurrent.ConcurrentHashMap<>();
     private final java.util.concurrent.atomic.AtomicBoolean tickInProgress = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public SimulationEngineService(
@@ -106,26 +111,31 @@ public class SimulationEngineService {
         if (!tickInProgress.compareAndSet(false, true)) {
             return;
         }
-        SimulationConfig config = getConfig();
         try {
-            if (!Boolean.TRUE.equals(config.getIsRunning()) || runtimeService.isPaused() || runtimeService.isResetting()) {
+            if (runtimeService.isPaused() || runtimeService.isResetting()) {
                 return;
             }
-
-            LocalDateTime now = LocalDateTime.now();
-            long tickIntervalMs = runtimeService.tickIntervalMs(config);
+            // Procesa TODOS los runtimes en curso: la operación viva (DAY_TO_DAY) y, si está activa, una
+            // simulación (PERIOD/COLLAPSE) — concurrentes. Cada uno con su propio reloj (su fila) y su
+            // propio ritmo; el source-scoping de executeTick los mantiene sin pisarse.
+            List<SimulationConfig> running = simulationConfigRepository.findByIsRunningTrue();
             long nowMs = System.currentTimeMillis();
-            long nextEligibleAt = nextEligibleTickAtMs.get();
-            if (nextEligibleAt > nowMs) {
-                return;
-            }
-            nextEligibleTickAtMs.set(nowMs + tickIntervalMs);
-
-            long startedAt = nowMs;
-            transactionTemplate.executeWithoutResult(status -> executeTick(config));
-            long elapsedMs = System.currentTimeMillis() - startedAt;
-            if (elapsedMs > tickIntervalMs) {
-                log.warn("Tick de simulación tardó {} ms en escenario {} (intervalo objetivo={} ms)", elapsedMs, config.getScenario(), tickIntervalMs);
+            for (SimulationConfig config : running) {
+                if (config.getId() == null) {
+                    continue;
+                }
+                long tickIntervalMs = runtimeService.tickIntervalMs(config);
+                long nextEligibleAt = nextEligibleByConfigId.getOrDefault(config.getId(), 0L);
+                if (nextEligibleAt > nowMs) {
+                    continue;
+                }
+                nextEligibleByConfigId.put(config.getId(), nowMs + tickIntervalMs);
+                long startedAt = System.currentTimeMillis();
+                transactionTemplate.executeWithoutResult(status -> executeTick(config));
+                long elapsedMs = System.currentTimeMillis() - startedAt;
+                if (elapsedMs > tickIntervalMs) {
+                    log.warn("Tick tardó {} ms en escenario {} (objetivo={} ms)", elapsedMs, config.getScenario(), tickIntervalMs);
+                }
             }
         } finally {
             tickInProgress.set(false);
@@ -139,6 +149,8 @@ public class SimulationEngineService {
     public void resetTickSequence() {
         tickSequence.set(0L);
         nextEligibleTickAtMs.set(0L);
+        nextEligibleByConfigId.clear();
+        collapseCheckedThroughByConfigId.clear();
     }
 
     public void executeHeadlessTick(SimulationConfig config) {
@@ -147,10 +159,21 @@ public class SimulationEngineService {
 
     void executeTick(SimulationConfig config) {
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime simulatedNow = runtimeService.currentSimulationTime().orElseGet(() -> resolveInitialSimulationTime(now));
+        LocalDateTime simulatedNow = runtimeService.currentSimulationTime(config).orElseGet(() -> resolveInitialSimulationTime(now, config));
         long secondsAdvance = runtimeService.simulationSecondsPerTick(config);
-        LocalDateTime horizon = simulatedNow.plusSeconds(secondsAdvance);
+        // DAY_TO_DAY (operación EN VIVO): el horizonte = hora real AHORA → procesa hasta el presente,
+        // cubriendo el tiempo transcurrido desde el último tick (reloj interno = hora cotidiana). Los
+        // demás escenarios (COLLAPSE/PERIOD) avanzan por secondsAdvance como antes.
+        LocalDateTime horizon = config.getScenario() == SimulationScenario.DAY_TO_DAY
+                ? now
+                : simulatedNow.plusSeconds(secondsAdvance);
         LocalDateTime periodEnd = resolvePeriodEnd(config);
+        if (periodEnd != null && !simulatedNow.isBefore(periodEnd)) {
+            runtimeService.setSimulationTime(config, periodEnd);
+            runtimeService.stopSimulationOnly(config);
+            log.info("Simulacion finalizada automaticamente en {}", periodEnd);
+            return;
+        }
         LocalDateTime effectiveHorizon = periodEnd != null && horizon.isAfter(periodEnd) ? periodEnd : horizon;
         LocalDateTime planningHorizon = effectiveHorizon;
         // Plan-ahead guard (PERIOD_SIMULATION y COLLAPSE_TEST): el reloj no adelanta más allá de lo
@@ -159,33 +182,64 @@ public class SimulationEngineService {
         if (config.getScenario() == SimulationScenario.PERIOD_SIMULATION
                 || config.getScenario() == SimulationScenario.COLLAPSE_TEST) {
             LocalDateTime plannedThrough = runtimeService.periodPlannedThrough().orElse(null);
-            if (plannedThrough != null && plannedThrough.isBefore(effectiveHorizon)) {
-                runtimeService.recordPeriodTickWait(effectiveHorizon, plannedThrough);
-                log.info("Tick plan-ahead en espera: escenario={} horizon={} plannedThrough={}", config.getScenario(), effectiveHorizon, plannedThrough);
+            if (plannedThrough == null) {
+                LocalDateTime waitFrontier = config.getEffectiveScenarioStartAt() != null
+                        ? config.getEffectiveScenarioStartAt()
+                        : config.getScenarioStartAt();
+                runtimeService.recordPeriodTickWait(effectiveHorizon, waitFrontier);
+                log.info("Tick plan-ahead en espera: escenario={} horizon={} plannedThrough=null", config.getScenario(), effectiveHorizon);
                 return;
+            }
+            if (plannedThrough != null
+                    && plannedThrough.isBefore(effectiveHorizon)
+                    && (periodEnd == null || effectiveHorizon.isBefore(periodEnd))) {
+                if (config.getScenario() == SimulationScenario.COLLAPSE_TEST) {
+                    if (config.getCollapseDetectedAtSim() == null
+                            && detectCollapse(config, effectiveHorizon, plannedThrough)) {
+                        return;
+                    }
+                }
+
+                if (!plannedThrough.isAfter(simulatedNow)) {
+                    if (simulatedNow.isAfter(plannedThrough)) {
+                        runtimeService.setSimulationTime(config, plannedThrough);
+                    }
+                    runtimeService.recordPeriodTickWait(effectiveHorizon, plannedThrough);
+                    log.info("Tick plan-ahead en espera: escenario={} horizon={} plannedThrough={}", config.getScenario(), effectiveHorizon, plannedThrough);
+                    return;
+                }
+
+                effectiveHorizon = plannedThrough;
+                planningHorizon = plannedThrough;
             }
         }
 
         long tickStartedAt = System.nanoTime();
-        reconcileFlightStates(simulatedNow, effectiveHorizon);
-        long afterReconcile = System.nanoTime();
-        // Procesar TODAS las piernas que caen dentro del salto de reloj. A alta velocidad un envío
-        // multi-tramo puede recorrer varias piernas en un mismo salto; cada iteración avanza una pierna
-        // (activa el tramo cuyo previo ya terminó + cierra los que arribaron). Se repite mientras haya
-        // progreso, con cota de seguridad para no bloquear el tick.
-        for (int legPass = 0; legPass < 50; legPass++) {
-            int activated = activateFlights(simulatedNow, effectiveHorizon);
-            int completed = closeFlightsAndAdvanceStops(simulatedNow, effectiveHorizon);
-            if (activated + completed == 0) {
-                break;
+        boolean planAheadScenario = config.getScenario() == SimulationScenario.PERIOD_SIMULATION
+                || config.getScenario() == SimulationScenario.COLLAPSE_TEST;
+        long afterReconcile;
+        long afterActivate;
+        if (planAheadScenario) {
+            afterReconcile = System.nanoTime();
+            afterActivate = afterReconcile;
+        } else {
+            reconcileFlightStates(simulatedNow, effectiveHorizon);
+            afterReconcile = System.nanoTime();
+            ShipmentSource scope = ShipmentSource.LIVE;
+            for (int legPass = 0; legPass < 50; legPass++) {
+                int activated = activateFlights(simulatedNow, effectiveHorizon, scope);
+                int completed = closeFlightsAndAdvanceStops(simulatedNow, effectiveHorizon, scope);
+                if (activated + completed == 0) {
+                    break;
+                }
             }
+            afterActivate = System.nanoTime();
         }
-        long afterActivate = System.nanoTime();
         long afterClose = afterActivate;
 
-        runtimeService.setSimulationTime(effectiveHorizon);
+        runtimeService.setSimulationTime(config, effectiveHorizon);
         long afterSetTime = System.nanoTime();
-        runtimeService.markTick(effectiveHorizon);
+        runtimeService.markTick(config, effectiveHorizon);
         long afterMarkTick = System.nanoTime();
 
         long totalTickMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(afterMarkTick - tickStartedAt);
@@ -209,12 +263,12 @@ public class SimulationEngineService {
         // Colapso (COLLAPSE_TEST): si el primer envío ya no llega a tiempo, registrar y detener.
         if (config.getScenario() == SimulationScenario.COLLAPSE_TEST
                 && config.getCollapseDetectedAtSim() == null
-                && detectCollapse(config, effectiveHorizon)) {
+                && detectCollapse(config, effectiveHorizon, runtimeService.periodPlannedThrough().orElse(effectiveHorizon))) {
             return;
         }
 
         if (periodEnd != null && !effectiveHorizon.isBefore(periodEnd)) {
-            runtimeService.stopSimulationOnly();
+            runtimeService.stopSimulationOnly(config);
             log.info("Simulacion de periodo finalizada automaticamente en {}", effectiveHorizon);
         }
     }
@@ -223,14 +277,18 @@ public class SimulationEngineService {
         // Incluye vuelos que despegan Y aterrizan dentro del mismo salto de reloj (arrival > simulatedNow),
         // no solo los que siguen volando al final; así a alta velocidad ningún vuelo corto queda sin
         // procesar (se activa + completa en el mismo tick) y no se generan colapsos falsos.
-        List<Long> recoverableScheduledIds = flightRepository.findRecoverableScheduledFlightIds(simulatedNow, horizon);
+        // Cota inferior = reloj - 24h: ningún vuelo en aire (duración máx 21h) despegó antes de eso, así
+        // que no se pierde ninguno; pero el escaneo deja de crecer con la corrida → tick ~1.5s → decenas de ms.
+        List<Long> recoverableScheduledIds = flightRepository.findRecoverableScheduledFlightIds(simulatedNow.minusHours(24), simulatedNow, horizon);
         if (!recoverableScheduledIds.isEmpty()) {
             flightRepository.updateStatusByIds(recoverableScheduledIds, FlightStatus.IN_FLIGHT);
         }
     }
 
-    private int activateFlights(LocalDateTime simulatedNow, LocalDateTime horizon) {
-        List<TravelStop> pendingStops = travelStopRepository.findPendingStopsForActivation(simulatedNow, horizon);
+    private int activateFlights(LocalDateTime simulatedNow, LocalDateTime horizon, ShipmentSource scope) {
+        List<TravelStop> pendingStops = travelStopRepository.findPendingStopsForActivation(simulatedNow, horizon).stream()
+                .filter(stop -> stop.getShipment() != null && stop.getShipment().getSource() == scope)
+                .toList();
         if (pendingStops.isEmpty()) {
             return 0;
         }
@@ -306,7 +364,7 @@ public class SimulationEngineService {
         return activatedCount;
     }
 
-    private int closeFlightsAndAdvanceStops(LocalDateTime simulatedNow, LocalDateTime horizon) {
+    private int closeFlightsAndAdvanceStops(LocalDateTime simulatedNow, LocalDateTime horizon, ShipmentSource scope) {
         List<Flight> toComplete = flightRepository
                 .findByStatusAndScheduledArrivalGreaterThanAndScheduledArrivalLessThanEqual(
                         FlightStatus.IN_FLIGHT,
@@ -317,7 +375,9 @@ public class SimulationEngineService {
 
         List<TravelStop> impactedStops = toComplete.isEmpty()
                 ? List.of()
-                : travelStopRepository.findByFlightInAndStopStatus(toComplete, StopStatus.IN_TRANSIT);
+                : travelStopRepository.findByFlightInAndStopStatus(toComplete, StopStatus.IN_TRANSIT).stream()
+                        .filter(stop -> stop.getShipment() != null && stop.getShipment().getSource() == scope)
+                        .toList();
         java.util.Map<Long, List<TravelStop>> impactedByFlightId = impactedStops.stream()
                 .collect(java.util.stream.Collectors.groupingBy(stop -> stop.getFlight().getId()));
         java.util.Map<Long, List<TravelStop>> allStopsByShipmentId = impactedStops.isEmpty()
@@ -355,7 +415,17 @@ public class SimulationEngineService {
 
                 List<TravelStop> allStops = allStopsByShipmentId.getOrDefault(shipment.getId(), List.of());
                 boolean allDone = allStops.stream().allMatch(s -> s.getStopStatus() == StopStatus.COMPLETED);
-                if (allDone) {
+                int maxStopOrder = allStops.stream()
+                        .map(TravelStop::getStopOrder)
+                        .filter(java.util.Objects::nonNull)
+                        .max(Integer::compareTo)
+                        .orElse(-1);
+                boolean isFinalDestinationStop = stop.getStopOrder() != null
+                        && stop.getStopOrder() == maxStopOrder
+                        && shipment.getDestinationAirport() != null
+                        && stop.getAirport() != null
+                        && java.util.Objects.equals(stop.getAirport().getId(), shipment.getDestinationAirport().getId());
+                if (allDone && isFinalDestinationStop) {
                     shipment.setStatus(ShipmentStatus.DELIVERED);
                     shipment.setDeliveredAt(arrivalAt);
                     shipment.setProgressPercentage(100.0);
@@ -388,7 +458,7 @@ public class SimulationEngineService {
     }
 
     private SimulationConfig getConfig() {
-        SimulationConfig config = simulationConfigRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = simulationConfigRepository.findLiveConfigOrFirst();
         return config != null
                 ? config
                 : simulationConfigRepository.save(SimulationConfig.builder().build());
@@ -402,7 +472,7 @@ public class SimulationEngineService {
      *
      * @return true si se detectó el colapso en este tick.
      */
-    private boolean detectCollapse(SimulationConfig config, LocalDateTime horizon) {
+    private boolean detectCollapse(SimulationConfig config, LocalDateTime horizon, LocalDateTime planningCoveredThrough) {
         // El colapso solo cuenta envíos registrados DESDE la fecha de inicio del escenario. Sin esto, al
         // arrancar en (p.ej.) jul-2027 los millones de envíos previos —PENDING, nunca planificados en esta
         // corrida y con deadline ya vencido— se detectaban como "primer envío tarde" → colapso espurio día 1.
@@ -412,34 +482,67 @@ public class SimulationEngineService {
         if (scenarioStart == null) {
             scenarioStart = LocalDateTime.of(1970, 1, 1, 0, 0);
         }
+        LocalDateTime coveredThrough = planningCoveredThrough == null ? horizon : planningCoveredThrough;
+        Long configId = config.getId();
+        if (configId != null) {
+            LocalDateTime checkedThrough = collapseCheckedThroughByConfigId.get(configId);
+            if (checkedThrough != null && !horizon.isAfter(checkedThrough.plus(COLLAPSE_SCAN_STEP))) {
+                return false;
+            }
+        }
+        LocalDateTime queryCoveredThrough = coveredThrough.isAfter(horizon) ? horizon : coveredThrough;
         List<Shipment> late = shipmentRepository.findFirstLateShipment(
-                scenarioStart, horizon, org.springframework.data.domain.PageRequest.of(0, 1));
+                scenarioStart,
+                horizon,
+                queryCoveredThrough,
+                org.springframework.data.domain.PageRequest.of(0, 1));
         if (late.isEmpty()) {
+            if (configId != null) {
+                collapseCheckedThroughByConfigId.put(configId, horizon);
+            }
             return false;
         }
         Shipment first = late.get(0);
-        config.setCollapseDetectedAtSim(first.getDeadline());
+        LocalDateTime effectiveDeadline = effectiveDeadline(first);
+        config.setCollapseDetectedAtSim(effectiveDeadline);
         config.setCollapseShipmentId(first.getId());
         config.setCollapseShipmentCode(first.getShipmentCode());
         simulationConfigRepository.save(config);
 
+        first.setStatus(ShipmentStatus.CRITICAL);
+        first.setDeadline(effectiveDeadline);
+        shipmentRepository.save(first);
+        runtimeService.setSimulationTime(config, effectiveDeadline);
+
         shipmentAuditService.log(
                 first,
                 ShipmentAuditType.DELAYED,
-                "Colapso: primer envío fuera de plazo (deadline " + first.getDeadline() + ")",
+                "Colapso: primer envío fuera de plazo (deadline " + effectiveDeadline + ")",
                 first.getDestinationAirport(),
                 null
         );
 
-        runtimeService.stopSimulationOnly();
+        runtimeService.stopSimulationOnly(config);
         log.warn("COLAPSO detectado: envío {} no llegó a tiempo (deadline {} <= horizonte {})",
-                first.getShipmentCode(), first.getDeadline(), horizon);
+                first.getShipmentCode(), effectiveDeadline, horizon);
         return true;
     }
 
-    private LocalDateTime resolveInitialSimulationTime(LocalDateTime fallbackNow) {
-        // Inicio configurado; si no, el primer vuelo programado o el primer envío importado.
-        SimulationConfig config = getConfig();
+    private LocalDateTime effectiveDeadline(Shipment shipment) {
+        if (shipment == null || shipment.getRegistrationDate() == null) {
+            return shipment == null ? null : shipment.getDeadline();
+        }
+        return Boolean.TRUE.equals(shipment.getIsInterContinental())
+                ? shipment.getRegistrationDate().plusDays(2)
+                : shipment.getRegistrationDate().plusDays(1);
+    }
+
+    private LocalDateTime resolveInitialSimulationTime(LocalDateTime fallbackNow, SimulationConfig config) {
+        // DAY_TO_DAY es la operación EN VIVO: su reloj interno = hora real actual, no una fecha histórica.
+        if (config != null && config.getScenario() == SimulationScenario.DAY_TO_DAY) {
+            return fallbackNow;
+        }
+        // Otros escenarios: inicio configurado; si no, el primer vuelo programado o el primer envío importado.
         if (config.getScenarioStartAt() != null) {
             return config.getScenarioStartAt();
         }

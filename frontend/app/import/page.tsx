@@ -13,10 +13,10 @@ interface TabState {
   showErrors: boolean;
 }
 
-const TABS: { key: ImportType; label: string; emoji: string }[] = [
-  { key: 'shipments', label: 'Envios historicos', emoji: '🧳' },
-  { key: 'airports', label: 'Aeropuertos', emoji: '✈' },
-  { key: 'flights', label: 'Vuelos', emoji: '🛫' },
+const TABS: { key: ImportType; label: string }[] = [
+  { key: 'shipments', label: 'Envíos históricos' },
+  { key: 'airports', label: 'Aeropuertos' },
+  { key: 'flights', label: 'Vuelos' },
 ];
 
 const INITIAL_TAB: TabState = {
@@ -28,15 +28,20 @@ const INITIAL_TAB: TabState = {
   showErrors: false,
 };
 
+const OK = '#43d29d';
+const WARN = '#f0c13a';
+const FAIL = '#ef4444';
+const ACCENT = '#5f82ff';
+
 function statusBadge(status: ImportStatus) {
-  const cfg: Record<ImportStatus, { bg: string; color: string; label: string }> = {
-    SUCCESS: { bg: '#22c55e18', color: '#22c55e', label: 'EXITOSO' },
-    PARTIAL: { bg: '#f59e0b18', color: '#f59e0b', label: 'PARCIAL' },
-    FAILED: { bg: '#ef444418', color: '#ef4444', label: 'FALLIDO' },
+  const cfg: Record<ImportStatus, { color: string; label: string }> = {
+    SUCCESS: { color: OK, label: 'Exitoso' },
+    PARTIAL: { color: WARN, label: 'Parcial' },
+    FAILED: { color: FAIL, label: 'Fallido' },
   };
   const c = cfg[status];
   return (
-    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: c.bg, color: c.color }}>
+    <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 99, color: c.color, background: `${c.color}1e`, border: `1px solid ${c.color}40` }}>
       {c.label}
     </span>
   );
@@ -54,7 +59,7 @@ function formatDate(iso: string) {
 
 function guessType(fileName: string): string {
   const f = fileName.toLowerCase();
-  if (f.includes('envio') || f.includes('shipment')) return 'Envios';
+  if (f.includes('envio') || f.includes('shipment')) return 'Envíos';
   if (f.includes('airport') || f.includes('aeropuerto')) return 'Aeropuertos';
   if (f.includes('flight') || f.includes('vuelo')) return 'Vuelos';
   return 'Datos';
@@ -62,9 +67,29 @@ function guessType(fileName: string): string {
 
 function Spinner() {
   return (
-    <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="10" stroke="#2d2d40" strokeWidth="3" />
-      <path d="M12 2a10 10 0 0 1 10 10" stroke="#6685ff" strokeWidth="3" strokeLinecap="round" />
+    <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" stroke="#32364f" strokeWidth="3" />
+      <path d="M12 2a10 10 0 0 1 10 10" stroke={ACCENT} strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function UploadIcon({ color }: { color: string }) {
+  return (
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   );
 }
@@ -203,229 +228,212 @@ export default function ImportPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold" style={{ color: '#f0f0f8' }}>Importacion de datos base</h1>
-        <p className="text-sm mt-1" style={{ color: '#8484a0' }}>
-          Esta vista solo importa aeropuertos, vuelos y envios historicos. La simulacion se opera desde Inicio.
-        </p>
-      </div>
+    <div className="app-page" style={{ paddingTop: 10 }}>
+      <header className="page-head">
+        <div>
+          <h1 className="page-head-title">Importación de datos base</h1>
+          <p className="page-head-subtitle">Aeropuertos, vuelos y envíos históricos. La simulación se opera desde Inicio.</p>
+        </div>
+      </header>
 
-      <div className="rounded-xl mb-6 p-4" style={{ background: '#182130', border: '1px solid #2d3f5f' }}>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <p className="text-sm font-semibold" style={{ color: '#d9e7ff' }}>Dataset de envíos (datos/envios)</p>
-            <p className="text-xs mt-1" style={{ color: '#9aa3be' }}>
-              {datasetSummary == null ? 'No se pudo leer el estado actual.' : `Envíos registrados: ${datasetSummary.total.toLocaleString('es-PE')}`}
-            </p>
-            <p className="text-xs mt-1" style={{ color: '#9aa3be' }}>
-              La simulación trabaja únicamente con estos envíos importados. No se genera demanda futura.
-            </p>
+      <div style={{ padding: '0 14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <article className="surface-panel" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#eaf0ff' }}>Dataset de envíos (datos/envios)</p>
+              <p style={{ margin: '6px 0 0', fontSize: 12, color: '#9ca7c8' }}>
+                {datasetSummary == null ? 'No se pudo leer el estado actual.' : `Envíos registrados: ${datasetSummary.total.toLocaleString('es-PE')}`}
+              </p>
+              <p style={{ margin: '4px 0 0', fontSize: 12, color: '#7c879f' }}>
+                La simulación trabaja únicamente con estos envíos importados. No se genera demanda futura.
+              </p>
+            </div>
+            <button className="chip" onClick={() => void loadSummary()} disabled={refreshingSummary}>
+              {refreshingSummary ? 'Actualizando…' : 'Actualizar estado'}
+            </button>
           </div>
-          <button
-            onClick={() => void loadSummary()}
-            disabled={refreshingSummary}
-            className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
-            style={{ background: '#2f3b5c', color: '#fff', opacity: refreshingSummary ? 0.7 : 1 }}
-          >
-            {refreshingSummary ? 'Actualizando...' : 'Actualizar estado'}
-          </button>
-        </div>
-        <div style={{ marginTop: 12, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <button
-            onClick={() => void importEnvios(false)}
-            disabled={enviosBusy}
-            className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
-            style={{ background: '#3559d1', color: '#fff', opacity: enviosBusy ? 0.7 : 1 }}
-          >
-            {enviosBusy ? 'Importando...' : 'Importar envíos (muestra)'}
-          </button>
-          <button
-            onClick={() => void importEnvios(true)}
-            disabled={enviosBusy}
-            className="text-xs font-semibold px-3 py-2 rounded-lg cursor-pointer"
-            style={{ background: '#2f3b5c', color: '#fff', opacity: enviosBusy ? 0.7 : 1 }}
-          >
-            {enviosBusy ? 'Importando...' : 'Importar dataset completo'}
-          </button>
-          {enviosMsg ? (
-            <p className="text-xs" style={{ margin: 0, color: '#9aa3be', alignSelf: 'center' }}>{enviosMsg}</p>
-          ) : null}
-        </div>
-      </div>
+          <div style={{ marginTop: 14, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button className="btn btn-primary" onClick={() => void importEnvios(false)} disabled={enviosBusy}>
+              {enviosBusy ? 'Importando…' : 'Importar envíos (muestra)'}
+            </button>
+            <button className="chip" onClick={() => void importEnvios(true)} disabled={enviosBusy}>
+              {enviosBusy ? 'Importando…' : 'Importar dataset completo'}
+            </button>
+            {enviosMsg ? <p style={{ margin: 0, fontSize: 12, color: '#9ca7c8' }}>{enviosMsg}</p> : null}
+          </div>
+        </article>
 
-      <div className="rounded-xl mb-6" style={{ background: '#1c1c24', border: '1px solid #2d2d40' }}>
-        <div className="flex" style={{ borderBottom: '1px solid #2d2d40' }}>
-          {TABS.map(({ key, label, emoji }) => {
-            const active = activeTab === key;
-            return (
+        <article className="surface-panel" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', borderBottom: '1px solid #2a2e44' }}>
+            {TABS.map(({ key, label }) => {
+              const active = activeTab === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setActiveTab(key)}
+                  style={{
+                    padding: '13px 20px',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    border: 'none',
+                    color: active ? '#eaf0ff' : '#8a93b2',
+                    borderBottom: active ? `2px solid ${ACCENT}` : '2px solid transparent',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ padding: 18 }}>
+            <div
+              onDragOver={onDragOver}
+              onDragLeave={onDragLeave}
+              onDrop={onDrop}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                height: 170,
+                borderRadius: 12,
+                border: `2px dashed ${cur.dragOver ? ACCENT : '#32364f'}`,
+                background: cur.dragOver ? 'rgba(95,130,255,0.06)' : '#171a29',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
+                cursor: 'pointer',
+                transition: '160ms ease',
+              }}
+            >
+              <UploadIcon color={cur.dragOver ? ACCENT : '#6f7693'} />
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: cur.dragOver ? '#aebeff' : '#9ca7c8' }}>
+                {cur.dragOver ? 'Soltá el archivo aquí' : 'Arrastrá tu archivo CSV o Excel aquí'}
+              </p>
+              <p style={{ margin: 0, fontSize: 12, color: '#6f7693' }}>.csv · .xlsx · máx. 50 MB</p>
+            </div>
+
+            <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }} onChange={onFileChange} />
+
+            {cur.file && !cur.loading ? (
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, background: '#171a29', border: '1px solid #32364f' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: '#eaf0ff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cur.file.name}</p>
+                  <p style={{ margin: '2px 0 0', fontSize: 12, color: '#8a93b2' }}>{(cur.file.size / 1024).toFixed(1)} KB</p>
+                </div>
+                <button className="chip" onClick={() => setTab(activeTab, { file: null })} aria-label="Quitar archivo">Quitar</button>
+                <button className="btn btn-primary" onClick={handleImport}>Importar</button>
+              </div>
+            ) : null}
+
+            {cur.loading ? (
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 12, background: 'rgba(95,130,255,0.08)', border: '1px solid rgba(95,130,255,0.3)' }}>
+                <Spinner />
+                <p style={{ margin: 0, fontSize: 13, color: '#aebeff' }}>Procesando archivo…</p>
+              </div>
+            ) : null}
+
+            {cur.error ? (
+              <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 12, background: `${FAIL}18`, border: `1px solid ${FAIL}40` }}>
+                <p style={{ margin: 0, fontSize: 13, color: FAIL }}>{cur.error}</p>
+              </div>
+            ) : null}
+
+            {cur.result ? (
+              <div style={{ marginTop: 14, padding: 16, borderRadius: 12, background: `${OK}12`, border: `1px solid ${OK}33` }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 500, color: '#eaf0ff' }}>{cur.result.fileName}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: '#7c879f' }}>{formatDate(cur.result.importedAt)}</p>
+                  </div>
+                  {statusBadge(cur.result.status)}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+                  <div style={{ textAlign: 'center', padding: 10, borderRadius: 10, background: '#171a2980' }}>
+                    <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: '#c2cced' }}>{cur.result.totalRows.toLocaleString('es-PE')}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: '#8a93b2' }}>Total filas</p>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: 10, borderRadius: 10, background: '#171a2980' }}>
+                    <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: OK }}>{cur.result.successRows.toLocaleString('es-PE')}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: '#8a93b2' }}>Exitosas</p>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: 10, borderRadius: 10, background: '#171a2980' }}>
+                    <p style={{ margin: 0, fontSize: 20, fontWeight: 600, color: cur.result.errorRows > 0 ? WARN : '#7c879f' }}>{cur.result.errorRows.toLocaleString('es-PE')}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: '#8a93b2' }}>Errores</p>
+                  </div>
+                </div>
+                {cur.result.errorRows > 0 && cur.result.errorDetails ? (
+                  <div style={{ marginTop: 10 }}>
+                    <button onClick={() => setTab(activeTab, { showErrors: !cur.showErrors })} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 12, color: WARN, padding: 0 }}>
+                      {cur.showErrors ? 'Ocultar detalles' : 'Ver detalles de errores'}
+                    </button>
+                    {cur.showErrors ? (
+                      <pre style={{ marginTop: 8, padding: 12, borderRadius: 10, fontSize: 11, lineHeight: 1.6, overflow: 'auto', maxHeight: 160, background: '#0f1118', color: WARN }}>
+                        {cur.result.errorDetails}
+                      </pre>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </article>
+
+        <article className="surface-panel" style={{ padding: 16 }}>
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#eaf0ff' }}>Plantillas</p>
+          <p style={{ margin: '4px 0 14px', fontSize: 12, color: '#9ca7c8' }}>Descargá el formato correcto antes de preparar el archivo.</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            {TABS.map(({ key, label }) => (
               <button
                 key={key}
-                onClick={() => setActiveTab(key)}
-                className="flex items-center gap-2 px-5 py-3.5 text-sm font-medium transition-colors cursor-pointer"
-                style={{
-                  color: active ? '#6685ff' : '#8484a0',
-                  borderBottom: active ? '2px solid #6685ff' : '2px solid transparent',
-                  background: 'transparent',
-                }}
+                onClick={() => handleDownload(key)}
+                disabled={dlLoading === key}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 12px', borderRadius: 12, background: '#171a29', border: '1px solid #32364f', color: '#dbe3ff', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
               >
-                <span>{emoji}</span>
+                {dlLoading === key ? <Spinner /> : <DownloadIcon />}
                 {label}
               </button>
-            );
-          })}
-        </div>
-
-        <div className="p-6">
-          <div
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            onDrop={onDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className="rounded-xl flex flex-col items-center justify-center gap-3 cursor-pointer transition-all mb-4"
-            style={{
-              height: 180,
-              border: `2px dashed ${cur.dragOver ? '#6685ff' : '#2d2d40'}`,
-              background: cur.dragOver ? '#6685ff0a' : '#232330',
-            }}
-          >
-            <p className="text-sm font-medium" style={{ color: cur.dragOver ? '#6685ff' : '#8484a0' }}>
-              {cur.dragOver ? 'Suelta el archivo aqui' : 'Arrastra tu archivo CSV o Excel aqui'}
-            </p>
-            <p className="text-xs" style={{ color: '#4a4a60' }}>.csv · .xlsx · max. 50 MB</p>
+            ))}
           </div>
+        </article>
 
-          <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onFileChange} />
-
-          {cur.file && !cur.loading ? (
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl mb-4" style={{ background: '#232330', border: '1px solid #2d2d40' }}>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate" style={{ color: '#f0f0f8' }}>{cur.file.name}</p>
-                <p className="text-xs" style={{ color: '#8484a0' }}>{(cur.file.size / 1024).toFixed(1)} KB</p>
-              </div>
-              <button onClick={() => setTab(activeTab, { file: null })} className="text-xs px-2 py-1 rounded cursor-pointer" style={{ color: '#8484a0' }}>✕</button>
-              <button onClick={handleImport} className="text-sm font-semibold px-5 py-2 rounded-lg cursor-pointer" style={{ background: '#6685ff', color: '#fff' }}>
-                Importar
-              </button>
-            </div>
-          ) : null}
-
-          {cur.loading ? (
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl mb-4" style={{ background: '#6685ff10', border: '1px solid #6685ff30' }}>
-              <Spinner />
-              <p className="text-sm" style={{ color: '#8ba3ff' }}>Procesando archivo...</p>
-            </div>
-          ) : null}
-
-          {cur.error ? (
-            <div className="px-4 py-3 rounded-xl mb-4" style={{ background: '#ef444418', border: '1px solid #ef444440', color: '#ef4444' }}>
-              <p className="text-sm">⚠ {cur.error}</p>
-            </div>
-          ) : null}
-
-          {cur.result ? (
-            <div className="rounded-xl p-4" style={{ background: '#22c55e10', border: '1px solid #22c55e30' }}>
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <p className="text-xs font-medium" style={{ color: '#8484a0' }}>{cur.result.fileName}</p>
-                  <p className="text-[10px] mt-0.5" style={{ color: '#4a4a60' }}>{formatDate(cur.result.importedAt)}</p>
-                </div>
-                {statusBadge(cur.result.status)}
-              </div>
-              <div className="grid grid-cols-3 gap-3 mb-2">
-                <div className="text-center rounded-lg p-2" style={{ background: '#1c1c2480' }}>
-                  <p className="text-xl font-bold" style={{ color: '#8484a0' }}>{cur.result.totalRows}</p>
-                  <p className="text-[10px]" style={{ color: '#8484a0' }}>Total filas</p>
-                </div>
-                <div className="text-center rounded-lg p-2" style={{ background: '#1c1c2480' }}>
-                  <p className="text-xl font-bold" style={{ color: '#22c55e' }}>{cur.result.successRows}</p>
-                  <p className="text-[10px]" style={{ color: '#8484a0' }}>Exitosas</p>
-                </div>
-                <div className="text-center rounded-lg p-2" style={{ background: '#1c1c2480' }}>
-                  <p className="text-xl font-bold" style={{ color: '#f59e0b' }}>{cur.result.errorRows}</p>
-                  <p className="text-[10px]" style={{ color: '#8484a0' }}>Errores</p>
-                </div>
-              </div>
-
-              {cur.result.errorRows > 0 && cur.result.errorDetails ? (
-                <div>
-                  <button
-                    onClick={() => setTab(activeTab, { showErrors: !cur.showErrors })}
-                    className="text-xs cursor-pointer"
-                    style={{ color: '#f59e0b' }}
-                  >
-                    {cur.showErrors ? '▲ Ocultar detalles' : '▼ Ver detalles de errores'}
-                  </button>
-                  {cur.showErrors ? (
-                    <pre
-                      className="mt-2 p-3 rounded-lg text-[11px] overflow-auto max-h-40"
-                      style={{ background: '#121217', color: '#f59e0b', lineHeight: 1.6 }}
-                    >
-                      {cur.result.errorDetails}
-                    </pre>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="rounded-xl p-6 mb-6" style={{ background: '#1c1c24', border: '1px solid #2d2d40' }}>
-        <h2 className="text-sm font-semibold mb-1" style={{ color: '#f0f0f8' }}>Plantillas</h2>
-        <p className="text-xs mb-5" style={{ color: '#8484a0' }}>Descarga el formato correcto antes de preparar el archivo.</p>
-        <div className="grid grid-cols-3 gap-4">
-          {TABS.map(({ key, label, emoji }) => (
-            <button
-              key={key}
-              onClick={() => handleDownload(key)}
-              disabled={dlLoading === key}
-              className="flex flex-col items-center gap-2 p-4 rounded-xl cursor-pointer transition-all"
-              style={{ background: '#232330', border: '1px solid #2d2d40' }}
-            >
-              {dlLoading === key ? <Spinner /> : <span style={{ color: '#6685ff' }}>⬇</span>}
-              <p className="text-sm font-medium" style={{ color: '#f0f0f8' }}>{emoji} {label}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="rounded-xl" style={{ background: '#1c1c24', border: '1px solid #2d2d40' }}>
-        <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: '1px solid #2d2d40' }}>
-          <h2 className="text-sm font-semibold" style={{ color: '#f0f0f8' }}>Historial de importaciones</h2>
-          <button onClick={() => void loadLogs()} className="text-xs cursor-pointer" style={{ color: '#8484a0' }}>↻ Actualizar</button>
-        </div>
-        {logs.length === 0 ? (
-          <div className="px-6 py-12 text-center">
-            <p className="text-sm" style={{ color: '#4a4a60' }}>Sin importaciones registradas</p>
+        <article className="surface-panel" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid #2a2e44' }}>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#eaf0ff' }}>Historial de importaciones</p>
+            <button className="chip" onClick={() => void loadLogs()}>Actualizar</button>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr style={{ borderBottom: '1px solid #2d2d40' }}>
-                  {['Archivo', 'Fecha', 'Tipo', 'Exitosas', 'Errores', 'Estado'].map((h) => (
-                    <th key={h} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#8484a0' }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((log) => (
-                  <tr key={log.id} style={{ borderBottom: '1px solid #2d2d4040' }}>
-                    <td className="px-5 py-3" style={{ color: '#f0f0f8' }}>{log.fileName}</td>
-                    <td className="px-5 py-3" style={{ color: '#8484a0' }}>{formatDate(log.importedAt)}</td>
-                    <td className="px-5 py-3" style={{ color: '#8484a0' }}>{guessType(log.fileName)}</td>
-                    <td className="px-5 py-3" style={{ color: '#22c55e' }}>{log.successRows}</td>
-                    <td className="px-5 py-3" style={{ color: log.errorRows > 0 ? '#f59e0b' : '#4a4a60' }}>{log.errorRows}</td>
-                    <td className="px-5 py-3">{statusBadge(log.status)}</td>
+          {logs.length === 0 ? (
+            <div style={{ padding: '40px 16px', textAlign: 'center' }}>
+              <p style={{ margin: 0, fontSize: 13, color: '#6f7693' }}>Sin importaciones registradas.</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    {['Archivo', 'Fecha', 'Tipo', 'Exitosas', 'Errores', 'Estado'].map((h) => (
+                      <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', color: '#8a93b2', borderBottom: '1px solid #2a2e44' }}>{h}</th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                </thead>
+                <tbody>
+                  {logs.map((log) => (
+                    <tr key={log.id} style={{ borderBottom: '1px solid #232842' }}>
+                      <td style={{ padding: '10px 16px', color: '#dbe3ff' }}>{log.fileName}</td>
+                      <td style={{ padding: '10px 16px', color: '#8a93b2' }}>{formatDate(log.importedAt)}</td>
+                      <td style={{ padding: '10px 16px', color: '#8a93b2' }}>{guessType(log.fileName)}</td>
+                      <td style={{ padding: '10px 16px', color: OK }}>{log.successRows.toLocaleString('es-PE')}</td>
+                      <td style={{ padding: '10px 16px', color: log.errorRows > 0 ? WARN : '#6f7693' }}>{log.errorRows.toLocaleString('es-PE')}</td>
+                      <td style={{ padding: '10px 16px' }}>{statusBadge(log.status)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </article>
       </div>
     </div>
   );

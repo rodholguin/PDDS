@@ -1,5 +1,7 @@
 package com.tasfb2b.dto;
 
+import java.time.LocalDateTime;
+
 public record MapLiveFlightDto(
         Long flightId,
         String flightCode,
@@ -11,6 +13,9 @@ public record MapLiveFlightDto(
         Double originLongitude,
         Double destinationLatitude,
         Double destinationLongitude,
-        double loadPct
+        LocalDateTime scheduledDeparture,
+        LocalDateTime scheduledArrival,
+        double loadPct,
+        String status
 ) {
 }

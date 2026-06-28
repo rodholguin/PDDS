@@ -1,5 +1,5 @@
 import type { Shipment, ShipmentDetail, ShipmentFeasibility, ShipmentPlanningEvent, ShipmentStatus, ShipmentUpcoming } from '@/lib/types';
-import { api } from './client';
+import { api, upload } from './client';
 
 export interface ShipmentCreate {
   airlineName: string;
@@ -79,6 +79,13 @@ export const shipmentsApi = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /** Carga un .txt de envíos (formato dataset) a la operación EN VIVO; el origen se detecta del nombre del archivo. */
+  uploadLive: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return upload<{ origin?: string; created: number; failed: number; errors: string[]; shipments?: ShipmentDetail[] }>('/api/shipments/upload-live', fd);
+  },
 
   checkFeasibility: (body: ShipmentCreate) =>
     api<ShipmentFeasibility>('/api/shipments/check-feasibility', {

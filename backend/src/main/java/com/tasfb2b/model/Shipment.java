@@ -2,6 +2,7 @@ package com.tasfb2b.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.time.LocalDateTime;
 
@@ -13,7 +14,9 @@ import java.time.LocalDateTime;
                 @Index(name = "idx_shipment_registration_date", columnList = "registration_date"),
                 @Index(name = "idx_shipment_deadline", columnList = "deadline"),
                 @Index(name = "idx_shipment_origin", columnList = "origin_airport_id"),
-                @Index(name = "idx_shipment_destination", columnList = "destination_airport_id")
+                @Index(name = "idx_shipment_destination", columnList = "destination_airport_id"),
+                @Index(name = "idx_shipment_source", columnList = "source"),
+                @Index(name = "idx_shipment_source_registration_date", columnList = "source, registration_date")
         }
 )
 @Getter
@@ -82,6 +85,18 @@ public class Shipment {
     @Builder.Default
     private Boolean isInterContinental = false;
 
+    /**
+     * Origen del envío: {@code HISTORICAL} (dataset, lo usan COLLAPSE_TEST y PERIOD_SIMULATION) o
+     * {@code LIVE} (registro en vivo de la operación DAY_TO_DAY: data-entry manual o carga txt).
+     * Default HISTORICAL: los del dataset y los ~9.5M existentes quedan como históricos sin reescribir
+     * la tabla (ADD COLUMN con DEFAULT es metadata-only en Postgres). DAY_TO_DAY opera SOLO los LIVE.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source", nullable = false, length = 20)
+    @ColumnDefault("'HISTORICAL'")
+    @Builder.Default
+    private ShipmentSource source = ShipmentSource.HISTORICAL;
+
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
     @PrePersist
@@ -92,8 +107,9 @@ public class Shipment {
                     originAirport.getContinent() != destinationAirport.getContinent();
         }
         if (registrationDate != null) {
-            long extraDays = Boolean.TRUE.equals(isInterContinental) ? 2L : 1L;
-            this.deadline = registrationDate.plusDays(extraDays);
+            this.deadline = Boolean.TRUE.equals(this.isInterContinental)
+                    ? registrationDate.plusDays(2)
+                    : registrationDate.plusDays(1);
         }
     }
 

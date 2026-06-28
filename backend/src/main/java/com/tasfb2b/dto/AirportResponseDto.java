@@ -19,7 +19,8 @@ public record AirportResponseDto(
         Integer maxStorageCapacity,
         Integer currentStorageLoad,
         Double occupancyPct,
-        AirportStatus status
+        AirportStatus status,
+        Integer gmtOffset
 ) {
     /** Factory method que resuelve los campos calculados usando los umbrales dados. */
     public static AirportResponseDto from(Airport a, int normalPct, int warningPct) {
@@ -34,7 +35,8 @@ public record AirportResponseDto(
                 a.getMaxStorageCapacity(),
                 a.getCurrentStorageLoad(),
                 a.getOccupancyPct(),
-                a.getStatus(normalPct, warningPct)
+                a.getStatus(normalPct, warningPct),
+                a.getGmtOffset()
         );
     }
 

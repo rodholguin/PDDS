@@ -279,7 +279,7 @@ public class CollapseMonitorService {
     // ── Helper ───────────────────────────────────────────────────────────────
 
     private SimulationConfig getConfig() {
-        SimulationConfig config = configRepository.findTopByOrderByIdAsc();
+        SimulationConfig config = configRepository.findLiveConfigOrFirst();
         return config == null ? SimulationConfig.builder().build() : config;
     }
 

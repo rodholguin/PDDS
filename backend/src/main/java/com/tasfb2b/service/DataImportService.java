@@ -1009,7 +1009,7 @@ public class DataImportService {
     }
 
     private String activeAlgorithmName() {
-        var config = simulationConfigRepository.findTopByOrderByIdAsc();
+        var config = simulationConfigRepository.findLiveConfigOrFirst();
         if (config == null) return "Genetic Algorithm";
         return switch (config.getPrimaryAlgorithm()) {
             case SIMULATED_ANNEALING -> "Simulated Annealing";
